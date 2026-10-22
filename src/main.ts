@@ -351,7 +351,7 @@ function renderFrame(now: number): void {
   }
 
   const snapshot = physics.snapshot(Math.min(1, accumulator / FIXED_STEP));
-  visuals.render(snapshot, physics, delta);
+  visuals.render(snapshot, physics, delta, status === 'running');
   audio.update(snapshot, status === 'running');
   if (status === 'running') {
     const warningDistance = Math.max(7, snapshot.speed * 0.85);
@@ -385,7 +385,7 @@ async function boot(): Promise<void> {
     physics = new GamePhysics();
     visuals = new GameVisuals(sceneElement);
     const snapshot = physics.snapshot(0);
-    visuals.render(snapshot, physics, 0);
+    visuals.render(snapshot, physics, 0, false);
     updateHud(snapshot);
     status = 'ready';
     loading.remove();

@@ -1,7 +1,8 @@
 import RAPIER from '@dimforge/rapier2d-compat';
 import type { Collider, EventQueue, RigidBody, World } from '@dimforge/rapier2d-compat';
 import { CHUNK_LENGTH, TrackGenerator, roadHeight, roadSlope, type HazardSpec, type TrackChunk } from './track';
-import { CAR_AXLE_Y, CAR_BODY_CLEARANCE, CAR_SUSPENSION_PITCH, CAR_SUSPENSION_TRAVEL, CAR_WHEEL_OFFSET, CAR_WHEEL_RADIUS } from './vehicle';
+import { CAR_AXLE_Y, CAR_BODY_CLEARANCE, CAR_WHEEL_OFFSET, CAR_WHEEL_RADIUS } from './vehicle';
+import { VehicleSuspension } from './suspension';
 
 export const FIXED_STEP = 1 / 120;
 
@@ -74,13 +75,9 @@ export class GamePhysics {
   private boostOn = false;
   private wheelAngle = 0;
   private crestCooldown = 0;
-  private suspensionOffset = 0;
-  private suspensionVelocity = 0;
-  private suspensionPitch = 0;
-  private suspensionPitchVelocity = 0;
+  private readonly suspension = new VehicleSuspension();
   private previousSuspensionOffset = 0;
   private previousSuspensionPitch = 0;
-  private previousRoadAngle = 0;
   private previousSpeed = 11.2;
   private jumpSerial = 0;
   private landingSerial = 0;
@@ -95,7 +92,6 @@ export class GamePhysics {
     const support = this.roadSupport(startX);
     const startY = support?.y ?? roadHeight(startX) + CAR_BODY_CLEARANCE;
     const startAngle = support?.angle ?? 0;
-    this.previousRoadAngle = startAngle;
     this.car = this.world.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
         .setTranslation(startX, startY)
@@ -209,8 +205,7 @@ export class GamePhysics {
       const impact = Math.max(0, v.x * Math.tan(support.angle) - v.y);
       this.landingSerial++;
       this.landingImpact = clamp(impact / 18, 0, 1);
-      this.suspensionVelocity -= Math.min(0.65, impact * 0.065);
-      this.suspensionPitchVelocity += clamp(angleDelta(this.car.rotation(), support.angle) * 2, -0.15, 0.15);
+      this.suspension.land(impact, angleDelta(support.angle, this.car.rotation()), p.y - support.y);
     }
     this.car.setTranslation({ x: p.x, y: support.y }, true);
     this.car.setRotation(support.angle, true);
@@ -220,39 +215,29 @@ export class GamePhysics {
     this.setGravity(0);
   }
 
-  /** The tires keep their stable contact frame while the body rides on a
-   * damped spring. This gives landings travel without feeding rebound into drive.
-   */
+  /** Inertial road loads excite the two body springs independently. */
   private updateSuspension(): void {
     const p = this.car.translation();
     const speed = this.car.linvel().x;
-    let targetTravel = 0;
-    let targetPitch = 0;
+    const acceleration = (speed - this.previousSpeed) / FIXED_STEP;
+    let normalAcceleration = 0;
+    let roadAngularAcceleration = 0;
     if (this.isGrounded) {
-      const before = this.roadSupport(p.x - 0.5);
+      const sample = 0.4;
+      const before = this.roadSupport(p.x - sample);
       const here = this.roadSupport(p.x);
-      const after = this.roadSupport(p.x + 0.5);
+      const after = this.roadSupport(p.x + sample);
       if (before?.contacts === 2 && here?.contacts === 2 && after?.contacts === 2) {
-        const normalAcceleration = (before.y - 2 * here.y + after.y) / 0.25 * speed * speed;
-        targetTravel = clamp(-normalAcceleration * 0.0022, -0.018, 0.018);
+        const slope = (after.y - before.y) / (2 * sample);
+        const curvature = (before.y - 2 * here.y + after.y) / (sample * sample);
+        const angleSlope = angleDelta(before.angle, after.angle) / (2 * sample);
+        const angleCurvature = (angleDelta(here.angle, before.angle) + angleDelta(here.angle, after.angle)) / (sample * sample);
+        normalAcceleration = curvature * speed * speed + slope * acceleration;
+        roadAngularAcceleration = angleCurvature * speed * speed + angleSlope * acceleration;
       }
-      const roadAngularVelocity = angleDelta(this.previousRoadAngle, this.car.rotation()) / FIXED_STEP;
-      const acceleration = (speed - this.previousSpeed) / FIXED_STEP;
-      targetPitch = clamp(-roadAngularVelocity * 0.035 - acceleration * 0.004, -CAR_SUSPENSION_PITCH, CAR_SUSPENSION_PITCH);
     }
-    this.suspensionVelocity += ((targetTravel - this.suspensionOffset) * 65 - this.suspensionVelocity * 10.5) * FIXED_STEP;
-    this.suspensionOffset += this.suspensionVelocity * FIXED_STEP;
-    if (Math.abs(this.suspensionOffset) > CAR_SUSPENSION_TRAVEL) {
-      this.suspensionOffset = clamp(this.suspensionOffset, -CAR_SUSPENSION_TRAVEL, CAR_SUSPENSION_TRAVEL);
-      this.suspensionVelocity = 0;
-    }
-    this.suspensionPitchVelocity += ((targetPitch - this.suspensionPitch) * 55 - this.suspensionPitchVelocity * 11) * FIXED_STEP;
-    this.suspensionPitch += this.suspensionPitchVelocity * FIXED_STEP;
-    if (Math.abs(this.suspensionPitch) > CAR_SUSPENSION_PITCH) {
-      this.suspensionPitch = clamp(this.suspensionPitch, -CAR_SUSPENSION_PITCH, CAR_SUSPENSION_PITCH);
-      this.suspensionPitchVelocity = 0;
-    }
-    this.previousRoadAngle = this.car.rotation();
+    this.suspension.update({ grounded: this.isGrounded, normalAcceleration, roadAngularAcceleration,
+      forwardAcceleration: acceleration, suction: this.fansOn }, FIXED_STEP);
     this.previousSpeed = speed;
   }
 
@@ -333,8 +318,8 @@ export class GamePhysics {
 
   step(controls: Controls): void {
     if (this.crashed) return;
-    this.previousSuspensionOffset = this.suspensionOffset;
-    this.previousSuspensionPitch = this.suspensionPitch;
+    this.previousSuspensionOffset = this.suspension.offset;
+    this.previousSuspensionPitch = this.suspension.pitch;
     for (const body of [this.car, ...this.wheels]) {
       body.resetForces(true);
       body.resetTorques(true);
@@ -389,7 +374,7 @@ export class GamePhysics {
         velocity.y = firstJump ? clamp(Math.max(0, velocity.y) + 9.4, 9.4, 12) : 9.2;
         this.jumpCount = firstJump ? 1 : 2;
         this.jumpSerial++;
-        this.suspensionVelocity += 0.16;
+        this.suspension.takeoff();
         this.groundGrace = 0;
         this.jumpLock = 0.16;
         this.jumpHoldTime = 0;
@@ -492,8 +477,8 @@ export class GamePhysics {
       car: pose(0), wheels: [pose(1), pose(2)], distance: this.distance,
       speed: this.car.linvel().x, boost: this.charge, grounded: this.isGrounded,
       suctionActive: this.fansOn, boostActive: this.boostOn, crashed: this.crashed,
-      suspensionOffset: lerp(this.previousSuspensionOffset, this.suspensionOffset, alpha),
-      suspensionPitch: lerp(this.previousSuspensionPitch, this.suspensionPitch, alpha),
+      suspensionOffset: lerp(this.previousSuspensionOffset, this.suspension.offset, alpha),
+      suspensionPitch: lerp(this.previousSuspensionPitch, this.suspension.pitch, alpha),
       jumpSerial: this.jumpSerial, jumpsUsed: this.jumpCount,
       landingSerial: this.landingSerial, landingImpact: this.landingImpact,
     };

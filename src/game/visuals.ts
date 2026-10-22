@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { GamePhysics, GameSnapshot } from './physics';
 import { getDistrict, hash, roadHeight, type HazardKind, type TrackChunk } from './track';
 import { CAR_ARCH_RADIUS, CAR_AXLE_Y, CAR_WHEEL_OFFSET, CAR_WHEEL_RADIUS } from './vehicle';
+import { CarSmoke } from './smoke';
 
 interface Theme {
   sky: string; haze: string; far: string; middle: string; near: string;
@@ -62,7 +63,7 @@ export class GameVisuals {
   private readonly carGroup = new THREE.Group();
   private readonly wheelGroups: [THREE.Group, THREE.Group];
   private readonly fanGlow: THREE.Mesh;
-  private readonly boostGlow: THREE.Mesh;
+  private readonly smoke = new CarSmoke();
   private sun!: THREE.Mesh;
   private moon!: THREE.Mesh;
   private stars!: THREE.Points;
@@ -93,19 +94,11 @@ export class GameVisuals {
     this.createCityMotion();
     this.createCar();
     this.wheelGroups = [this.createWheel(), this.createWheel()];
-    this.worldGroup.add(this.carGroup, ...this.wheelGroups);
+    this.worldGroup.add(this.carGroup, ...this.wheelGroups, this.smoke.mesh);
     this.fanGlow = box(1.8, 0.07, 0.55, new THREE.MeshBasicMaterial({ color: '#58f4dd', transparent: true, opacity: 0.8 }));
     this.fanGlow.position.set(0, -0.48, 0.08);
     this.fanGlow.visible = false;
     this.carGroup.add(this.fanGlow);
-    this.boostGlow = new THREE.Mesh(
-      new THREE.ConeGeometry(0.19, 0.75, 5),
-      new THREE.MeshBasicMaterial({ color: '#8bf6ff', transparent: true, opacity: 0.86 }),
-    );
-    this.boostGlow.rotation.z = Math.PI / 2;
-    this.boostGlow.position.set(-2.24, -0.22, 0.08);
-    this.boostGlow.visible = false;
-    this.carGroup.add(this.boostGlow);
     this.resize();
     window.addEventListener('resize', this.resize);
   }
@@ -293,6 +286,26 @@ export class GameVisuals {
     const tailLight = new THREE.MeshBasicMaterial({ color: '#ff6c66' });
     panel([[1.82, 0.055], [2.04, -0.06], [2.04, -0.11], [1.84, 0.015]], headlight, 0.529);
     panel([[-2.045, 0.13], [-1.85, 0.20], [-1.86, 0.15], [-2.045, 0.09]], tailLight, 0.530);
+    // Rear air-boost ports and two downward jump nozzles share the smoke emitters.
+    for (const z of [-0.33, 0.38]) {
+      const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.09, 0.17, 12), trim);
+      nozzle.rotation.z = Math.PI / 2;
+      nozzle.position.set(-2.055, -0.25, z);
+      this.carGroup.add(nozzle);
+      const rim = new THREE.Mesh(new THREE.TorusGeometry(0.072, 0.017, 5, 12), shade);
+      rim.rotation.y = Math.PI / 2;
+      rim.position.set(-2.145, -0.25, z);
+      this.carGroup.add(rim);
+    }
+    for (const x of [-0.46, 0.46]) {
+      const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.075, 0.13, 12), trim);
+      nozzle.position.set(x, -0.49, 0.38);
+      this.carGroup.add(nozzle);
+      const rim = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.017, 5, 12), shade);
+      rim.rotation.x = Math.PI / 2;
+      rim.position.set(x, -0.555, 0.38);
+      this.carGroup.add(rim);
+    }
     this.carGroup.position.z = 1.15;
   }
 
@@ -508,7 +521,7 @@ export class GameVisuals {
     this.stars.position.set(this.cameraX, this.cameraY, 0);
   }
 
-  render(snapshot: GameSnapshot, physics: GamePhysics, delta: number): void {
+  render(snapshot: GameSnapshot, physics: GamePhysics, delta: number, running = true): void {
     this.elapsed += delta;
     this.syncChunks(physics);
     this.updateTheme(snapshot.distance);
@@ -520,8 +533,7 @@ export class GameVisuals {
       wheel.rotation.z = pose.angle;
     });
     this.fanGlow.visible = snapshot.suctionActive;
-    this.boostGlow.visible = snapshot.boostActive;
-    if (snapshot.boostActive) this.boostGlow.scale.y = 0.75 + Math.sin(this.elapsed * 39) * 0.18;
+    this.smoke.update(snapshot, delta, running);
 
     const width = this.camera.right - this.camera.left;
     const targetX = snapshot.car.x + width * 0.19;
@@ -559,6 +571,7 @@ export class GameVisuals {
   dispose(): void {
     window.removeEventListener('resize', this.resize);
     for (const view of this.chunks.values()) disposeGroup(view.group);
+    this.smoke.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
