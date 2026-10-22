@@ -2,6 +2,11 @@ import RAPIER from '@dimforge/rapier2d-compat';
 import { FIXED_STEP, GamePhysics, type Controls, type GameSnapshot } from './game/physics';
 import { GameVisuals } from './game/visuals';
 import { GameAudio } from './game/audio';
+import { ExperienceProgress, LEVEL_XP } from './game/experience';
+import { loopsBetween } from './game/track';
+import { ImpactPause, IMPACT_DAMAGE, IMPACT_PAUSE_SECONDS, MAX_HEALTH } from './game/damage';
+import { WeaponLoadout, WEAPONS, weaponSpec, type AimDirection } from './game/weapons';
+import { weaponIcon } from './game/weaponIcon';
 import { formatNumber, formatPercent, getLanguage, setLanguage, t, type MessageKey } from './i18n';
 import './styles.css';
 
@@ -24,6 +29,7 @@ app.innerHTML = `
           <button id="pause-button" class="icon-button" type="button"><span class="pause-icon" aria-hidden="true"></span></button>
         </div>
         <div class="settings-controls">
+          <button id="armory-button" class="icon-button armory-button" type="button" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h9v7H4zM13 10h8v3h-8M7 15v4m-4 0h12M6 6h5"/></svg></button>
           <button id="sound-button" class="icon-button sound-button" type="button" aria-pressed="true">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4 6 8H3v8h3l5 4Z"/><path class="sound-waves" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/><path class="sound-slash" d="m15 9 6 6m0-6-6 6"/></svg>
           </button>
@@ -32,14 +38,41 @@ app.innerHTML = `
       </div>
     </header>
     <div class="district-tag"><span class="district-dot"></span><span id="district"></span></div>
+    <div id="pursuit-glow" class="pursuit-glow" aria-hidden="true"></div>
+    <div id="impact-flash" class="impact-flash" aria-hidden="true"></div>
+    <div id="challenge-hint" class="challenge-hint" role="status"></div>
+    <div id="xp-toast" class="xp-toast" role="status"></div>
+    <div class="resources-panel">
+        <div id="health-panel" class="health-panel"><div class="boost-heading"><span data-i18n="health"></span><span id="health-value"></span></div><div id="health-meter" class="health-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div id="health-fill" class="health-fill"></div></div></div>
+        <div class="boost-panel"><div class="boost-heading"><span data-i18n="boostReserve"></span><span id="boost-value"></span></div><div id="boost-meter" class="boost-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div id="boost-fill" class="boost-fill"></div></div></div>
+    </div>
+    <div class="weapon-panel">
+      <div class="weapon-heading"><span id="weapon-name"></span><strong id="weapon-ammo" dir="ltr"></strong></div>
+      <div id="ammo-meter" class="ammo-track" role="progressbar" aria-valuemin="0"><span id="ammo-fill"></span></div>
+      <div class="weapon-status-row"><button id="weapon-aim" class="aim-button" type="button"><span id="weapon-direction"></span><kbd lang="en" dir="ltr">Q</kbd></button><span id="weapon-status" role="status"></span></div>
+    </div>
     <div class="bottom-hud">
-      <div class="boost-panel"><div class="boost-heading"><span data-i18n="boostReserve"></span><span id="boost-value"></span></div><div id="boost-meter" class="boost-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div id="boost-fill" class="boost-fill"></div></div></div>
+      <div class="experience-panel"><div><span id="xp-level"></span><strong id="xp-total"></strong></div><div id="xp-meter" class="xp-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><span id="xp-fill"></span></div></div>
       <div class="speed-panel"><span data-i18n="speed"></span><strong id="speed"></strong><small data-i18n="speedUnit"></small></div>
     </div>
-    <div class="keyboard-guide" aria-hidden="true"><span><kbd data-i18n="spaceKey"></kbd><span data-i18n="jumpGuide"></span></span><span><kbd>↓</kbd><span data-i18n="suction"></span></span><span><kbd data-i18n="shiftKey"></kbd><span data-i18n="airBoost"></span></span></div>
+    <div class="keyboard-guide" aria-hidden="true"><span><kbd lang="en" dir="ltr" data-i18n="spaceKey"></kbd><span data-i18n="jumpGuide"></span></span><span><kbd lang="en" dir="ltr">↓</kbd><span data-i18n="suction"></span></span><span><kbd lang="en" dir="ltr" data-i18n="shiftKey"></kbd><span data-i18n="airBoost"></span></span><span><kbd lang="en" dir="ltr">← / →</kbd><span data-i18n="turnWeapon"></span></span><span><kbd lang="en" dir="ltr">F</kbd><span data-i18n="fire"></span></span></div>
     <div class="touch-controls">
-      <button id="touch-suction" class="touch-button touch-suction" type="button"><span class="touch-glyph" aria-hidden="true">↓</span><span data-i18n="suction"></span></button>
+      <div class="touch-left"><button id="touch-fire" class="touch-button touch-fire" type="button"><span class="touch-glyph" aria-hidden="true">⌖</span><span data-i18n="fire"></span></button><div class="touch-left-bottom"><button id="touch-suction" class="touch-button touch-suction" type="button"><span class="touch-glyph" aria-hidden="true">↓</span><span data-i18n="suction"></span></button><button id="touch-aim" class="touch-button touch-aim" type="button"><span class="touch-glyph" aria-hidden="true">↔</span></button></div></div>
       <div class="touch-right"><button id="touch-boost" class="touch-button touch-boost" type="button"><span class="touch-glyph" aria-hidden="true">↗</span><span data-i18n="boost"></span></button><button id="touch-jump" class="touch-button touch-jump" type="button"><span class="touch-glyph" aria-hidden="true">↑</span><span data-i18n="jump"></span></button></div>
+    </div>
+    <div id="armory" class="armory" role="dialog" aria-modal="true" aria-labelledby="armory-title" hidden>
+      <div class="armory-card">
+        <div class="armory-heading"><div><span class="eyebrow" data-i18n="armory"></span><h2 id="armory-title" data-i18n="armoryTitle"></h2></div><button id="armory-close" class="armory-close" type="button" data-i18n="closeArmory"></button></div>
+        <p class="armory-description" data-i18n="armoryDescription"></p>
+        <p class="armory-help" data-i18n="armoryHelp"></p>
+        <div class="weapon-grid">${WEAPONS.map((spec, index) => `<button id="equip-${spec.id}" class="weapon-card" type="button" aria-pressed="false">
+          <span class="weapon-card-index" dir="ltr">0${index + 1}</span>${weaponIcon(spec.id)}
+          <strong data-i18n="weapon${index}"></strong><small class="weapon-english" lang="en" dir="ltr">${spec.name}</small>
+          <span class="weapon-power" aria-hidden="true">${Array.from({ length: 6 }, (_, dot) => `<i${dot < spec.power ? ' class="is-filled"' : ''}></i>`).join('')}</span>
+          <span id="weapon-stats-${spec.id}" class="weapon-stats"></span><span id="weapon-unlock-${spec.id}" class="weapon-unlock"></span>
+        </button>`).join('')}</div>
+        <p class="armory-note" data-i18n="armoryAmmoNote"></p>
+      </div>
     </div>
     <div id="overlay" class="overlay is-visible">
       <div class="intro-grid" aria-hidden="true"></div>
@@ -85,6 +118,33 @@ const pauseButton = element<HTMLButtonElement>('pause-button');
 const soundButton = element<HTMLButtonElement>('sound-button');
 const languageButton = element<HTMLButtonElement>('language-button');
 const audio = new GameAudio();
+let progressStorage: Storage | undefined;
+try { progressStorage = localStorage; } catch { /* Session-only XP if storage is unavailable. */ }
+const experience = new ExperienceProgress(progressStorage);
+const loadout = new WeaponLoadout(experience.total, progressStorage);
+const armory = element('armory');
+const armoryButton = element<HTMLButtonElement>('armory-button');
+const armoryClose = element<HTMLButtonElement>('armory-close');
+armory.hidden = true;
+let resumeAfterArmory = false;
+let displayedArmoryXp = -1;
+const xpLevel = element('xp-level');
+const xpTotal = element('xp-total');
+const xpFill = element('xp-fill');
+const xpMeter = element('xp-meter');
+const xpToast = element('xp-toast');
+const challengeHint = element('challenge-hint');
+const pursuitGlow = element('pursuit-glow');
+const impactFlash = element('impact-flash');
+const healthPanel = element('health-panel');
+const healthValue = element('health-value');
+const healthFill = element('health-fill');
+const healthMeter = element('health-meter');
+const impactPause = new ImpactPause();
+let lastImpactSerial = 0;
+let rewardTime = 0;
+let lastReward = 0;
+let lastRewardMessage: MessageKey = 'loopReward';
 
 let status: GameStatus = 'loading';
 let physics: GamePhysics;
@@ -95,12 +155,30 @@ let jumpQueued = false;
 let currentDistrict = 0;
 const warnedChallenges = new Set<string>();
 let failureKey: 'bootError' | 'runtimeError' | null = null;
-const held = { jump: new Set<string>(), suction: new Set<string>(), boost: new Set<string>() };
+const held = { jump: new Set<string>(), suction: new Set<string>(), boost: new Set<string>(), fire: new Set<string>() };
+let aimDirection: AimDirection = 1;
 let best = 0;
 try { best = Number(localStorage.getItem('roadster-best') || 0) || 0; } catch { /* Storage may be disabled. */ }
 
 const formatDistance = (meters: number): string => `${formatNumber(meters, 4)} <small>${t('meter')}</small>`;
 const districtKeys: MessageKey[] = ['districtMorning', 'districtDowntown', 'districtNight'];
+const weaponName = (id: string): string => t(`weapon${WEAPONS.findIndex(spec => spec.id === id)}` as MessageKey);
+
+function refreshArmory(): void {
+  displayedArmoryXp = experience.total;
+  for (const spec of WEAPONS) {
+    const button = element<HTMLButtonElement>(`equip-${spec.id}`);
+    const unlocked = experience.total >= spec.xp;
+    const selected = loadout.selected === spec.id;
+    button.disabled = !unlocked;
+    button.classList.toggle('is-locked', !unlocked);
+    button.classList.toggle('is-equipped', selected);
+    button.setAttribute('aria-pressed', String(selected));
+    element(`weapon-stats-${spec.id}`).textContent = `${t('ammo')}: ${formatNumber(physics?.weaponAmmo(spec.id) ?? spec.ammo)} · ${t('turnTime', { ms: formatNumber(spec.turnSeconds * 1000) })}`;
+    element(`weapon-unlock-${spec.id}`).textContent = unlocked ? t(selected ? 'equipped' : 'equip') : t('unlockAt', { xp: formatNumber(spec.xp) });
+    button.setAttribute('aria-label', `${weaponName(spec.id)} · ${t('power')} ${formatNumber(spec.power)} / ${formatNumber(6)} · ${element(`weapon-unlock-${spec.id}`).textContent}`);
+  }
+}
 
 function updateAudioButton(): void {
   soundButton.classList.toggle('is-muted', audio.muted);
@@ -127,8 +205,58 @@ function updateHud(snapshot?: GameSnapshot): void {
   boostMeter.setAttribute('aria-valuenow', String(percentage));
   boostMeter.setAttribute('aria-label', t('boostReserve'));
   boostMeter.setAttribute('aria-valuetext', t('boostMeter', { charge: formatPercent(charge) }));
+  const health = snapshot?.health ?? MAX_HEALTH;
+  healthFill.style.width = `${health}%`;
+  healthValue.textContent = formatPercent(health / MAX_HEALTH);
+  healthMeter.setAttribute('aria-valuenow', String(health));
+  healthMeter.setAttribute('aria-label', t('health'));
+  healthMeter.setAttribute('aria-valuetext', t('healthMeter', { health: formatPercent(health / MAX_HEALTH) }));
+  healthPanel.classList.toggle('is-low', health <= IMPACT_DAMAGE);
+  impactFlash.style.opacity = String(status === 'running' && impactPause.active
+    ? 0.55 * Math.sqrt(impactPause.remaining / IMPACT_PAUSE_SECONDS) : 0);
   speedLabel.textContent = formatNumber(Math.round(Math.max(0, snapshot?.speed ?? 0) * 3.6), 2);
   districtLabel.textContent = t(districtKeys[currentDistrict]);
+  xpLevel.textContent = t('xpLevel', { level: formatNumber(experience.level) });
+  xpTotal.textContent = `${formatNumber(experience.total)} XP`;
+  xpFill.style.width = `${experience.levelProgress / LEVEL_XP * 100}%`;
+  xpMeter.setAttribute('aria-valuenow', String(experience.levelProgress));
+  xpMeter.setAttribute('aria-label', t('xpProgress', { xp: formatNumber(experience.levelProgress), target: formatNumber(LEVEL_XP) }));
+  const rewardText = t(lastRewardMessage, { xp: formatNumber(lastReward) });
+  if (xpToast.textContent !== rewardText) xpToast.textContent = rewardText;
+  const police = snapshot?.police;
+  pursuitGlow.style.opacity = String(status === 'running' ? (police?.pressure ?? 0) * 0.7 : 0);
+  pursuitGlow.classList.toggle('is-ahead', Boolean(police && police.gap < 0));
+  const nextLoop = snapshot ? loopsBetween(snapshot.car.x, snapshot.car.x + 35)[0] : undefined;
+  let hint = '';
+  if (status === 'running') {
+    if (impactPause.active) hint = t('impactNotice', { damage: formatPercent(IMPACT_DAMAGE / MAX_HEALTH) });
+    else if (snapshot && snapshot.invincibilityRemaining > 0) hint = t('invincibleNotice');
+    else if (snapshot?.loop) hint = t('loopHold');
+    else if (police && police.visibility > 0.3 && Math.abs(police.gap) < 23) hint = t(police.gap < 0 ? 'policeAhead' : 'policeWarning');
+    else if (nextLoop) hint = t('loopAhead');
+  }
+  // Keep live-region announcements stable instead of changing every frame.
+  if (challengeHint.textContent !== hint) challengeHint.textContent = hint;
+  challengeHint.classList.toggle('is-visible', Boolean(hint));
+  challengeHint.classList.toggle('is-danger', impactPause.active || Boolean(!snapshot?.loop && police && Math.abs(police.gap) < 14));
+  xpToast.classList.toggle('is-visible', rewardTime > 0);
+  xpToast.hidden = rewardTime <= 0;
+  challengeHint.hidden = !hint;
+  const weapon = snapshot?.weapon;
+  const spec = weaponSpec(weapon?.id ?? loadout.selected);
+  const ammo = weapon?.ammo ?? spec.ammo;
+  element('weapon-name').textContent = weaponName(spec.id);
+  element('weapon-ammo').textContent = `${formatNumber(ammo)} / ${formatNumber(spec.ammo)}`;
+  element('ammo-fill').style.width = `${ammo / spec.ammo * 100}%`;
+  element('ammo-meter').setAttribute('aria-valuemax', String(spec.ammo));
+  element('ammo-meter').setAttribute('aria-valuenow', String(ammo));
+  element('ammo-meter').setAttribute('aria-label', `${t('ammo')} · ${weaponName(spec.id)}`);
+  element('weapon-direction').textContent = t(aimDirection === 1 ? 'aimFront' : 'aimBack');
+  const weaponStatus = t(!ammo ? 'ammoEmpty' : weapon && weapon.turnRemaining > .001 ? 'turning' : 'weaponReady');
+  if (element('weapon-status').textContent !== weaponStatus) element('weapon-status').textContent = weaponStatus;
+  element('weapon-status').classList.toggle('is-empty', ammo === 0);
+  element('touch-fire').classList.toggle('is-empty', ammo === 0);
+  if (!armory.hidden && displayedArmoryXp !== experience.total) refreshArmory();
 }
 
 function setOverlay(mode: 'ready' | 'paused' | 'crashed'): void {
@@ -136,10 +264,10 @@ function setOverlay(mode: 'ready' | 'paused' | 'crashed'): void {
   overlay.classList.toggle('is-compact', mode !== 'ready');
   controlsSummary.hidden = mode !== 'ready';
   const prefix = mode === 'ready' ? 'ready' : mode === 'paused' ? 'paused' : 'crashed';
-  eyebrow.innerHTML = `<span class="eyebrow-line"></span>${t(`${prefix}Eyebrow`)}`;
+  eyebrow.innerHTML = `<span class="eyebrow-line"></span>${t(mode === 'crashed' && physics.snapshot(1).health === 0 ? 'carDestroyed' : `${prefix}Eyebrow`)}`;
   title.innerHTML = t(`${prefix}Title`);
   description.textContent = mode === 'crashed'
-    ? t('crashedDescription', { distance: formatNumber(physics.distance), best: formatNumber(best) })
+    ? `${physics.snapshot(1).crashReason === 'police' ? t('policeCaught') + ' ' : ''}${t('crashedDescription', { distance: formatNumber(physics.distance), best: formatNumber(best) })} · ${t('runXp', { xp: formatNumber(physics.snapshot(1).runXp) })}`
     : t(mode === 'ready' ? 'readyDescription' : 'pausedDescription');
   primaryLabel.textContent = t(mode === 'ready' ? 'start' : mode === 'paused' ? 'resumeRun' : 'runAgain');
   overlayFoot.innerHTML = t(`${prefix}Foot`);
@@ -157,6 +285,12 @@ function updateLanguage(): void {
   element('touch-jump').setAttribute('aria-label', t('jumpLabel'));
   element('touch-suction').setAttribute('aria-label', t('suctionLabel'));
   element('touch-boost').setAttribute('aria-label', t('boostLabel'));
+  element('touch-fire').setAttribute('aria-label', t('fireLabel'));
+  element('touch-aim').setAttribute('aria-label', t('turnWeapon'));
+  element('weapon-aim').setAttribute('aria-label', t('turnWeapon'));
+  element('weapon-aim').title = t('turnWeapon');
+  armoryButton.setAttribute('aria-label', t('armory'));
+  armoryButton.title = t('armory');
   languageButton.setAttribute('aria-label', t('switchLanguage'));
   languageButton.title = t('switchLanguage');
   element('language-en').classList.toggle('is-active', getLanguage() === 'en');
@@ -167,6 +301,7 @@ function updateLanguage(): void {
   if (status === 'ready' || status === 'paused' || status === 'crashed') setOverlay(status);
   else if (status === 'loading') setOverlay('ready');
   if (failureKey) renderFailure();
+  refreshArmory();
 }
 
 function clearHeld(): void {
@@ -179,13 +314,18 @@ function start(): void {
   const resuming = status === 'paused';
   if (status === 'crashed') {
     physics.dispose();
-    physics = new GamePhysics();
+    physics = new GamePhysics(7, { id: loadout.selected, xp: experience.total });
     audio.reset();
     accumulator = 0;
     jumpQueued = false;
     currentDistrict = 0;
     warnedChallenges.clear();
+    experience.resetRun();
+    rewardTime = 0;
+    impactPause.reset();
+    lastImpactSerial = 0;
     clearHeld();
+    aimDirection = 1;
   }
   status = 'running';
   overlay.classList.remove('is-visible');
@@ -209,7 +349,8 @@ function crash(): void {
   if (status !== 'running') return;
   status = 'crashed';
   clearHeld();
-  audio.play('crash');
+  // The final obstacle hit already played its impact sound before hit stop.
+  if (physics.snapshot(1).health > 0) audio.play('crash');
   const distance = Math.floor(physics.distance);
   if (distance > best) {
     best = distance;
@@ -253,11 +394,46 @@ function bindTouch(id: string, action: keyof typeof held): void {
 bindTouch('touch-jump', 'jump');
 bindTouch('touch-suction', 'suction');
 bindTouch('touch-boost', 'boost');
+bindTouch('touch-fire', 'fire');
+
+function turnWeapon(direction: AimDirection = aimDirection === 1 ? -1 : 1): void {
+  aimDirection = direction;
+  updateHud(physics?.snapshot(Math.min(1, accumulator / FIXED_STEP)));
+}
+element('touch-aim').addEventListener('click', () => turnWeapon());
+element('weapon-aim').addEventListener('click', () => { turnWeapon(); element('weapon-aim').blur(); });
+
+function openArmory(): void {
+  if (status === 'loading' || status === 'error') return;
+  resumeAfterArmory = status === 'running';
+  if (resumeAfterArmory) pause();
+  clearHeld(); jumpQueued = false;
+  armory.hidden = false;
+  armoryButton.setAttribute('aria-expanded', 'true');
+  refreshArmory();
+  armoryClose.focus();
+}
+function closeArmory(): void {
+  armory.hidden = true;
+  armoryButton.setAttribute('aria-expanded', 'false');
+  if (resumeAfterArmory && status === 'paused') start();
+  else armoryButton.focus();
+  resumeAfterArmory = false;
+}
+armoryButton.addEventListener('click', openArmory);
+armoryClose.addEventListener('click', closeArmory);
+for (const spec of WEAPONS) element(`equip-${spec.id}`).addEventListener('click', () => {
+  if (!loadout.select(spec.id, experience.total)) return;
+  physics.equipWeapon(spec.id, experience.total);
+  refreshArmory(); updateHud(physics.snapshot(1));
+  void audio.unlock().then(() => audio.play('click'));
+});
 
 const actionForKey = (code: string): keyof typeof held | null => {
   if (['Space', 'ArrowUp', 'KeyW'].includes(code)) return 'jump';
   if (['ArrowDown', 'KeyS'].includes(code)) return 'suction';
   if (['ShiftLeft', 'ShiftRight', 'KeyX'].includes(code)) return 'boost';
+  if (code === 'KeyF') return 'fire';
   return null;
 };
 
@@ -270,6 +446,18 @@ function toggleSound(): void {
 }
 
 window.addEventListener('keydown', (event) => {
+  if (!armory.hidden) {
+    if (event.code === 'Escape') { event.preventDefault(); closeArmory(); }
+    if (event.code === 'Tab') {
+      const buttons = [...armory.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+      const first = buttons[0]; const last = buttons.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    }
+    return;
+  }
+  if (event.target instanceof HTMLElement && ['BUTTON', 'INPUT', 'SELECT'].includes(event.target.tagName) &&
+      (event.code === 'Space' || event.code === 'Enter')) return;
   const action = actionForKey(event.code);
   if (action) {
     event.preventDefault();
@@ -277,6 +465,9 @@ window.addEventListener('keydown', (event) => {
     void audio.unlock();
     if (action === 'jump') jumpDown(`key-${event.code}`);
     else held[action].add(`key-${event.code}`);
+  } else if (['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD', 'KeyQ'].includes(event.code)) {
+    event.preventDefault();
+    if (!event.repeat) turnWeapon(['ArrowLeft', 'KeyA'].includes(event.code) ? -1 : ['ArrowRight', 'KeyD'].includes(event.code) ? 1 : undefined);
   } else if (event.code === 'KeyP' || event.code === 'Escape') {
     event.preventDefault();
     if (event.repeat) return;
@@ -330,10 +521,16 @@ function frame(now: number): void {
 }
 
 function renderFrame(now: number): void {
-  const delta = Math.min((now - lastFrame) / 1000, 0.06);
+  const wallDelta = Math.max(0, (now - lastFrame) / 1000);
+  const delta = Math.min(wallDelta, 0.06);
   lastFrame = now;
+  let playDelta = 0;
   if (status === 'running') {
-    accumulator = Math.min(accumulator + delta, 0.15);
+    playDelta = Math.min(impactPause.consume(wallDelta), 0.06);
+    if (physics.crashed && !impactPause.active) crash();
+  }
+  if (status === 'running' && playDelta > 0) {
+    accumulator = Math.min(accumulator + playDelta, 0.15);
     let steps = 0;
     while (accumulator >= FIXED_STEP && steps < 10) {
       const controls: Controls = {
@@ -341,19 +538,37 @@ function renderFrame(now: number): void {
         jumpHeld: held.jump.size > 0,
         suction: held.suction.size > 0,
         boost: held.boost.size > 0,
+        fire: held.fire.size > 0,
+        aim: aimDirection,
       };
       physics.step(controls);
       jumpQueued = false;
       accumulator -= FIXED_STEP;
       steps++;
+      const state = physics.snapshot(1);
+      if (state.impactSerial > lastImpactSerial) {
+        lastImpactSerial = state.impactSerial;
+        impactPause.start();
+        accumulator = 0;
+        audio.play('impact');
+        break;
+      }
       if (physics.crashed) { crash(); break; }
     }
   }
 
-  const snapshot = physics.snapshot(Math.min(1, accumulator / FIXED_STEP));
-  visuals.render(snapshot, physics, delta, status === 'running');
-  audio.update(snapshot, status === 'running');
-  if (status === 'running') {
+  const snapshot = physics.snapshot(impactPause.active || physics.crashed ? 1 : Math.min(1, accumulator / FIXED_STEP));
+  const simulating = status === 'running' && !impactPause.active;
+  const gained = experience.collect(snapshot.loopCompletions, snapshot.obstaclesDestroyed, snapshot.policeDestroyed);
+  if (gained) {
+    lastReward = gained;
+    lastRewardMessage = ({ loop: 'loopReward', obstacle: 'obstacleReward', police: 'policeReward', mixed: 'xpReward' } as const)[experience.lastRewardKind];
+    rewardTime = 3;
+    audio.play('record');
+  } else if (simulating) rewardTime = Math.max(0, rewardTime - playDelta);
+  visuals.render(snapshot, physics, delta, simulating, impactPause.active);
+  audio.update(snapshot, simulating);
+  if (simulating) {
     const warningDistance = Math.max(7, snapshot.speed * 0.85);
     for (const hazard of physics.hazardStates) {
       const ahead = hazard.x - snapshot.car.x;
@@ -372,7 +587,7 @@ function renderFrame(now: number): void {
     }
   }
   const district = Math.min(2, Math.floor(snapshot.distance / 360));
-  if (district !== currentDistrict && status === 'running') audio.play('district');
+  if (district !== currentDistrict && simulating) audio.play('district');
   currentDistrict = district;
   updateHud(snapshot);
   document.body.classList.toggle('fans-on', snapshot.suctionActive);
@@ -382,7 +597,7 @@ function renderFrame(now: number): void {
 async function boot(): Promise<void> {
   try {
     await RAPIER.init();
-    physics = new GamePhysics();
+    physics = new GamePhysics(7, { id: loadout.selected, xp: experience.total });
     visuals = new GameVisuals(sceneElement);
     const snapshot = physics.snapshot(0);
     visuals.render(snapshot, physics, 0, false);

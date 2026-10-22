@@ -33,13 +33,15 @@ function positions(smoke) {
   return result;
 }
 
-test('air boost emits behind the rear nozzles, and stops on the ground', () => {
+test('boost emits behind the rear nozzles in the air and on the ground', () => {
   const smoke = new CarSmoke();
   try {
     for (let i = 0; i < 4; i++) smoke.update(snapshot({ boostActive: true }), 1 / 60);
     assert.ok(smoke.activeCount > 0);
     assert.ok(positions(smoke).every((puff) => puff.x < 8 && puff.y > 3.3 && puff.y < 4));
     for (let i = 0; i < 90; i++) smoke.update(snapshot({ boostActive: true, grounded: true }), 1 / 60);
+    assert.ok(smoke.activeCount > 0, 'ground boost must keep emitting');
+    for (let i = 0; i < 90; i++) smoke.update(snapshot({ grounded: true }), 1 / 60);
     assert.equal(smoke.activeCount, 0);
   } finally { smoke.dispose(); }
 });

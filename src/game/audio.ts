@@ -1,7 +1,8 @@
 import type { GameSnapshot } from './physics';
 
 export type SoundEvent = 'start' | 'resume' | 'pause' | 'jump' | 'doubleJump' | 'land' |
-  'crash' | 'click' | 'district' | 'record' | 'warning';
+  'crash' | 'impact' | 'click' | 'district' | 'record' | 'warning' |
+  'shot' | 'heavyShot' | 'rocketShot' | 'laserShot' | 'plasmaShot' | 'weaponHit' | 'explosion';
 
 interface SoundLoops {
   motor: GainNode;
@@ -16,6 +17,8 @@ interface SoundLoops {
   boostFilter: BiquadFilterNode;
   suction: GainNode;
   fanPitch: OscillatorNode;
+  siren: GainNode;
+  sirenPitch: OscillatorNode;
 }
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
@@ -40,8 +43,10 @@ export class GameAudio {
   private lastLoopUpdate = -Infinity;
   private jumpSerial = 0;
   private landingSerial = 0;
-  private crashPlayed = false;
   private lastWarning = -Infinity;
+  private shotSerial = 0;
+  private hitSerial = 0;
+  private destroySerial = 0;
 
   constructor() {
     try { this.silent = localStorage.getItem(STORAGE_KEY) === 'true'; } catch { /* Private browsing can deny storage. */ }
@@ -164,9 +169,11 @@ export class GameAudio {
     fanLevel.gain.value = 0.24;
     fanLevel.connect(suctionFilter);
     const fanPitch = oscillator('triangle', 135, fanLevel);
+    const siren = gain();
+    const sirenPitch = oscillator('sine', 650, siren);
 
     this.loops = { motor, motorPitch, motorOvertone, motorFilter, tires, tireFilter,
-      wind, windFilter, boost, boostFilter, suction, fanPitch };
+      wind, windFilter, boost, boostFilter, suction, fanPitch, siren, sirenPitch };
   }
 
   private target(parameter: AudioParam, value: number, smoothing = 0.07): void {
@@ -180,6 +187,13 @@ export class GameAudio {
     // Serials survive skipped display frames, so short takeoffs and landings
     // still produce exactly one sound with a variable display refresh rate.
     if (running && !snapshot.crashed) {
+      const weapon = snapshot.weapon;
+      if (weapon && weapon.shotSerial > this.shotSerial) {
+        this.play(weapon.id === 'plasma-cannon' ? 'plasmaShot' : weapon.id === 'laser-gun' ? 'laserShot'
+          : weapon.id.includes('launcher') ? 'rocketShot' : weapon.id === 'cannon' ? 'heavyShot' : 'shot');
+      }
+      if (weapon && weapon.destroySerial > this.destroySerial) this.play('explosion');
+      else if (weapon && weapon.hitSerial > this.hitSerial) this.play('weaponHit');
       if (snapshot.jumpSerial !== this.jumpSerial) {
         this.play(snapshot.jumpsUsed > 1 ? 'doubleJump' : 'jump');
       }
@@ -189,7 +203,9 @@ export class GameAudio {
     }
     this.jumpSerial = snapshot.jumpSerial;
     this.landingSerial = snapshot.landingSerial;
-    if (snapshot.crashed && !this.crashPlayed) this.play('crash');
+    this.shotSerial = snapshot.weapon?.shotSerial ?? 0;
+    this.hitSerial = snapshot.weapon?.hitSerial ?? 0;
+    this.destroySerial = snapshot.weapon?.destroySerial ?? 0;
 
     if (!running || snapshot.crashed) {
       if (this.running) this.suspend();
@@ -216,10 +232,11 @@ export class GameAudio {
     this.target(loops.boostFilter.frequency, 1100 + speed * 2100, 0.10);
     this.target(loops.suction.gain, snapshot.suctionActive ? 0.11 : 0, 0.065);
     this.target(loops.fanPitch.frequency, 110 + speed * 120, 0.12);
+    this.target(loops.siren.gain, snapshot.police.pressure * 0.095, 0.18);
+    this.target(loops.sirenPitch.frequency, 760 + Math.sin(now * 5.5) * 230, 0.035);
   }
 
   play(event: SoundEvent, strength = 1): void {
-    if (event === 'crash') this.crashPlayed = true;
     if (!this.context || !this.master || this.context.state !== 'running' || this.silent || this.disposed) return;
     const now = this.context.currentTime;
     const level = clamp(strength, 0.1, 1);
@@ -257,6 +274,39 @@ export class GameAudio {
         this.burst(0.64, 0.33, 3000, 180, 'lowpass', 0.65);
         this.tone(110, 29, 0.52, 0.18, 0, 'triangle');
         this.tone(220, 64, 0.30, 0.045, 0.035, 'sawtooth');
+        break;
+      case 'impact':
+        this.burst(0.28, 0.31, 3200, 320, 'lowpass', 0.8);
+        this.tone(150, 38, 0.27, 0.18, 0, 'triangle');
+        this.tone(710, 170, 0.16, 0.06, 0.012, 'sawtooth');
+        break;
+      case 'shot':
+        this.burst(.075, .12, 4200, 900, 'bandpass', .7);
+        this.tone(180, 65, .075, .055, 0, 'triangle');
+        break;
+      case 'heavyShot':
+        this.burst(.24, .20, 1900, 160, 'lowpass', .8);
+        this.tone(125, 32, .26, .12, 0, 'triangle');
+        break;
+      case 'rocketShot':
+        this.burst(.30, .15, 450, 2400, 'bandpass', .55);
+        this.tone(170, 70, .18, .06, 0, 'triangle');
+        break;
+      case 'laserShot':
+        this.tone(1600, 480, .12, .075, 0, 'sine');
+        this.tone(2400, 800, .08, .025, 0, 'triangle');
+        break;
+      case 'plasmaShot':
+        this.tone(420, 65, .30, .12, 0, 'triangle');
+        this.tone(840, 130, .23, .055, .015, 'sine');
+        this.burst(.20, .10, 1700, 300, 'bandpass', 1.4);
+        break;
+      case 'weaponHit':
+        this.burst(.09, .075, 2900, 700, 'highpass', .6);
+        break;
+      case 'explosion':
+        this.burst(.40, .20, 2200, 120, 'lowpass', .7);
+        this.tone(100, 26, .35, .10, 0, 'triangle');
         break;
       case 'district':
         this.tone(523, 523, 0.25, 0.04, 0, 'triangle');
@@ -338,7 +388,7 @@ export class GameAudio {
     this.running = false;
     this.lastLoopUpdate = -Infinity;
     if (this.loops) {
-      for (const name of ['motor', 'tires', 'wind', 'boost', 'suction'] as const) {
+      for (const name of ['motor', 'tires', 'wind', 'boost', 'suction', 'siren'] as const) {
         this.target(this.loops[name].gain, 0, 0.035);
       }
     }
@@ -358,8 +408,8 @@ export class GameAudio {
     this.suspend();
     this.jumpSerial = 0;
     this.landingSerial = 0;
-    this.crashPlayed = false;
     this.lastWarning = -Infinity;
+    this.shotSerial = this.hitSerial = this.destroySerial = 0;
     for (const voice of this.voices) {
       try { voice.stop(); } catch { /* A voice may have ended between frames. */ }
     }

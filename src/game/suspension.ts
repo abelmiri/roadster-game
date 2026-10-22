@@ -11,8 +11,8 @@ interface SuspensionInput {
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 const INERTIA = 1.30;
 const CG_HEIGHT = 0.44;
-const FRONT_RATE = 37;
-const REAR_RATE = 33;
+const FRONT_RATE = 29;
+const REAR_RATE = 26;
 
 /** Two sprung axles drive body heave and pitch. Rates are normalized by sprung
  * mass, with lighter compression damping and slower, controlled rebound.
@@ -31,13 +31,16 @@ export class VehicleSuspension {
     this.velocity += 0.22;
   }
 
-  land(impact: number, angleError: number, penetration: number): void {
+  land(impact: number, angleError: number, penetration: number, angularVelocity = 0): void {
     // Preserve a little of the incoming body pose, then absorb impact over the
     // stroke rather than flattening the spring at the moment tires touch down.
-    this.offset += clamp(penetration, -0.025, 0.025);
+    this.offset += clamp(penetration, -0.035, 0.035);
     this.pitch += angleError;
-    this.velocity -= clamp(impact * 0.13, 0, 1.85);
-    this.pitchVelocity -= clamp(angleError * 1.8, -0.22, 0.22);
+    // Retain part of the sprung body's incoming normal and angular momentum.
+    // A harder landing spends more of the available stroke instead of giving
+    // every touchdown the same small kick.
+    this.velocity -= clamp(impact * 0.20, 0, 3.6);
+    this.pitchVelocity += clamp(angularVelocity * 0.45, -1.2, 1.2);
     this.limitStroke();
   }
 
@@ -53,7 +56,7 @@ export class VehicleSuspension {
     const frontTravel = this.offset + rotation;
     const rearTravel = this.offset - rotation;
     // The wheels droop gently when unloaded in flight.
-    const rest = input.grounded ? 0 : 0.035;
+    const rest = input.grounded ? 0 : 0.055;
     const front = this.axleForce(frontTravel, this.velocity + rotationVelocity, FRONT_RATE, rest, input.grounded);
     const rear = this.axleForce(rearTravel, this.velocity - rotationVelocity, REAR_RATE, rest, input.grounded);
     const roadLoad = input.grounded ? this.normalAcceleration + (input.suction ? 3.8 : 0) : 0;
@@ -68,12 +71,12 @@ export class VehicleSuspension {
 
   private axleForce(travel: number, velocity: number, rate: number, rest: number, grounded: boolean): number {
     const displacement = travel - rest;
-    const damping = grounded ? (velocity < 0 ? 3.2 : 7.7) : 5.2;
+    const damping = grounded ? (velocity < 0 ? 3.4 : 5.4) : 4.4;
     // Progressive rubber stops cushion the last part of the stroke. The hard
     // limit below is only a final guard against extreme landing impulses.
-    const endTravel = Math.max(0, Math.abs(travel) - 0.060);
-    const bumpStop = Math.sign(travel) * endTravel * endTravel * 7500;
-    const stopDamping = endTravel * 160 * velocity;
+    const endTravel = Math.max(0, Math.abs(travel) - 0.115);
+    const bumpStop = Math.sign(travel) * endTravel * endTravel * 4500;
+    const stopDamping = endTravel * 120 * velocity;
     return -rate * displacement - damping * velocity - bumpStop - stopDamping;
   }
 

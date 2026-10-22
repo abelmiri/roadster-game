@@ -15,6 +15,9 @@ let CAR_WHEEL_OFFSET;
 let CAR_AXLE_Y;
 let CAR_BODY_CLEARANCE;
 let CAR_ARCH_RADIUS;
+let loopsBetween;
+let loopGeometry;
+let sprungBodyPose;
 
 before(async () => {
   const outdir = path.resolve('node_modules/.cache/roadster-tests');
@@ -29,8 +32,8 @@ before(async () => {
   });
   await RAPIER.init();
   ({ GamePhysics, FIXED_STEP } = await import(pathToFileURL(path.join(outdir, 'physics.mjs')).href));
-  ({ TrackGenerator, roadHeight, roadSlope } = await import(pathToFileURL(path.join(outdir, 'track.mjs')).href));
-  ({ CAR_WHEEL_RADIUS, CAR_WHEEL_OFFSET, CAR_AXLE_Y, CAR_BODY_CLEARANCE, CAR_ARCH_RADIUS } =
+  ({ TrackGenerator, roadHeight, roadSlope, loopsBetween, loopGeometry } = await import(pathToFileURL(path.join(outdir, 'track.mjs')).href));
+  ({ CAR_WHEEL_RADIUS, CAR_WHEEL_OFFSET, CAR_AXLE_Y, CAR_BODY_CLEARANCE, CAR_ARCH_RADIUS, sprungBodyPose } =
     await import(pathToFileURL(path.join(outdir, 'vehicle.mjs')).href));
 });
 
@@ -66,7 +69,7 @@ function runChallenge(startX, endX, jumpAt) {
       if (jumpPressed) jumpStep = i;
       game.step({ ...idle, jumpPressed, jumpHeld: i - jumpStep < 22 });
     }
-    return { x: game.snapshot(1).car.x, crashed: game.crashed };
+    return { x: game.snapshot(1).car.x, crashed: game.crashed, health: game.snapshot(1).health };
   } finally { game.dispose(); }
 }
 
@@ -146,19 +149,28 @@ test('jump landings preserve forward motion and do not launch the car back into 
 });
 
 test('soft suspension compresses on landing and keeps space around both tires', () => {
-  const game = new GamePhysics();
+  const game = new GamePhysics(19);
   let minimumGap = Infinity;
   let minimumLandingTravel = 0;
   let landingFrame = -1;
   try {
+    // Use a controlled impact so the tested spring load does not depend on
+    // which hill a jump reaches when the starting cruise speed changes.
+    game.step(idle);
+    for (const body of [game.car, ...game.wheels]) {
+      const p = body.translation();
+      body.setTranslation({ x: p.x, y: p.y + 1.5 }, true);
+      body.setLinvel({ x: 14, y: -10 }, true);
+    }
     for (let i = 0; i < 500 && !game.crashed && game.car.translation().x < 60; i++) {
-      game.step({ ...idle, jumpPressed: i === 50, jumpHeld: i >= 50 && i < 72 });
+      game.step(idle);
       const state = game.snapshot(1);
-      const bodyAngle = state.car.angle + state.suspensionPitch;
+      const body = sprungBodyPose(state.car, state.suspensionOffset, state.suspensionPitch);
+      const bodyAngle = body.angle;
       state.wheels.forEach((wheel, index) => {
         const offset = index === 0 ? -CAR_WHEEL_OFFSET : CAR_WHEEL_OFFSET;
-        const archX = state.car.x + offset * Math.cos(bodyAngle) - CAR_AXLE_Y * Math.sin(bodyAngle);
-        const archY = state.car.y + state.suspensionOffset + offset * Math.sin(bodyAngle) + CAR_AXLE_Y * Math.cos(bodyAngle);
+        const archX = body.x + offset * Math.cos(bodyAngle) - CAR_AXLE_Y * Math.sin(bodyAngle);
+        const archY = body.y + offset * Math.sin(bodyAngle) + CAR_AXLE_Y * Math.cos(bodyAngle);
         const gap = CAR_ARCH_RADIUS - CAR_WHEEL_RADIUS - Math.hypot(wheel.x - archX, wheel.y - archY);
         minimumGap = Math.min(minimumGap, gap);
       });
@@ -168,11 +180,10 @@ test('soft suspension compresses on landing and keeps space around both tires', 
       }
     }
     assert.equal(game.crashed, false);
-    assert.equal(game.snapshot(1).jumpSerial, 1);
     assert.equal(game.snapshot(1).landingSerial, 1);
-    assert.ok(game.snapshot(1).landingImpact > 0);
-    assert.ok(minimumLandingTravel < -0.015, `landing compression=${minimumLandingTravel}`);
-    assert.ok(minimumGap > 0.03, `tire clearance=${minimumGap}`);
+    assert.ok(game.snapshot(1).landingImpact > 0.8);
+    assert.ok(minimumLandingTravel < -0.10, `landing compression=${minimumLandingTravel}`);
+    assert.ok(minimumGap > 0.04, `tire clearance=${minimumGap}`);
   } finally { game.dispose(); }
 });
 
@@ -294,19 +305,21 @@ test('air boost drains and then recharges', () => {
   } finally { game.dispose(); coast.dispose(); }
 });
 
-test('an early barrier is lethal, while a timed jump clears it', () => {
+test('an early barrier costs one health segment, while a timed jump clears it without damage', () => {
   const track = new TrackGenerator();
   const barrier = track.chunk(2).hazards[0];
-  assert.equal(runChallenge(7, 95, Infinity).crashed, true);
+  const collision = runChallenge(7, 95, Infinity);
+  assert.equal(collision.crashed, false);
+  assert.equal(collision.health, 75);
   const paths = Array.from({ length: 9 }, (_, i) => runChallenge(7, 95, barrier.x - (i + 3)));
-  assert.ok(paths.some((path) => !path.crashed && path.x >= 95), 'barrier has no reachable jump');
+  assert.ok(paths.some((path) => !path.crashed && path.x >= 95 && path.health === 100), 'barrier has no reachable jump');
 });
 
-test('a gap requires a jump and has a reachable landing', () => {
-  const gap = new TrackGenerator().chunk(4).gap;
-  assert.equal(runChallenge(122, 155, Infinity).crashed, true);
-  const paths = Array.from({ length: 9 }, (_, i) => runChallenge(122, 155, gap.start - (i + 3)));
-  assert.ok(paths.some((path) => !path.crashed && path.x >= 155), 'gap has no reachable jump');
+test('an uphill gap requires a jump and remains reachable at the higher starting speed', () => {
+  const gap = new TrackGenerator().chunk(14).gap;
+  assert.equal(runChallenge(422, 455, Infinity).crashed, true);
+  const paths = Array.from({ length: 9 }, (_, i) => runChallenge(422, 455, gap.start - (i + 3)));
+  assert.ok(paths.some((path) => !path.crashed && path.x >= 455), 'gap has no reachable jump');
 });
 
 test('suction prevents high-speed crest lift-off', () => {
@@ -316,18 +329,23 @@ test('suction prevents high-speed crest lift-off', () => {
     try {
       placeOnRoad(game, x, 18);
       let maxClearance = 0;
+      let airborneSteps = 0;
       for (let i = 0; i < 110 && !game.crashed; i++) {
         game.step({ ...idle, suction });
-        const wheelClearance = Math.min(...game.snapshot(1).wheels.map((wheel) => wheel.y - roadHeight(wheel.x)));
-        maxClearance = Math.max(maxClearance, wheelClearance);
+        if (!game.snapshot(1).grounded) airborneSteps++;
+        // The first touching tire now catches the car while the other axle
+        // can still be airborne. Check each tire rather than only the lower one.
+        maxClearance = Math.max(maxClearance, ...game.snapshot(1).wheels.map((wheel) => wheel.y - roadHeight(wheel.x)));
       }
-      return maxClearance;
+      return { maxClearance, airborneSteps };
     } finally { game.dispose(); }
   }
   const coasting = crest(false);
   const planted = crest(true);
-  assert.ok(coasting > CAR_WHEEL_RADIUS + 0.08, `coasting clearance=${coasting}`);
-  assert.ok(planted < CAR_WHEEL_RADIUS + 0.04, `suction clearance=${planted}`);
+  assert.ok(coasting.airborneSteps > 0);
+  assert.equal(planted.airborneSteps, 0);
+  assert.ok(coasting.maxClearance > planted.maxClearance + 0.05);
+  assert.ok(planted.maxClearance < CAR_WHEEL_RADIUS + 0.04, `suction clearance=${planted.maxClearance}`);
 });
 
 test('roof-first contact ends the run', () => {
@@ -338,5 +356,450 @@ test('roof-first contact ends the run', () => {
     game.car.setTranslation({ x, y: roadHeight(x) + 0.8 }, true);
     game.step(idle);
     assert.equal(game.crashed, true);
+  } finally { game.dispose(); }
+});
+
+
+test('ground boost accelerates without a jump, spends charge, and recharges', () => {
+  const game = new GamePhysics();
+  const coast = new GamePhysics();
+  try {
+    stepFor(game, .65, { ...idle, boost: true });
+    stepFor(coast, .65);
+    const boosted = game.snapshot(1);
+    assert.equal(boosted.grounded, true);
+    assert.equal(boosted.boostActive, true);
+    assert.equal(boosted.jumpSerial, 0);
+    assert.ok(boosted.speed > coast.snapshot(1).speed + 2);
+    assert.ok(boosted.boost < .75);
+    stepFor(game, .5);
+    assert.ok(game.snapshot(1).boost > boosted.boost);
+  } finally { game.dispose(); coast.dispose(); }
+});
+
+test('loop spacing is 200–400 meters and the shared ordinary road stays clear', () => {
+  const loops = loopsBetween(0, 25000);
+  assert.ok(loops.length > 70);
+  let previous = 7;
+  const generator = new TrackGenerator();
+  for (const loop of loops) {
+    const spacing = loop.entryX - previous;
+    assert.ok(spacing >= 200 && spacing <= 400, `spacing=${spacing}`);
+    previous = loop.entryX;
+    for (let x = loop.entryX - 19; x <= loop.entryX + 19; x += 2) {
+      const chunk = generator.chunk(Math.floor(x / 30));
+      assert.equal(chunk.gap, null);
+      assert.equal(chunk.hazards.length, 0);
+      assert.equal(generator.hasRoad(x), true);
+      const finiteDifference = (roadHeight(x + .001) - roadHeight(x - .001)) / .002;
+      assert.ok(Math.abs(finiteDifference - roadSlope(x)) < .001);
+    }
+  }
+});
+
+test('holding suction completes full loops at early and late speeds, awards once, and rejoins', () => {
+  for (const index of [0, 3, 7]) {
+    const spec = loopsBetween(0, 3000)[index];
+    const game = new GamePhysics(index ? 7 : spec.entryX - .2);
+    try {
+      if (index) placeOnRoad(game, spec.entryX - .2, 18);
+      let sawTop = false;
+      let previousDistance = 0;
+      let maximumProgress = 0;
+      for (let i = 0; i < 700 && !game.crashed; i++) {
+        game.step({ ...idle, suction: true, boost: index === 3 });
+        const state = game.snapshot(1);
+        assert.ok(state.distance >= previousDistance, 'score regressed inside the loop');
+        previousDistance = state.distance;
+        if (state.loop) {
+          maximumProgress = Math.max(maximumProgress, state.loop.progress);
+          if (state.loop.progress > .45 && state.loop.progress < .55) {
+            sawTop = true;
+            const center = loopGeometry(spec);
+            assert.ok(state.car.y > center.y + 3);
+            assert.ok(Math.cos(state.car.angle - center.angle) < -.9, 'roof should face down at the top');
+          }
+          for (const wheel of state.wheels) {
+            const center = loopGeometry(spec);
+            const radial = Math.hypot(wheel.x - center.x, wheel.y - center.y) + CAR_WHEEL_RADIUS;
+            assert.ok(Math.abs(radial - spec.radius) < .002, `tire does not follow the inner surface: ${radial}`);
+          }
+        }
+        if (state.loopCompletions) break;
+      }
+      assert.equal(game.crashed, false);
+      assert.equal(sawTop, true);
+      assert.ok(maximumProgress > .97);
+      assert.equal(game.snapshot(1).loopCompletions, 1);
+      assert.equal(game.snapshot(1).runXp, 25);
+      stepFor(game, .7, { ...idle, suction: true });
+      assert.equal(game.crashed, false);
+      assert.equal(game.snapshot(1).loop, null);
+      assert.equal(game.snapshot(1).runXp, 25);
+      assert.ok(game.snapshot(1).car.x > spec.entryX + 5);
+      assert.equal(game.snapshot(1).grounded, true);
+    } finally { game.dispose(); }
+  }
+});
+
+test('ordinary route skips the loop, while releasing suction abandons the reward', () => {
+  const spec = loopsBetween(0, 500)[0];
+  const normal = new GamePhysics(spec.entryX - 4);
+  const released = new GamePhysics(spec.entryX - .2);
+  try {
+    stepFor(normal, 1.4);
+    assert.equal(normal.crashed, false);
+    assert.ok(normal.snapshot(1).car.x > spec.entryX + 8);
+    assert.equal(normal.snapshot(1).runXp, 0);
+    stepFor(released, .65, { ...idle, suction: true });
+    const before = released.snapshot(1);
+    assert.ok(before.loop && before.loop.progress > .1);
+    released.step(idle);
+    const after = released.snapshot(1);
+    assert.equal(after.loop, null);
+    assert.equal(after.grounded, false);
+    assert.equal(after.runXp, 0);
+    assert.ok(Math.hypot(after.car.x - before.car.x, after.car.y - before.car.y) < .25);
+  } finally { normal.dispose(); released.dispose(); }
+});
+
+test('police contact costs one health segment and a grounded boost creates escape room', () => {
+  const caught = new GamePhysics();
+  const escaping = new GamePhysics();
+  const airborne = new GamePhysics();
+  try {
+    for (const game of [caught, escaping, airborne]) {
+      game.pursuit.gap = 4.1;
+      game.pursuit.idleSeconds = 20;
+      game.pursuit.visibility = 1;
+    }
+    for (let i = 0; i < 14; i++) caught.step(idle);
+    assert.equal(caught.crashed, false);
+    assert.equal(caught.snapshot(1).health, 75);
+    assert.equal(caught.snapshot(1).impactSerial, 1);
+    assert.ok(caught.snapshot(1).invincibilityRemaining > 0);
+    stepFor(escaping, .25, { ...idle, boost: true });
+    assert.equal(escaping.crashed, false);
+    assert.equal(escaping.snapshot(1).health, 100);
+    assert.ok(escaping.snapshot(1).police.gap > 6);
+    airborne.car.setTranslation({ x: 7, y: roadHeight(7) + 4 }, true);
+    stepFor(airborne, .1);
+    assert.equal(airborne.crashed, false, 'police below the player must not cause an air collision');
+    assert.equal(airborne.snapshot(1).health, 100);
+  } finally { caught.dispose(); escaping.dispose(); airborne.dispose(); }
+});
+
+test('releasing suction near loop exits lands safely instead of falling through the ordinary road', () => {
+  // Cover uphill/downhill loops, both cruise speeds, boost, and releasing just
+  // before completion as well as on the first step after the reward.
+  for (const spec of loopsBetween(0, 3000).slice(0, 5)) {
+    for (const speed of [11.2, 18]) {
+      for (const releaseAt of [.90, .94, .97, .99, 1]) {
+        const game = new GamePhysics(speed > 12 ? 7 : spec.entryX - .2);
+        const boosted = spec.id === 3;
+        let released = false;
+        let leftLoop = false;
+        const label = `loop=${spec.id}, speed=${speed}, release=${releaseAt}`;
+        try {
+          if (speed > 12) placeOnRoad(game, spec.entryX - .2, speed);
+          for (let i = 0; i < 800 && !game.crashed; i++) {
+            const state = game.snapshot(1);
+            if ((state.loop?.progress ?? 0) >= releaseAt || state.loopCompletions) released = true;
+            game.step({ ...idle, suction: !released, boost: boosted });
+            const after = game.snapshot(1);
+            if (released && !after.loop) leftLoop = true;
+            if (leftLoop) {
+              for (const wheel of after.wheels) {
+                assert.ok(wheel.y - roadHeight(wheel.x) >= CAR_WHEEL_RADIUS - .025,
+                  `tire tunneled through the exit road: ${label}`);
+              }
+              assert.ok(after.speed >= 6 - .0001 && after.speed <= 23 + .0001, `bad exit velocity: ${label}`);
+              assert.ok(Math.abs(after.car.angle) < 1.4, `exit retained full-turn rotation: ${label}`);
+            }
+            if (leftLoop && after.car.x > spec.entryX + 9) break;
+          }
+          assert.equal(released, true, label);
+          assert.equal(game.crashed, false, label);
+          assert.equal(game.snapshot(1).grounded, true, label);
+          assert.ok(game.snapshot(1).car.x > spec.entryX + 9, label);
+          assert.equal(game.snapshot(1).runXp, releaseAt === 1 ? 25 : 0, label);
+        } finally { game.dispose(); }
+      }
+    }
+  }
+});
+
+test('suspension preserves tire clearance through a loop and resolves heave in the local normal', () => {
+  const spec = loopsBetween(0, 500)[0];
+  const game = new GamePhysics(spec.entryX - .2);
+  let minimumGap = Infinity;
+  let sawInvertedCompression = false;
+  try {
+    for (let i = 0; i < 500 && !game.crashed && !game.snapshot(1).loopCompletions; i++) {
+      game.step({ ...idle, suction: true, boost: true });
+      const state = game.snapshot(1);
+      const body = sprungBodyPose(state.car, state.suspensionOffset, state.suspensionPitch);
+      if (Math.cos(state.car.angle) < -.9 && state.suspensionOffset < -.05) {
+        assert.ok(body.y > state.car.y, 'compression at the top must move the body toward the tires');
+        sawInvertedCompression = true;
+      }
+      state.wheels.forEach((wheel, index) => {
+        const axle = index ? CAR_WHEEL_OFFSET : -CAR_WHEEL_OFFSET;
+        const archX = body.x + axle * Math.cos(body.angle) - CAR_AXLE_Y * Math.sin(body.angle);
+        const archY = body.y + axle * Math.sin(body.angle) + CAR_AXLE_Y * Math.cos(body.angle);
+        minimumGap = Math.min(minimumGap, CAR_ARCH_RADIUS - CAR_WHEEL_RADIUS - Math.hypot(wheel.x - archX, wheel.y - archY));
+      });
+    }
+    assert.equal(game.crashed, false);
+    assert.equal(sawInvertedCompression, true);
+    assert.ok(minimumGap > .04, `loop tire clearance=${minimumGap}`);
+  } finally { game.dispose(); }
+});
+
+test('the faster start remains below crest launch speed and restart restores full health', () => {
+  const game = new GamePhysics();
+  try {
+    assert.ok(Math.abs(game.snapshot(1).speed - 14) < .01);
+    assert.equal(game.snapshot(1).health, 100);
+    assert.equal(game.snapshot(1).impactSerial, 0);
+    assert.equal(game.snapshot(1).invincibilityRemaining, 0);
+    stepFor(game, 2);
+    assert.equal(game.crashed, false);
+    assert.equal(game.snapshot(1).grounded, true);
+  } finally { game.dispose(); }
+});
+
+test('Rapier obstacle contact counts one hit across the chassis and tires; a fourth hit ends the run', () => {
+  const barrier = new TrackGenerator().chunk(2).hazards[0];
+  const game = new GamePhysics(barrier.x - 4);
+  try {
+    for (let hit = 1; hit <= 4; hit++) {
+      placeOnRoad(game, barrier.x - 4, 12.8);
+      for (let i = 0; i < 120 && !game.crashed && game.snapshot(1).impactSerial < hit; i++) game.step(idle);
+      assert.equal(game.snapshot(1).health, 100 - hit * 25);
+      assert.equal(game.snapshot(1).impactSerial, hit);
+      assert.equal(game.crashed, hit === 4);
+      if (hit < 4) {
+        stepFor(game, .15);
+        assert.equal(game.snapshot(1).health, 100 - hit * 25, 'same obstacle must not damage through another tire');
+        placeOnRoad(game, 10, 12.8);
+        stepFor(game, 1.5);
+      }
+    }
+  } finally { game.dispose(); }
+});
+
+test('a different obstacle during flashing protection causes no extra damage', () => {
+  const track = new TrackGenerator();
+  const first = track.chunk(2).hazards[0];
+  const second = track.chunk(5).hazards[0];
+  const game = new GamePhysics(first.x - 4);
+  try {
+    while (game.snapshot(1).impactSerial === 0 && !game.crashed) game.step(idle);
+    assert.equal(game.snapshot(1).health, 75);
+    placeOnRoad(game, second.x - 3, 12.8);
+    stepFor(game, .45);
+    assert.ok(game.snapshot(1).car.x > second.x + 2);
+    assert.ok(game.snapshot(1).invincibilityRemaining > 0);
+    assert.equal(game.snapshot(1).health, 75);
+    assert.equal(game.snapshot(1).impactSerial, 1);
+  } finally { game.dispose(); }
+});
+
+test('police passes under a full loop, returns behind, and contact uses the health/impact system', () => {
+  const spec = loopsBetween(0, 500)[0];
+  const game = new GamePhysics(spec.entryX - .2);
+  game.pursuit.gap = 7;
+  game.pursuit.idleSeconds = 20;
+  game.pursuit.visibility = 1;
+  let previousPoliceX = -Infinity;
+  let wentBackward = false;
+  let previousCarX = game.car.translation().x;
+  try {
+    for (let i = 0; i < 600 && !game.snapshot(1).loopCompletions; i++) {
+      game.step({ ...idle, suction: true });
+      const state = game.snapshot(1);
+      assert.equal(state.health, 100, 'a car inside the loop cannot be hit by a patrol on the ordinary road');
+      assert.ok(state.police.x > previousPoliceX, 'patrol must keep moving during the lap');
+      assert.ok(state.police.y < roadHeight(state.police.x) + 1.1, 'patrol followed the car into the loop');
+      if (state.car.x < previousCarX) wentBackward = true;
+      previousCarX = state.car.x;
+      previousPoliceX = state.police.x;
+    }
+    assert.equal(wentBackward, true);
+    assert.equal(game.snapshot(1).loopCompletions, 1);
+    assert.equal(game.snapshot(1).runXp, 25);
+    assert.equal(game.snapshot(1).police.mode, 'rejoining');
+    assert.ok(game.snapshot(1).police.x > game.snapshot(1).car.x, 'patrol should have driven beyond the loop');
+    let sawImpact = false;
+    let returnedBehind = false;
+    for (let i = 0; i < 1000 && !game.crashed; i++) {
+      for (const chunk of game.chunks.values()) for (const hazard of chunk.hazards) hazard.collider.setEnabled(false);
+      game.step({ ...idle, suction: true });
+      const state = game.snapshot(1);
+      assert.ok(state.police.x >= previousPoliceX - .001, 'patrol reversed or warped during regroup');
+      previousPoliceX = state.police.x;
+      if (state.impactSerial) {
+        sawImpact = true;
+        assert.equal(state.health, 75);
+        assert.equal(state.impactSerial, 1, 'bumper overlap must not count twice');
+      }
+      if (sawImpact && state.police.mode === 'chasing' && state.police.gap >= 11.9) {
+        returnedBehind = true; break;
+      }
+    }
+    assert.equal(game.crashed, false);
+    assert.equal(sawImpact, true);
+    assert.equal(returnedBehind, true);
+  } finally { game.dispose(); }
+});
+
+test('an abandoned loop does not move the police back behind the player', () => {
+  const spec = loopsBetween(0, 500)[0];
+  const game = new GamePhysics(spec.entryX - .2);
+  game.pursuit.gap = 7; game.pursuit.idleSeconds = 20; game.pursuit.visibility = 1;
+  try {
+    stepFor(game, .6, { ...idle, suction: true });
+    const before = game.snapshot(1).police.x;
+    game.step(idle);
+    const after = game.snapshot(1);
+    assert.equal(after.loop, null);
+    assert.equal(after.loopCompletions, 0);
+    assert.equal(after.police.mode, 'intercepting');
+    assert.ok(after.police.x > before);
+    assert.ok(after.police.x - before < .2);
+  } finally { game.dispose(); }
+});
+
+test('four police contacts use four health segments and report the fatal police impact', () => {
+  const game = new GamePhysics(10);
+  try {
+    for (let hit = 1; hit <= 4; hit++) {
+      assert.equal(game.pursuit.mode, 'chasing');
+      // Keep contact on the same road segment, rather than on a crest that
+      // the faster car can reach during its post-impact protection period.
+      placeOnRoad(game, 10, 14);
+      game.pursuit.gap = 3.85;
+      game.pursuit.x = game.car.translation().x - game.pursuit.gap;
+      game.pursuit.idleSeconds = 20;
+      game.pursuit.visibility = 1;
+      game.step(idle);
+      assert.equal(game.snapshot(1).health, 100 - hit * 25);
+      assert.equal(game.snapshot(1).impactSerial, hit);
+      assert.equal(game.crashed, hit === 4);
+      if (hit < 4) {
+        for (let i = 0; i < 360 && (game.pursuit.mode !== 'chasing' || game.snapshot(1).invincibilityRemaining > 0); i++) {
+          for (const chunk of game.chunks.values()) for (const hazard of chunk.hazards) hazard.collider.setEnabled(false);
+          game.step(idle);
+          assert.equal(game.snapshot(1).health, 100 - hit * 25);
+        }
+      }
+    }
+    assert.equal(game.snapshot(1).crashReason, 'police');
+  } finally { game.dispose(); }
+});
+
+test('every unlocked weapon can destroy a real road barrier and disable its Rapier collider', () => {
+  const barrier = new TrackGenerator().chunk(2).hazards[0];
+  for (const id of ['machine-gun','twin-gun','gatling-gun','cannon','rocket-launcher','missile-launcher','laser-gun','plasma-cannon']) {
+    const game = new GamePhysics(barrier.x - 14, { id, xp: 950 });
+    try {
+      for (let i=0;i<240&&!game.crashed&&game.car.translation().x<barrier.x+3;i++) {
+        game.step({...idle,suction:true,fire:true,aim:1});
+      }
+      const state = game.snapshot(1);
+      const destroyed = game.chunks.get(2).hazards.find(hazard => hazard.spec.id===barrier.id);
+      assert.equal(destroyed.health,0,id);
+      assert.equal(destroyed.collider.isEnabled(),false,id);
+      assert.equal(game.hazardStates.some(hazard=>hazard.id===barrier.id),false,id);
+      assert.equal(state.health,100,id);
+      assert.ok(state.weapon.destroySerial>=1,id);
+      assert.ok(state.obstaclesDestroyed>=1,id);
+      assert.equal(state.policeDestroyed,0,id);
+      assert.equal(state.runXp,state.obstaclesDestroyed*10,id);
+      assert.equal(game.crashed,false,id);
+    } finally { game.dispose(); }
+  }
+});
+
+test('rear fire stops a real patrol; its disabled wreck cannot damage the player', () => {
+  const game = new GamePhysics(20);
+  game.pursuit.gap=13;game.pursuit.idleSeconds=20;game.pursuit.visibility=1;
+  try {
+    for(let i=0;i<480&&!game.crashed&&!game.snapshot(1).police.disabled;i++) {
+      game.step({...idle,suction:true,fire:true,aim:-1});
+    }
+    let state=game.snapshot(1);
+    assert.equal(state.police.health,0);
+    assert.equal(state.police.disabled,true);
+    assert.equal(state.health,100);
+    assert.equal(state.weapon.hitSerial,12);
+    assert.equal(state.policeDestroyed,1);
+    assert.equal(state.obstaclesDestroyed,0);
+    assert.equal(state.runXp,20);
+    placeOnRoad(game,state.police.x,14);
+    stepFor(game,.25,{...idle,suction:true});
+    state=game.snapshot(1);
+    assert.equal(state.health,100,'disabled police caused contact damage');
+    assert.equal(state.police.disabled,true);
+    assert.equal(state.policeDestroyed,1,'fading police must not award XP twice');
+    assert.equal(state.runXp,20);
+  } finally { game.dispose(); }
+});
+
+test('nonfatal weapon hits and ramming an obstacle award no destruction XP', () => {
+  const barrier=new TrackGenerator().chunk(2).hazards[0];
+  const game=new GamePhysics(barrier.x-14);
+  try {
+    // Let the turret settle its elevation before firing the single test shot.
+    stepFor(game,.1,{...idle,suction:true});
+    game.step({...idle,suction:true,fire:true,aim:1});
+    stepFor(game,1.4,{...idle,suction:true});
+    const state=game.snapshot(1);
+    const hazard=game.chunks.get(2).hazards.find(hazard=>hazard.spec.id===barrier.id);
+    assert.ok(state.weapon.hitSerial>0);
+    assert.equal(hazard.health,2);
+    assert.ok(state.health<100,'fixture must include a real collision');
+    assert.equal(state.obstaclesDestroyed,0);
+    assert.equal(state.policeDestroyed,0);
+    assert.equal(state.runXp,0);
+  } finally {game.dispose();}
+});
+
+test('destroyed obstacles stay destroyed when a chunk reloads and cannot pay XP again', () => {
+  const barrier=new TrackGenerator().chunk(2).hazards[0];
+  const game=new GamePhysics(barrier.x-14);
+  try {
+    for(let i=0;i<160&&!game.snapshot(1).obstaclesDestroyed;i++) game.step({...idle,suction:true,fire:true});
+    assert.equal(game.snapshot(1).obstaclesDestroyed,1);
+    assert.equal(game.snapshot(1).runXp,10);
+    game.ensureChunks(barrier.x+180);
+    assert.equal(game.chunks.has(2),false);
+    game.ensureChunks(barrier.x);
+    const hazard=game.chunks.get(2).hazards.find(hazard=>hazard.spec.id===barrier.id);
+    assert.equal(hazard.health,0);
+    assert.equal(hazard.collider.isEnabled(),false);
+    assert.equal(game.hazardStates.some(hazard=>hazard.id===barrier.id),false);
+    assert.equal(game.snapshot(1).obstaclesDestroyed,1);
+    assert.equal(game.snapshot(1).runXp,10);
+  } finally {game.dispose();}
+});
+
+test('weapons follow a complete loop without changing driving, XP, or suspension stability', () => {
+  const spec=loopsBetween(0,500)[0];
+  const game=new GamePhysics(spec.entryX-.2,{id:'plasma-cannon',xp:950});
+  try {
+    for(let i=0;i<600&&!game.crashed&&!game.snapshot(1).loopCompletions;i++) {
+      game.step({...idle,suction:true,fire:true,aim:-1});
+    }
+    const state=game.snapshot(1);
+    assert.equal(game.crashed,false);
+    assert.equal(state.loopCompletions,1);
+    assert.equal(state.runXp,25);
+    assert.equal(state.health,100);
+    assert.equal(state.grounded,true);
+    assert.ok(state.weapon.ammo<18);
+    assert.equal(game.equipWeapon('laser-gun',699),false);
+    assert.equal(game.snapshot(1).weapon.id,'plasma-cannon');
   } finally { game.dispose(); }
 });

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { GameSnapshot } from './physics';
+import { sprungBodyPose } from './vehicle';
 
 const CAPACITY = 128;
 const BOOST_INTERVAL = 1 / 45;
@@ -59,14 +60,15 @@ export class CarSmoke {
   private emit(snapshot: GameSnapshot, kind: 'boost' | 'jump', nozzle: number, burst = false): void {
     const puff = this.puffs[this.cursor];
     this.cursor = (this.cursor + 1) % CAPACITY;
-    const angle = snapshot.car.angle + snapshot.suspensionPitch;
+    const body = sprungBodyPose(snapshot.car, snapshot.suspensionOffset, snapshot.suspensionPitch);
+    const angle = body.angle;
     const cos = Math.cos(angle);
     const sin = Math.sin(angle);
     const localX = kind === 'boost' ? -2.15 : nozzle * 0.46;
     const localY = kind === 'boost' ? -0.25 : -0.55;
     const spread = (Math.random() - 0.5) * (burst ? 1.8 : 0.65);
-    puff.x = snapshot.car.x + localX * cos - localY * sin;
-    puff.y = snapshot.car.y + snapshot.suspensionOffset + localX * sin + localY * cos;
+    puff.x = body.x + localX * cos - localY * sin;
+    puff.y = body.y + localX * sin + localY * cos;
     puff.z = nozzle > 0 ? 1.96 : 1.70;
     puff.vx = kind === 'boost' ? -cos * 6.3 + snapshot.speed * 0.12 : sin * 4.0 + snapshot.speed * 0.20 + spread;
     puff.vy = kind === 'boost' ? -sin * 6.3 + spread : -cos * 4.0 + spread * 0.3;
@@ -86,7 +88,7 @@ export class CarSmoke {
         this.jumpJetTime = 0.16;
         this.jumpClock = 0;
       }
-      if (snapshot.boostActive && !snapshot.grounded) {
+      if (snapshot.boostActive) {
         this.boostClock += dt;
         while (this.boostClock >= BOOST_INTERVAL) {
           this.emit(snapshot, 'boost', -1);

@@ -26,7 +26,7 @@ test('landing weight compresses over time and recovers without repeated bouncing
     if (suspension.offset < lowest) { lowest = suspension.offset; peakStep = i; }
     highest = Math.max(highest, suspension.offset);
   }
-  assert.ok(lowest < -0.06 && lowest >= -0.10, `compression=${lowest}`);
+  assert.ok(lowest < -0.13 && lowest >= -0.17, `compression=${lowest}`);
   assert.ok(peakStep >= 4 && peakStep < 24, `impact flattened instantly: step=${peakStep}`);
   assert.ok(highest < 0.01, `rebound overshoot=${highest}`);
   assert.ok(Math.abs(suspension.offset) < 0.001 && Math.abs(suspension.pitch) < 0.001);
@@ -56,4 +56,37 @@ test('uneven road loads are stable at different integration rates', () => {
   const finer = run(240);
   assert.ok(Math.abs(normal.offset - finer.offset) < 0.002);
   assert.ok(Math.abs(normal.pitch - finer.pitch) < 0.002);
+});
+
+test('harder landings spend more stroke while progressive stops prevent wheel clipping', () => {
+  const peaks = [];
+  for (const impact of [4, 12, 20]) {
+    const suspension = new VehicleSuspension();
+    suspension.land(impact, 0, 0);
+    let compression = 0;
+    for (let i = 0; i < 240; i++) {
+      suspension.update(flat, 1 / 120);
+      compression = Math.max(compression, -suspension.offset);
+      for (const travel of [suspension.offset + Math.sin(suspension.pitch) * 1.275,
+        suspension.offset - Math.sin(suspension.pitch) * 1.275]) assert.ok(Math.abs(travel) <= .170001);
+    }
+    assert.ok(Math.abs(suspension.offset) < .001, 'body should settle after impact');
+    peaks.push(compression);
+  }
+  assert.ok(peaks[1] > peaks[0] * 1.6, `light/medium compression=${peaks}`);
+  assert.ok(peaks[2] > peaks[1] + .01, `medium/hard compression=${peaks}`);
+});
+
+test('nose-first angular momentum loads the front suspension before the rear', () => {
+  const suspension = new VehicleSuspension();
+  suspension.land(10, -.035, -.01, -.8);
+  let greatestFrontLoad = 0;
+  for (let i = 0; i < 30; i++) {
+    suspension.update(flat, 1 / 120);
+    const rotation = Math.sin(suspension.pitch) * 1.275;
+    const frontCompression = -suspension.offset - rotation;
+    const rearCompression = -suspension.offset + rotation;
+    greatestFrontLoad = Math.max(greatestFrontLoad, frontCompression - rearCompression);
+  }
+  assert.ok(greatestFrontLoad > .06, `front/rear response=${greatestFrontLoad}`);
 });
