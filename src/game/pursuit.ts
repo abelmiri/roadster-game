@@ -1,4 +1,7 @@
 export type PoliceMode = 'chasing' | 'bypassing' | 'rejoining' | 'intercepting';
+export const POLICE_WARNING_SECONDS = 12;
+export const POLICE_CHASE_SECONDS = 14;
+export const POLICE_CLOSING_SPEED = 2.2;
 interface PursuitTarget { x: number; speed: number }
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
@@ -18,6 +21,7 @@ export class PolicePursuit {
   private yielding = false;
 
   get disabled(): boolean { return this.disabledSeconds > 0; }
+  get speed(): number { return this.roadSpeed; }
   disable(seconds: number): void {
     this.disabledSeconds = seconds;
     this.engaged = false;
@@ -33,7 +37,7 @@ export class PolicePursuit {
     if (this.disabled) return;
     // An absent patrol must not silently pass the player during a loop and
     // later materialize ahead when the no-boost warning begins.
-    if (!this.engaged && this.visibility <= 0.01 && this.idleSeconds <= 10) return;
+    if (!this.engaged && this.visibility <= 0.01 && this.idleSeconds <= POLICE_WARNING_SECONDS) return;
     this.engaged = true;
     this.bypassLoop(carX, speed);
   }
@@ -41,7 +45,7 @@ export class PolicePursuit {
   private bypassLoop(carX: number, speed: number): void {
     if (this.mode === 'chasing') this.x = carX - this.gap;
     this.mode = 'bypassing';
-    this.bypassSpeed = clamp(speed + (this.idleSeconds >= 12 ? 2.6 : 0), 8, 23);
+    this.bypassSpeed = clamp(speed + (this.idleSeconds >= POLICE_CHASE_SECONDS ? POLICE_CLOSING_SPEED : 0), 8, 23);
     this.roadSpeed = this.bypassSpeed;
     this.regroupDistance = 8;
   }
@@ -75,7 +79,7 @@ export class PolicePursuit {
       return;
     }
     this.idleSeconds = boosting ? 0 : this.idleSeconds + dt;
-    if (!this.engaged && this.idleSeconds > 10) {
+    if (!this.engaged && this.idleSeconds > POLICE_WARNING_SECONDS) {
       if (this.visibility <= 0.01) {
         // Every new pursuit starts behind, with two seconds of warning before
         // closing. A visible patrol already bypassing a loop stays continuous.
@@ -100,7 +104,7 @@ export class PolicePursuit {
     }
     if (this.mode === 'chasing') {
       if (boosting) this.gap = Math.min(30, this.gap + dt * 10);
-      else if (this.idleSeconds >= 12) this.gap = Math.max(3.5, this.gap - dt * 2.6);
+      else if (this.idleSeconds >= POLICE_CHASE_SECONDS) this.gap = Math.max(3.5, this.gap - dt * POLICE_CLOSING_SPEED);
       else this.gap = Math.min(30, this.gap + dt * 2);
       const nextX = target.x - this.gap;
       this.roadSpeed = clamp((nextX - this.x) / dt, 0, 23);
@@ -115,7 +119,7 @@ export class PolicePursuit {
         this.yielding = false;
       }
     }
-    if (this.mode === 'chasing' && this.gap >= 29 && this.idleSeconds < 10) this.engaged = false;
+    if (this.mode === 'chasing' && this.gap >= 29 && this.idleSeconds < POLICE_WARNING_SECONDS) this.engaged = false;
     this.visibility += ((this.engaged ? 1 : 0) - this.visibility) * (1 - Math.exp(-dt * 1.4));
   }
 

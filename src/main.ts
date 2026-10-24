@@ -2,13 +2,15 @@ import RAPIER from '@dimforge/rapier2d-compat';
 import { FIXED_STEP, GamePhysics, type Controls, type GameSnapshot } from './game/physics';
 import { GameVisuals } from './game/visuals';
 import { GameAudio } from './game/audio';
+import { HudFeedback } from './game/hudFeedback';
 import { ExperienceProgress, LEVEL_XP } from './game/experience';
 import { loopsBetween } from './game/track';
-import { ImpactPause, IMPACT_DAMAGE, IMPACT_PAUSE_SECONDS, MAX_HEALTH } from './game/damage';
+import { ImpactPause, IMPACT_DAMAGE, IMPACT_PAUSE_SECONDS, EXPLOSION_PAUSE_SECONDS, RESTART_DELAY_SECONDS, WRECK_TIME_SCALE, MAX_HEALTH } from './game/damage';
 import { WeaponLoadout, WEAPONS, weaponSpec, type AimDirection } from './game/weapons';
 import { weaponIcon } from './game/weaponIcon';
 import { formatNumber, formatPercent, getLanguage, setLanguage, t, type MessageKey } from './i18n';
 import './styles.css';
+import './hud.css';
 
 type GameStatus = 'loading' | 'ready' | 'running' | 'paused' | 'crashed' | 'error';
 
@@ -19,8 +21,9 @@ app.innerHTML = `
   <div class="game-shell">
     <div id="scene" class="scene"></div>
     <div class="vignette" aria-hidden="true"></div>
+    ${import.meta.env.DEV ? '<div id="fps-counter" class="fps-counter" aria-hidden="true" lang="en" dir="ltr">-- FPS</div>' : ''}
     <header class="topbar">
-      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span data-i18n="brand"></span><span class="brand-edition" data-i18n="edition"></span></div>
+      <div class="brand"><img class="brand-mark app-icon" src="/icons/icon-192.png" width="32" height="32" alt="" /><span data-i18n="brand"></span><span class="brand-edition" data-i18n="edition"></span></div>
       <div class="topbar-tools">
         <div class="hud" aria-live="off">
           <div class="hud-stat"><span class="hud-label" data-i18n="distance"></span><strong id="distance"></strong></div>
@@ -43,10 +46,10 @@ app.innerHTML = `
     <div id="challenge-hint" class="challenge-hint" role="status"></div>
     <div id="xp-toast" class="xp-toast" role="status"></div>
     <div class="resources-panel">
-        <div id="health-panel" class="health-panel"><div class="boost-heading"><span data-i18n="health"></span><span id="health-value"></span></div><div id="health-meter" class="health-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div id="health-fill" class="health-fill"></div></div></div>
-        <div class="boost-panel"><div class="boost-heading"><span data-i18n="boostReserve"></span><span id="boost-value"></span></div><div id="boost-meter" class="boost-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div id="boost-fill" class="boost-fill"></div></div></div>
+        <div id="health-panel" class="health-panel"><div class="boost-heading"><span data-i18n="health"></span><span id="health-value"></span></div><div id="health-meter" class="health-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div id="health-trail" class="health-trail" aria-hidden="true"></div><div id="health-fill" class="health-fill"></div></div></div>
+        <div id="boost-panel" class="boost-panel"><div class="boost-heading"><span data-i18n="boostReserve"></span><span id="boost-value"></span></div><div id="boost-meter" class="boost-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div id="boost-fill" class="boost-fill"></div></div></div>
     </div>
-    <div class="weapon-panel">
+    <div id="weapon-panel" class="weapon-panel">
       <div class="weapon-heading"><span id="weapon-name"></span><strong id="weapon-ammo" dir="ltr"></strong></div>
       <div id="ammo-meter" class="ammo-track" role="progressbar" aria-valuemin="0"><span id="ammo-fill"></span></div>
       <div class="weapon-status-row"><button id="weapon-aim" class="aim-button" type="button"><span id="weapon-direction"></span><kbd lang="en" dir="ltr">Q</kbd></button><span id="weapon-status" role="status"></span></div>
@@ -55,7 +58,7 @@ app.innerHTML = `
       <div class="experience-panel"><div><span id="xp-level"></span><strong id="xp-total"></strong></div><div id="xp-meter" class="xp-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><span id="xp-fill"></span></div></div>
       <div class="speed-panel"><span data-i18n="speed"></span><strong id="speed"></strong><small data-i18n="speedUnit"></small></div>
     </div>
-    <div class="keyboard-guide" aria-hidden="true"><span><kbd lang="en" dir="ltr" data-i18n="spaceKey"></kbd><span data-i18n="jumpGuide"></span></span><span><kbd lang="en" dir="ltr">↓</kbd><span data-i18n="suction"></span></span><span><kbd lang="en" dir="ltr" data-i18n="shiftKey"></kbd><span data-i18n="airBoost"></span></span><span><kbd lang="en" dir="ltr">← / →</kbd><span data-i18n="turnWeapon"></span></span><span><kbd lang="en" dir="ltr">F</kbd><span data-i18n="fire"></span></span></div>
+    <div class="keyboard-guide" aria-hidden="true"><span><kbd lang="en" dir="ltr" data-i18n="spaceKey"></kbd><span data-i18n="jumpGuide"></span></span><span><kbd lang="en" dir="ltr">↓</kbd><span data-i18n="suction"></span></span><span><kbd lang="en" dir="ltr" data-i18n="shiftKey"></kbd><span data-i18n="airBoost"></span></span><span><kbd lang="en" dir="ltr">← / →</kbd><span data-i18n="turnWeapon"></span></span><span><kbd lang="en" dir="ltr">F</kbd><span data-i18n="fire"></span></span><span><kbd lang="en" dir="ltr">1–8</kbd><span data-i18n="selectWeapon"></span></span></div>
     <div class="touch-controls">
       <div class="touch-left"><button id="touch-fire" class="touch-button touch-fire" type="button"><span class="touch-glyph" aria-hidden="true">⌖</span><span data-i18n="fire"></span></button><div class="touch-left-bottom"><button id="touch-suction" class="touch-button touch-suction" type="button"><span class="touch-glyph" aria-hidden="true">↓</span><span data-i18n="suction"></span></button><button id="touch-aim" class="touch-button touch-aim" type="button"><span class="touch-glyph" aria-hidden="true">↔</span></button></div></div>
       <div class="touch-right"><button id="touch-boost" class="touch-button touch-boost" type="button"><span class="touch-glyph" aria-hidden="true">↗</span><span data-i18n="boost"></span></button><button id="touch-jump" class="touch-button touch-jump" type="button"><span class="touch-glyph" aria-hidden="true">↑</span><span data-i18n="jump"></span></button></div>
@@ -83,6 +86,11 @@ app.innerHTML = `
         <div id="overlay-controls" class="control-summary"><div><span data-number="1"></span><strong data-i18n="jump"></strong><small data-i18n="jumpSummary"></small></div><div><span data-number="2"></span><strong data-i18n="suction"></strong><small data-i18n="suctionSummary"></small></div><div><span data-number="3"></span><strong data-i18n="boost"></strong><small data-i18n="boostSummary"></small></div></div>
         <button id="primary-button" class="primary-button" type="button"><span id="primary-label"></span><span class="button-arrow" aria-hidden="true">↗</span></button>
         <div id="overlay-foot" class="overlay-foot"></div>
+        <footer class="app-credits">
+          <a href="https://github.com/abelmiri" target="_blank" rel="noopener noreferrer" dir="ltr">© 2026 abelmiri</a>
+          <a href="mailto:miri1888@gmail.com" dir="ltr">miri1888@gmail.com</a>
+          <a href="/legal/index.html" target="_blank" rel="noopener noreferrer" data-i18n="legalCredits"></a>
+        </footer>
       </div>
       <div class="overlay-side" aria-hidden="true"><span data-i18n="sideIndex"></span><span data-i18n="sideMotto"></span></div>
     </div>
@@ -91,13 +99,35 @@ app.innerHTML = `
   </div>
 `;
 
+const elementCache = new Map<string, HTMLElement>();
 const element = <T extends HTMLElement>(id: string): T => {
-  const result = document.getElementById(id);
+  const result = elementCache.get(id) ?? document.getElementById(id);
   if (!result) throw new Error(`Missing #${id}`);
+  elementCache.set(id, result);
   return result as T;
 };
 
 const sceneElement = element<HTMLDivElement>('scene');
+const updateFps = import.meta.env.DEV ? (() => {
+  const label = element('fps-counter');
+  let previousFrame: number | undefined;
+  let elapsed = 0;
+  let frames = 0;
+  return (now: number): void => {
+    const duration = previousFrame === undefined ? 0 : now - previousFrame;
+    previousFrame = now;
+    if (duration <= 0 || duration > 1000 || document.hidden) {
+      elapsed = frames = 0;
+      return;
+    }
+    elapsed += duration;
+    frames++;
+    if (elapsed >= 500) {
+      label.textContent = `${Math.round(frames * 1000 / elapsed)} FPS`;
+      elapsed = frames = 0;
+    }
+  };
+})() : undefined;
 const overlay = element<HTMLDivElement>('overlay');
 const title = element<HTMLHeadingElement>('overlay-title');
 const eyebrow = element<HTMLSpanElement>('eyebrow');
@@ -139,9 +169,17 @@ const impactFlash = element('impact-flash');
 const healthPanel = element('health-panel');
 const healthValue = element('health-value');
 const healthFill = element('health-fill');
+const healthTrail = element('health-trail');
 const healthMeter = element('health-meter');
+const hudFeedback = new HudFeedback({
+  health: healthValue, healthPanel, air: boostValue, airPanel: element('boost-panel'), speed: speedLabel,
+  xp: xpTotal, level: xpLevel, xpFill, distance: distanceLabel, best: bestLabel,
+  ammo: element('weapon-ammo'), weaponPanel: element('weapon-panel'),
+});
 const impactPause = new ImpactPause();
+const explosionPause = new ImpactPause();
 let lastImpactSerial = 0;
+let lastExplosionSerial = 0;
 let rewardTime = 0;
 let lastReward = 0;
 let lastRewardMessage: MessageKey = 'loopReward';
@@ -150,7 +188,9 @@ let status: GameStatus = 'loading';
 let physics: GamePhysics;
 let visuals: GameVisuals;
 let accumulator = 0;
+let holdInterpolation = false;
 let lastFrame = performance.now();
+let restartAvailableAt = 0;
 let jumpQueued = false;
 let currentDistrict = 0;
 const warnedChallenges = new Set<string>();
@@ -195,34 +235,52 @@ function updatePauseButton(): void {
   pauseButton.disabled = status !== 'running' && status !== 'paused';
 }
 
+function textIfChanged(node: HTMLElement, value: string): void { if (node.textContent !== value) node.textContent = value; }
+function htmlIfChanged(node: HTMLElement, value: string): void { if (node.innerHTML !== value) node.innerHTML = value; }
+function fillIfChanged(node: HTMLElement, value: number): void {
+  const transform = `scaleX(${Math.max(0, Math.min(1, value))})`;
+  if (node.style.transform !== transform) node.style.transform = transform;
+}
+function attributeIfChanged(node: HTMLElement, name: string, value: string): void {
+  if (node.getAttribute(name) !== value) node.setAttribute(name, value);
+}
+
 function updateHud(snapshot?: GameSnapshot): void {
-  distanceLabel.innerHTML = formatDistance(snapshot?.distance ?? 0);
-  bestLabel.innerHTML = formatDistance(best);
   const charge = snapshot?.boost ?? 1;
-  const percentage = Math.round(charge * 100);
-  boostFill.style.width = `${percentage}%`;
-  boostValue.textContent = formatPercent(charge);
-  boostMeter.setAttribute('aria-valuenow', String(percentage));
-  boostMeter.setAttribute('aria-label', t('boostReserve'));
-  boostMeter.setAttribute('aria-valuetext', t('boostMeter', { charge: formatPercent(charge) }));
   const health = snapshot?.health ?? MAX_HEALTH;
-  healthFill.style.width = `${health}%`;
-  healthValue.textContent = formatPercent(health / MAX_HEALTH);
-  healthMeter.setAttribute('aria-valuenow', String(health));
-  healthMeter.setAttribute('aria-label', t('health'));
-  healthMeter.setAttribute('aria-valuetext', t('healthMeter', { health: formatPercent(health / MAX_HEALTH) }));
+  const weapon = snapshot?.weapon;
+  const spec = weaponSpec(weapon?.id ?? loadout.selected);
+  const ammo = weapon?.ammo ?? spec.ammo;
+  const speed = hudFeedback.update({ health, boost: Math.round(charge * 100),
+    speed: Math.max(0, snapshot?.speed ?? 0) * 3.6, xp: experience.total, level: experience.level,
+    progress: experience.levelProgress / LEVEL_XP, distance: snapshot?.distance ?? 0, best,
+    ammo, capacity: spec.ammo, weapon: spec.id }, performance.now(), status === 'running' || status === 'crashed');
+  htmlIfChanged(distanceLabel, formatDistance(snapshot?.distance ?? 0));
+  htmlIfChanged(bestLabel, formatDistance(best));
+  const percentage = Math.round(charge * 100);
+  fillIfChanged(boostFill, charge);
+  textIfChanged(boostValue, formatPercent(charge));
+  attributeIfChanged(boostMeter, 'aria-valuenow', String(percentage));
+  attributeIfChanged(boostMeter, 'aria-label', t('boostReserve'));
+  attributeIfChanged(boostMeter, 'aria-valuetext', t('boostMeter', { charge: formatPercent(charge) }));
+  fillIfChanged(healthFill, health / MAX_HEALTH);
+  fillIfChanged(healthTrail, health / MAX_HEALTH);
+  textIfChanged(healthValue, formatPercent(health / MAX_HEALTH));
+  attributeIfChanged(healthMeter, 'aria-valuenow', String(health));
+  attributeIfChanged(healthMeter, 'aria-label', t('health'));
+  attributeIfChanged(healthMeter, 'aria-valuetext', t('healthMeter', { health: formatPercent(health / MAX_HEALTH) }));
   healthPanel.classList.toggle('is-low', health <= IMPACT_DAMAGE);
   impactFlash.style.opacity = String(status === 'running' && impactPause.active
     ? 0.55 * Math.sqrt(impactPause.remaining / IMPACT_PAUSE_SECONDS) : 0);
-  speedLabel.textContent = formatNumber(Math.round(Math.max(0, snapshot?.speed ?? 0) * 3.6), 2);
-  districtLabel.textContent = t(districtKeys[currentDistrict]);
-  xpLevel.textContent = t('xpLevel', { level: formatNumber(experience.level) });
-  xpTotal.textContent = `${formatNumber(experience.total)} XP`;
-  xpFill.style.width = `${experience.levelProgress / LEVEL_XP * 100}%`;
-  xpMeter.setAttribute('aria-valuenow', String(experience.levelProgress));
-  xpMeter.setAttribute('aria-label', t('xpProgress', { xp: formatNumber(experience.levelProgress), target: formatNumber(LEVEL_XP) }));
+  textIfChanged(speedLabel, formatNumber(speed, 2));
+  textIfChanged(districtLabel, t(districtKeys[currentDistrict]));
+  textIfChanged(xpLevel, t('xpLevel', { level: formatNumber(experience.level) }));
+  textIfChanged(xpTotal, `${formatNumber(experience.total)} XP`);
+  fillIfChanged(xpFill, experience.levelProgress / LEVEL_XP);
+  attributeIfChanged(xpMeter, 'aria-valuenow', String(experience.levelProgress));
+  attributeIfChanged(xpMeter, 'aria-label', t('xpProgress', { xp: formatNumber(experience.levelProgress), target: formatNumber(LEVEL_XP) }));
   const rewardText = t(lastRewardMessage, { xp: formatNumber(lastReward) });
-  if (xpToast.textContent !== rewardText) xpToast.textContent = rewardText;
+  if (xpToast.textContent !== rewardText) textIfChanged(xpToast, rewardText);
   const police = snapshot?.police;
   pursuitGlow.style.opacity = String(status === 'running' ? (police?.pressure ?? 0) * 0.7 : 0);
   pursuitGlow.classList.toggle('is-ahead', Boolean(police && police.gap < 0));
@@ -236,24 +294,21 @@ function updateHud(snapshot?: GameSnapshot): void {
     else if (nextLoop) hint = t('loopAhead');
   }
   // Keep live-region announcements stable instead of changing every frame.
-  if (challengeHint.textContent !== hint) challengeHint.textContent = hint;
+  if (challengeHint.textContent !== hint) textIfChanged(challengeHint, hint);
   challengeHint.classList.toggle('is-visible', Boolean(hint));
   challengeHint.classList.toggle('is-danger', impactPause.active || Boolean(!snapshot?.loop && police && Math.abs(police.gap) < 14));
   xpToast.classList.toggle('is-visible', rewardTime > 0);
   xpToast.hidden = rewardTime <= 0;
   challengeHint.hidden = !hint;
-  const weapon = snapshot?.weapon;
-  const spec = weaponSpec(weapon?.id ?? loadout.selected);
-  const ammo = weapon?.ammo ?? spec.ammo;
-  element('weapon-name').textContent = weaponName(spec.id);
-  element('weapon-ammo').textContent = `${formatNumber(ammo)} / ${formatNumber(spec.ammo)}`;
-  element('ammo-fill').style.width = `${ammo / spec.ammo * 100}%`;
-  element('ammo-meter').setAttribute('aria-valuemax', String(spec.ammo));
-  element('ammo-meter').setAttribute('aria-valuenow', String(ammo));
-  element('ammo-meter').setAttribute('aria-label', `${t('ammo')} · ${weaponName(spec.id)}`);
-  element('weapon-direction').textContent = t(aimDirection === 1 ? 'aimFront' : 'aimBack');
+  textIfChanged(element('weapon-name'), weaponName(spec.id));
+  textIfChanged(element('weapon-ammo'), `${formatNumber(ammo)} / ${formatNumber(spec.ammo)}`);
+  fillIfChanged(element('ammo-fill'), ammo / spec.ammo);
+  attributeIfChanged(element('ammo-meter'), 'aria-valuemax', String(spec.ammo));
+  attributeIfChanged(element('ammo-meter'), 'aria-valuenow', String(ammo));
+  attributeIfChanged(element('ammo-meter'), 'aria-label', `${t('ammo')} · ${weaponName(spec.id)}`);
+  textIfChanged(element('weapon-direction'), t(aimDirection === 1 ? 'aimFront' : 'aimBack'));
   const weaponStatus = t(!ammo ? 'ammoEmpty' : weapon && weapon.turnRemaining > .001 ? 'turning' : 'weaponReady');
-  if (element('weapon-status').textContent !== weaponStatus) element('weapon-status').textContent = weaponStatus;
+  if (element('weapon-status').textContent !== weaponStatus) textIfChanged(element('weapon-status'), weaponStatus);
   element('weapon-status').classList.toggle('is-empty', ammo === 0);
   element('touch-fire').classList.toggle('is-empty', ammo === 0);
   if (!armory.hidden && displayedArmoryXp !== experience.total) refreshArmory();
@@ -261,6 +316,7 @@ function updateHud(snapshot?: GameSnapshot): void {
 
 function setOverlay(mode: 'ready' | 'paused' | 'crashed'): void {
   overlay.classList.add('is-visible');
+  overlay.classList.toggle('is-game-over', mode === 'crashed');
   overlay.classList.toggle('is-compact', mode !== 'ready');
   controlsSummary.hidden = mode !== 'ready';
   const prefix = mode === 'ready' ? 'ready' : mode === 'paused' ? 'paused' : 'crashed';
@@ -271,7 +327,17 @@ function setOverlay(mode: 'ready' | 'paused' | 'crashed'): void {
     : t(mode === 'ready' ? 'readyDescription' : 'pausedDescription');
   primaryLabel.textContent = t(mode === 'ready' ? 'start' : mode === 'paused' ? 'resumeRun' : 'runAgain');
   overlayFoot.innerHTML = t(`${prefix}Foot`);
+  updateRestartUi();
   updatePauseButton();
+}
+
+function updateRestartUi(now = performance.now()): void {
+  const seconds = Math.max(0, Math.ceil((restartAvailableAt - now) / 1000));
+  const locked = status === 'crashed' && seconds > 0;
+  if (primaryButton.disabled !== locked) primaryButton.disabled = locked;
+  if (status !== 'crashed') return;
+  textIfChanged(primaryLabel, locked ? t('restartIn', { seconds: formatNumber(seconds) }) : t('runAgain'));
+  htmlIfChanged(overlayFoot, locked ? '' : t('crashedFoot'));
 }
 
 function updateLanguage(): void {
@@ -311,19 +377,25 @@ function clearHeld(): void {
 
 function start(): void {
   if (status === 'loading' || status === 'error' || status === 'running') return;
+  if (status === 'crashed' && performance.now() < restartAvailableAt) return;
   const resuming = status === 'paused';
   if (status === 'crashed') {
+    restartAvailableAt = 0;
+    primaryButton.disabled = false;
     physics.dispose();
     physics = new GamePhysics(7, { id: loadout.selected, xp: experience.total });
     audio.reset();
     accumulator = 0;
+    holdInterpolation = false;
     jumpQueued = false;
     currentDistrict = 0;
     warnedChallenges.clear();
     experience.resetRun();
     rewardTime = 0;
     impactPause.reset();
+    explosionPause.reset();
     lastImpactSerial = 0;
+    lastExplosionSerial = 0;
     clearHeld();
     aimDirection = 1;
   }
@@ -348,6 +420,11 @@ function pause(): void {
 function crash(): void {
   if (status !== 'running') return;
   status = 'crashed';
+  restartAvailableAt = performance.now() + RESTART_DELAY_SECONDS * 1000;
+  impactPause.reset();
+  explosionPause.reset();
+  accumulator = 0;
+  holdInterpolation = false;
   clearHeld();
   // The final obstacle hit already played its impact sound before hit stop.
   if (physics.snapshot(1).health > 0) audio.play('crash');
@@ -422,12 +499,17 @@ function closeArmory(): void {
 }
 armoryButton.addEventListener('click', openArmory);
 armoryClose.addEventListener('click', closeArmory);
-for (const spec of WEAPONS) element(`equip-${spec.id}`).addEventListener('click', () => {
-  if (!loadout.select(spec.id, experience.total)) return;
+function selectWeapon(index: number): void {
+  const spec = WEAPONS[index];
+  if (!physics || !spec || !loadout.select(spec.id, experience.total)) return;
   physics.equipWeapon(spec.id, experience.total);
   refreshArmory(); updateHud(physics.snapshot(1));
   void audio.unlock().then(() => audio.play('click'));
-});
+}
+for (const [index, spec] of WEAPONS.entries()) {
+  element(`equip-${spec.id}`).setAttribute('aria-keyshortcuts', String(index + 1));
+  element(`equip-${spec.id}`).addEventListener('click', () => selectWeapon(index));
+}
 
 const actionForKey = (code: string): keyof typeof held | null => {
   if (['Space', 'ArrowUp', 'KeyW'].includes(code)) return 'jump';
@@ -446,6 +528,19 @@ function toggleSound(): void {
 }
 
 window.addEventListener('keydown', (event) => {
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  const target = event.target;
+  if (target instanceof HTMLElement &&
+      (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)) return;
+  const slot = /^(?:Digit|Numpad)([1-8])$/.exec(event.code);
+  const keySlot = event.key?.length === 1 ? Math.max('12345678'.indexOf(event.key),
+    '۱۲۳۴۵۶۷۸'.indexOf(event.key), '١٢٣٤٥٦٧٨'.indexOf(event.key)) : -1;
+  const weaponSlot = slot ? Number(slot[1]) - 1 : keySlot;
+  if (weaponSlot >= 0) {
+    event.preventDefault();
+    if (!event.repeat) selectWeapon(weaponSlot);
+    return;
+  }
   if (!armory.hidden) {
     if (event.code === 'Escape') { event.preventDefault(); closeArmory(); }
     if (event.code === 'Tab') {
@@ -521,13 +616,14 @@ function frame(now: number): void {
 }
 
 function renderFrame(now: number): void {
+  updateFps?.(now);
   const wallDelta = Math.max(0, (now - lastFrame) / 1000);
   const delta = Math.min(wallDelta, 0.06);
   lastFrame = now;
   let playDelta = 0;
   if (status === 'running') {
-    playDelta = Math.min(impactPause.consume(wallDelta), 0.06);
-    if (physics.crashed && !impactPause.active) crash();
+    playDelta = Math.min(impactPause.consume(wallDelta), explosionPause.consume(wallDelta), 0.06);
+    if (physics.crashed) crash();
   }
   if (status === 'running' && playDelta > 0) {
     accumulator = Math.min(accumulator + playDelta, 0.15);
@@ -542,23 +638,44 @@ function renderFrame(now: number): void {
         aim: aimDirection,
       };
       physics.step(controls);
+      holdInterpolation = false;
       jumpQueued = false;
       accumulator -= FIXED_STEP;
       steps++;
-      const state = physics.snapshot(1);
-      if (state.impactSerial > lastImpactSerial) {
-        lastImpactSerial = state.impactSerial;
-        impactPause.start();
-        accumulator = 0;
+      const impacted = physics.impactSerial > lastImpactSerial;
+      const exploded = physics.explosionSerial > lastExplosionSerial;
+      if (impacted) {
+        lastImpactSerial = physics.impactSerial;
         audio.play('impact');
+      }
+      if (exploded) {
+        lastExplosionSerial = physics.explosionSerial;
+        audio.play('explosion');
+      }
+      // A fatal hit shows the menu immediately and starts the loose wreck;
+      // it must not inherit either kind of hit stop from the living car.
+      if (physics.crashed) { crash(); break; }
+      if (impacted || exploded) {
+        if (impacted) impactPause.start();
+        if (exploded) explosionPause.start(EXPLOSION_PAUSE_SECONDS);
+        accumulator = 0;
+        holdInterpolation = true;
         break;
       }
-      if (physics.crashed) { crash(); break; }
     }
   }
 
-  const snapshot = physics.snapshot(impactPause.active || physics.crashed ? 1 : Math.min(1, accumulator / FIXED_STEP));
-  const simulating = status === 'running' && !impactPause.active;
+  if (status === 'crashed') {
+    updateRestartUi();
+    accumulator = Math.min(accumulator + delta * WRECK_TIME_SCALE, 0.15);
+    while (accumulator >= FIXED_STEP) {
+      physics.stepWreck();
+      accumulator -= FIXED_STEP;
+    }
+  }
+  const frozen = impactPause.active || explosionPause.active;
+  const snapshot = physics.snapshot(frozen || holdInterpolation ? 1 : Math.min(1, accumulator / FIXED_STEP));
+  const simulating = status === 'running' && !frozen;
   const gained = experience.collect(snapshot.loopCompletions, snapshot.obstaclesDestroyed, snapshot.policeDestroyed);
   if (gained) {
     lastReward = gained;
@@ -566,7 +683,10 @@ function renderFrame(now: number): void {
     rewardTime = 3;
     audio.play('record');
   } else if (simulating) rewardTime = Math.max(0, rewardTime - playDelta);
-  visuals.render(snapshot, physics, delta, simulating, impactPause.active);
+  const sceneDelta = status === 'crashed' ? delta * WRECK_TIME_SCALE : status === 'running' ? playDelta : delta;
+  const cameraDelta = status === 'running' || status === 'crashed' ? wallDelta : 0;
+  visuals.render(snapshot, physics, sceneDelta,
+    simulating || status === 'crashed', frozen, cameraDelta);
   audio.update(snapshot, simulating);
   if (simulating) {
     const warningDistance = Math.max(7, snapshot.speed * 0.85);

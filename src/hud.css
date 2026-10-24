@@ -1,0 +1,125 @@
+/* Indicator dimensions grow together; controls and viewport anchors stay put. */
+:root{--hud-scale:1.25;--hud-resource-width:calc(188px * var(--hud-scale));--hud-weapon-width:calc(218px * var(--hud-scale));--hud-edge:clamp(28px,4.2vw,74px)}
+.hud{gap:calc(18px * var(--hud-scale))}
+.hud-stat{min-width:calc(80px * var(--hud-scale))}
+.hud-label{font-size:calc(9px * var(--hud-scale))}
+.hud-stat strong{font-size:calc(24px * var(--hud-scale))}
+.hud-stat small{font-size:calc(12px * var(--hud-scale))}
+.hud-divider{height:calc(31px * var(--hud-scale))}
+.resources-panel{width:var(--hud-resource-width);gap:calc(13px * var(--hud-scale))}
+.boost-heading{font-size:calc(9px * var(--hud-scale));margin-bottom:calc(8px * var(--hud-scale))}
+.health-track{height:calc(8px * var(--hud-scale))}
+.boost-track{height:calc(5px * var(--hud-scale))}
+.weapon-panel{width:var(--hud-weapon-width)}
+.weapon-heading{font-size:calc(11px * var(--hud-scale));gap:calc(12px * var(--hud-scale));margin-bottom:calc(8px * var(--hud-scale))}
+.weapon-heading>span{min-width:0;line-height:1.4}
+.weapon-heading strong{font-size:calc(15px * var(--hud-scale))}
+.ammo-track{height:calc(5px * var(--hud-scale))}
+.weapon-status-row{font-size:calc(9px * var(--hud-scale));gap:calc(8px * var(--hud-scale));margin-top:calc(9px * var(--hud-scale))}
+.aim-button{font-size:calc(10px * var(--hud-scale));gap:calc(12px * var(--hud-scale));min-height:calc(30px * var(--hud-scale));padding:calc(4px * var(--hud-scale)) calc(8px * var(--hud-scale))}
+.aim-button kbd{font-size:calc(9px * var(--hud-scale))}
+.bottom-hud{gap:calc(24px * var(--hud-scale))}
+.experience-panel{width:calc(164px * var(--hud-scale))}
+.experience-panel>div:first-child{font-size:calc(9px * var(--hud-scale));gap:calc(16px * var(--hud-scale));margin-bottom:calc(7px * var(--hud-scale))}
+.experience-panel strong{font-size:calc(12px * var(--hud-scale))}
+.xp-track{height:calc(3px * var(--hud-scale))}
+.speed-panel{gap:calc(4px * var(--hud-scale));padding-left:calc(18px * var(--hud-scale))}
+.speed-panel span{font-size:calc(9px * var(--hud-scale));margin-right:calc(5px * var(--hud-scale))}
+.speed-panel strong{font-size:calc(23px * var(--hud-scale))}
+.speed-panel small{font-size:calc(9px * var(--hud-scale))}
+#distance,#best,#health-value,#boost-value,#speed,#xp-total,#xp-level,#weapon-ammo{display:inline-block;font-variant-numeric:tabular-nums;transform-origin:center}
+#health-value,#boost-value{font-weight:800}
+
+/* Meter motion uses compositor transforms. The health trail makes lost
+   segments visible before they settle to the exact new value. */
+.health-fill,.health-trail,.boost-fill,.xp-track>span,.ammo-track>span{width:100%;transform-origin:left center;transition:transform .18s ease-out}
+.health-fill,.health-trail{position:absolute;inset:0;height:100%}
+.health-trail{z-index:0;background:#ffe9b9a6;transition:transform .65s cubic-bezier(.2,.7,.2,1) .18s}
+.health-fill{z-index:1;transition:transform .16s ease-out,background .2s}
+.health-track:after{z-index:2}
+.health-panel.is-restoring .health-trail{transition-duration:.2s;transition-delay:0s}
+.health-panel.is-low #health-value{color:#ffb7c5;text-shadow:0 0 12px #ff567e66}
+.boost-fill{position:relative;transition:transform .18s linear,background .2s}
+.boost-fill:after{content:"";position:absolute;inset:0;background:linear-gradient(105deg,transparent 30%,#ffffff99 50%,transparent 70%);opacity:0;transform:translateX(-110%);pointer-events:none}
+.boost-panel.is-refilling .boost-fill:after{opacity:.7;animation:hud-airflow 1.4s ease-in-out infinite}
+.boost-panel.is-refilling .boost-heading{color:#bdffed}
+.boost-panel.is-draining .boost-fill{background:linear-gradient(90deg,#e6ad62,#fff0bc)}
+.boost-panel.is-depleted #boost-value{color:#ffd194}
+.weapon-panel.is-low-ammo #weapon-ammo{color:#ffd194}
+.xp-track>span{transition:none}
+.ammo-track>span{transition:transform .12s linear}
+@keyframes hud-airflow{to{transform:translateX(110%)}}
+
+html[lang=fa] .hud-stat{min-width:calc(87px * var(--hud-scale))}
+html[lang=fa] .hud-label{font-size:calc(10px * var(--hud-scale))}
+html[lang=fa] .hud-stat strong{font-size:calc(24px * var(--hud-scale))}
+html[lang=fa] .hud-stat small{font-size:calc(11px * var(--hud-scale))}
+html[lang=fa] .boost-heading{font-size:calc(11px * var(--hud-scale))}
+html[lang=fa] .speed-panel span{font-size:calc(11px * var(--hud-scale));margin-right:0;margin-left:calc(5px * var(--hud-scale))}
+html[lang=fa] .speed-panel small{font-size:calc(10px * var(--hud-scale))}
+html[lang=fa] .experience-panel>div:first-child{font-size:calc(11px * var(--hud-scale))}
+html[lang=fa] .weapon-heading{font-size:calc(13px * var(--hud-scale))}
+html[lang=fa] .weapon-status-row,html[lang=fa] .aim-button{font-size:calc(11px * var(--hud-scale))}
+
+@media(max-width:900px) and (orientation:landscape),(pointer:coarse) and (orientation:landscape){
+  :root{--hud-resource-width:calc(140px * var(--hud-scale))}
+  .resources-panel{gap:calc(10px * var(--hud-scale))}
+  .resources-panel .boost-heading{margin-bottom:calc(5px * var(--hud-scale))}
+  .health-track{height:calc(6px * var(--hud-scale))}
+  .bottom-hud{gap:calc(10px * var(--hud-scale))}
+  .speed-panel{padding-left:calc(10px * var(--hud-scale))}
+  .challenge-hint,.xp-toast{left:calc(50% + (var(--hud-resource-width) - var(--hud-weapon-width)) * .5);max-width:calc(100vw - var(--hud-resource-width) - var(--hud-weapon-width) - var(--hud-edge) * 2 - 16px)}
+}
+@media(max-width:900px){
+  :root{--hud-resource-width:calc(160px * var(--hud-scale));--hud-weapon-width:calc(190px * var(--hud-scale));--hud-edge:26px}
+  .hud{gap:calc(12px * var(--hud-scale))}
+  .hud-stat{min-width:calc(66px * var(--hud-scale))}
+  .hud-label{font-size:calc(8px * var(--hud-scale))}
+  .hud-stat strong{font-size:calc(18px * var(--hud-scale))}
+  html[lang=fa] .hud-stat{min-width:calc(67px * var(--hud-scale))}
+  html[lang=fa] .hud-stat strong{font-size:calc(20px * var(--hud-scale))}
+  .experience-panel{width:calc(133px * var(--hud-scale))}
+  .weapon-heading{font-size:calc(10px * var(--hud-scale))}
+  .weapon-heading strong{font-size:calc(13px * var(--hud-scale))}
+  .weapon-status-row{font-size:calc(8px * var(--hud-scale))}
+  .fps-counter{top:max(1px,env(safe-area-inset-top));font-size:9px;line-height:1}
+}
+@media(max-width:700px){
+  .hud{gap:calc(10px * var(--hud-scale))}
+  .hud-stat{min-width:calc(52px * var(--hud-scale))}
+  .hud-stat strong{font-size:calc(17px * var(--hud-scale))}
+  .hud-divider{height:calc(26px * var(--hud-scale))}
+  html[lang=fa] .hud-stat{min-width:calc(59px * var(--hud-scale))}
+  html[lang=fa] .hud-stat strong{font-size:calc(18px * var(--hud-scale))}
+  html[lang=fa] .hud-label{font-size:calc(9px * var(--hud-scale))}
+}
+@media(max-height:580px){
+  :root{--hud-resource-width:calc(140px * var(--hud-scale));--hud-weapon-width:calc(175px * var(--hud-scale))}
+  .resources-panel{gap:calc(9px * var(--hud-scale))}
+  .experience-panel{width:calc(115px * var(--hud-scale))}
+  .experience-panel>div:first-child{margin-bottom:calc(4px * var(--hud-scale))}
+  .weapon-heading{margin-bottom:calc(5px * var(--hud-scale))}
+  .weapon-status-row{margin-top:calc(5px * var(--hud-scale))}
+  .aim-button{min-height:calc(26px * var(--hud-scale))}
+  html[lang=fa] .bottom-hud{gap:calc(10px * var(--hud-scale))}
+  html[lang=fa] .boost-heading{font-size:calc(10px * var(--hud-scale))}
+  html[lang=fa] .speed-panel strong{font-size:calc(21px * var(--hud-scale))}
+  html[lang=fa] .speed-panel small{font-size:calc(9px * var(--hud-scale))}
+}
+@media(max-width:650px) and (orientation:landscape){
+  :root{--hud-weapon-width:calc(160px * var(--hud-scale))}
+  .experience-panel{width:calc(100px * var(--hud-scale))}
+  .weapon-heading,html[lang=fa] .weapon-heading{font-size:calc(11px * var(--hud-scale))}
+  .weapon-status-row,html[lang=fa] .weapon-status-row{font-size:calc(9px * var(--hud-scale))}
+}
+@media(max-height:370px){
+  .district-tag{display:none}
+  .resources-panel,.weapon-panel{top:64px}
+  .resources-panel{gap:calc(7px * var(--hud-scale))}
+  .resources-panel .boost-heading{font-size:calc(8px * var(--hud-scale))}
+  html[lang=fa] .resources-panel .boost-heading{font-size:calc(9px * var(--hud-scale))}
+}
+@media(prefers-reduced-motion:reduce){
+  .health-fill,.health-trail,.boost-fill,.xp-track>span,.ammo-track>span{transition:none}
+  .boost-fill:after{animation:none!important;opacity:0!important}
+}

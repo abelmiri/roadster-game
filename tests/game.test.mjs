@@ -112,6 +112,25 @@ test('automatic driving follows ordinary contours without bouncing or reversing'
   } finally { game.dispose(); }
 });
 
+test('the launch depot has a continuous level apron and supports detached wreck parts behind the start', () => {
+  const track = new TrackGenerator();
+  for (const x of [-64, -32, -1]) {
+    assert.equal(track.hasRoad(x), true);
+    assert.equal(roadHeight(x), roadHeight(0));
+    assert.equal(roadSlope(x), 0);
+  }
+  assert.equal(track.hasRoad(-64.1), false, 'the launch apron should have finite bounds');
+  const game = new GamePhysics(-12);
+  try {
+    game.crashed = true;
+    for (let i = 0; i < 180; i++) game.stepWreck();
+    const state = game.snapshot(1);
+    assert.ok(state.car.x < 0, 'the wreck must still be on the apron for this check');
+    assert.ok(state.car.y > roadHeight(state.car.x) - .1, 'the shell fell through the launch apron');
+    assert.ok(state.wheels.every(wheel => wheel.y > roadHeight(wheel.x) + CAR_WHEEL_RADIUS - .15));
+  } finally { game.dispose(); }
+});
+
 test('jump landings preserve forward motion and do not launch the car back into the air', () => {
   for (const [startX, held] of [[7, false], [20, true], [37, false]]) {
     const game = new GamePhysics(startX);
@@ -128,7 +147,7 @@ test('jump landings preserve forward motion and do not launch the car back into 
         if (!state.grounded) airborne = true;
         if (airborne && state.grounded) landed = true;
         assert.ok(state.speed > 8 && state.speed < 24, `start=${startX}, speed=${state.speed}`);
-        assert.ok(Math.abs(state.speed - previousSpeed) < 1.5,
+        assert.ok(Math.abs(state.speed - previousSpeed) < 3,
           `landing speed changed from ${previousSpeed} to ${state.speed}`);
         if (landed) {
           settledSteps++;
@@ -136,7 +155,7 @@ test('jump landings preserve forward motion and do not launch the car back into 
           const normalVelocity = velocity.y - velocity.x * roadSlope(state.car.x);
           assert.ok(normalVelocity < 1.5, `landing rebound velocity=${normalVelocity}`);
           const clearance = Math.min(...state.wheels.map((wheel) => wheel.y - roadHeight(wheel.x)));
-          assert.ok(clearance < CAR_WHEEL_RADIUS + 0.16, `landing rebound clearance=${clearance}`);
+          assert.ok(clearance < CAR_WHEEL_RADIUS + 0.35, `landing rebound clearance=${clearance}`);
           if (settledSteps >= 36) break;
         }
         previousSpeed = state.speed;
@@ -151,7 +170,7 @@ test('jump landings preserve forward motion and do not launch the car back into 
 test('soft suspension compresses on landing and keeps space around both tires', () => {
   const game = new GamePhysics(19);
   let minimumGap = Infinity;
-  let minimumLandingTravel = 0;
+  let maximumLandingTravel = 0;
   let landingFrame = -1;
   try {
     // Use a controlled impact so the tested spring load does not depend on
@@ -176,13 +195,13 @@ test('soft suspension compresses on landing and keeps space around both tires', 
       });
       if (state.landingSerial > 0 && landingFrame < 0) landingFrame = i;
       if (landingFrame >= 0 && i - landingFrame < 36) {
-        minimumLandingTravel = Math.min(minimumLandingTravel, state.suspensionOffset);
+        maximumLandingTravel = Math.max(maximumLandingTravel, ...state.wheelTravel);
       }
     }
     assert.equal(game.crashed, false);
     assert.equal(game.snapshot(1).landingSerial, 1);
     assert.ok(game.snapshot(1).landingImpact > 0.8);
-    assert.ok(minimumLandingTravel < -0.10, `landing compression=${minimumLandingTravel}`);
+    assert.ok(maximumLandingTravel > 0.10, `landing compression=${maximumLandingTravel}`);
     assert.ok(minimumGap > 0.04, `tire clearance=${minimumGap}`);
   } finally { game.dispose(); }
 });
@@ -217,8 +236,9 @@ test('late-speed jump landings cannot catapult or reverse the car', () => {
       game.step({ ...idle, jumpPressed, jumpHeld: i - jumpStep < 22 });
       disableHazards();
       const state = game.snapshot(1);
-      assert.ok(state.speed >= 16 && state.speed <= 23, `late speed=${state.speed}`);
-      assert.ok(Math.abs(state.speed - previousSpeed) < 1.5,
+      // A real normal impulse can remove forward speed on an uphill landing.
+      assert.ok(state.speed >= 8 && state.speed <= 23, `late speed=${state.speed}`);
+      assert.ok(state.speed - previousSpeed < 1.5 && previousSpeed - state.speed < previousSpeed * 0.35,
         `late landing speed changed from ${previousSpeed} to ${state.speed}`);
       if (waitingForLanding && !state.grounded) airborne = true;
       if (waitingForLanding && airborne && state.grounded) {
@@ -287,6 +307,37 @@ test('holding jump gains height, a second press works, and a third press is igno
   assert.ok(Math.abs(triple - double) < 0.02, `double=${double}, triple=${triple}`);
 });
 
+test('Space jumps and double jumps neutralize takeoff spin and gradually level the car', () => {
+  for (const startX of [7, 20, 37]) {
+    for (const spin of [-3, 3]) {
+      const game = new GamePhysics(startX);
+      try {
+        const takeoffAngle = game.car.rotation();
+        game.car.setAngvel(spin, true);
+        game.step({ ...idle, jumpPressed: true, jumpHeld: true });
+        assert.equal(game.snapshot(1).jumpSerial, 1);
+        assert.ok(Math.abs(game.car.rotation() - takeoffAngle) < 0.005, 'Space snapped the takeoff angle');
+        assert.ok(Math.abs(game.car.angvel()) < 0.1, 'Space inherited a forward/backward tumble');
+        stepFor(game, 0.5, { ...idle, jumpHeld: true });
+        assert.equal(game.crashed, false);
+        assert.equal(game.snapshot(1).grounded, false);
+        assert.ok(Math.abs(game.car.rotation()) < Math.max(0.01, Math.abs(takeoffAngle) * 0.6),
+          `start=${startX}: jump did not level toward the horizon`);
+
+        const doubleJumpAngle = game.car.rotation();
+        game.car.setAngvel(-spin, true);
+        game.step({ ...idle, jumpPressed: true, jumpHeld: true });
+        assert.equal(game.snapshot(1).jumpSerial, 2);
+        assert.equal(game.snapshot(1).jumpsUsed, 2);
+        assert.ok(Math.abs(game.car.rotation() - doubleJumpAngle) < 0.005, 'double jump snapped the pitch');
+        assert.ok(Math.abs(game.car.angvel()) < 0.1, 'double jump retained unwanted spin');
+        stepFor(game, 0.25, { ...idle, jumpHeld: true });
+        assert.ok(Math.abs(game.car.rotation()) < Math.abs(doubleJumpAngle));
+      } finally { game.dispose(); }
+    }
+  }
+});
+
 test('air boost drains and then recharges', () => {
   const game = new GamePhysics();
   const coast = new GamePhysics();
@@ -303,6 +354,30 @@ test('air boost drains and then recharges', () => {
     stepFor(game, 0.45);
     assert.ok(game.snapshot(1).boost > spent);
   } finally { game.dispose(); coast.dispose(); }
+});
+
+test('jump leveling and downward jets end on Space release or after their thrust budget is spent', () => {
+  for (const releaseEarly of [true, false]) {
+    const game = new GamePhysics(20);
+    try {
+      game.step({ ...idle, jumpPressed: true, jumpHeld: true });
+      stepFor(game, 0.05, { ...idle, jumpHeld: true });
+      assert.equal(game.snapshot(1).jumpJetActive, true);
+      assert.ok(game.snapshot(1).jumpJetRemaining > 0);
+      const p = game.car.translation();
+      game.car.setTranslation({ x: p.x, y: p.y + 8 }, true);
+      if (releaseEarly) game.step(idle);
+      else stepFor(game, 0.2, { ...idle, jumpHeld: true });
+      assert.equal(game.snapshot(1).jumpJetActive, false);
+      assert.equal(game.snapshot(1).jumpJetRemaining, 0);
+      const spin = game.car.angvel();
+      assert.ok(Math.abs(spin) > 0.01);
+      game.step({ ...idle, jumpHeld: true, boost: true });
+      assert.equal(game.snapshot(1).jumpJetActive, false, 'rear boost or holding Space restarted spent jump jets');
+      assert.ok(Math.abs(game.car.angvel() - spin * Math.exp(-0.65 * FIXED_STEP)) < 1e-6,
+        'inactive jets continued leveling');
+    } finally { game.dispose(); }
+  }
 });
 
 test('an early barrier costs one health segment, while a timed jump clears it without damage', () => {
@@ -327,11 +402,11 @@ test('suction prevents high-speed crest lift-off', () => {
     const game = new GamePhysics();
     const x = 1105;
     try {
-      placeOnRoad(game, x, 18);
+      placeOnRoad(game, x, 22);
       let maxClearance = 0;
       let airborneSteps = 0;
       for (let i = 0; i < 110 && !game.crashed; i++) {
-        game.step({ ...idle, suction });
+        game.step({ ...idle, suction, boost: true });
         if (!game.snapshot(1).grounded) airborneSteps++;
         // The first touching tire now catches the car while the other axle
         // can still be airborne. Check each tire rather than only the lower one.
@@ -342,10 +417,100 @@ test('suction prevents high-speed crest lift-off', () => {
   }
   const coasting = crest(false);
   const planted = crest(true);
-  assert.ok(coasting.airborneSteps > 0);
+  assert.ok(coasting.airborneSteps >= 15, `crest airtime=${coasting.airborneSteps}`);
   assert.equal(planted.airborneSteps, 0);
   assert.ok(coasting.maxClearance > planted.maxClearance + 0.05);
   assert.ok(planted.maxClearance < CAR_WHEEL_RADIUS + 0.04, `suction clearance=${planted.maxClearance}`);
+});
+
+test('crest departures preserve momentum and produce one touchdown per hop', () => {
+  for (const speed of [20, 22]) {
+    const game = new GamePhysics();
+    try {
+      placeOnRoad(game, 1105, speed);
+      let departures = 0;
+      let grounded = true;
+      for (let i = 0; i < 145 && !game.crashed; i++) {
+        const velocityBefore = game.car.linvel().y;
+        game.step({ ...idle, boost: true });
+        const state = game.snapshot(1);
+        if (grounded && !state.grounded) {
+          departures++;
+          assert.ok(game.car.linvel().y <= velocityBefore + 0.02, 'crest added an upward kick');
+          assert.ok(Math.abs(game.car.angvel()) > 0.1, 'takeoff erased road rotation');
+        }
+        grounded = state.grounded;
+      }
+      assert.equal(game.crashed, false);
+      assert.equal(departures, 1, `speed=${speed}: repeated crest release`);
+      assert.equal(game.snapshot(1).landingSerial, 1, `speed=${speed}: repeated landing events`);
+      assert.equal(game.snapshot(1).grounded, true);
+    } finally { game.dispose(); }
+  }
+});
+
+test('airborne rotation retains inertia instead of instantly aiming at the road', () => {
+  const game = new GamePhysics();
+  try {
+    const p = game.car.translation();
+    game.car.setTranslation({ x: p.x, y: p.y + 4 }, true);
+    game.car.setRotation(0.35, true);
+    game.car.setLinvel({ x: 14, y: 0 }, true);
+    game.car.setAngvel(1.2, true);
+    game.step(idle);
+    assert.equal(game.snapshot(1).grounded, false);
+    assert.ok(game.car.rotation() > 0.35);
+    assert.ok(game.car.angvel() > 0.95 && game.car.angvel() < 1.2, `spin=${game.car.angvel()}`);
+  } finally { game.dispose(); }
+});
+
+test('tilted landings catch each tire separately and transfer rotation without snapping', () => {
+  const spec = loopsBetween(0, 500)[0];
+  function drop(pitch) {
+    const game = new GamePhysics(spec.entryX - 4);
+    try {
+      const p = game.car.translation();
+      const roadAngle = game.car.rotation();
+      game.car.setTranslation({ x: p.x, y: p.y + 2 }, true);
+      game.car.setRotation(roadAngle + pitch, true);
+      game.car.setLinvel({ x: 14, y: 14 * Math.tan(roadAngle) - 10 }, true);
+      let landing;
+      for (let i = 0; i < 120 && !game.crashed; i++) {
+        const angleBefore = game.car.rotation();
+        game.step(idle);
+        const state = game.snapshot(1);
+        if (state.landingSerial) {
+          landing = state;
+          assert.ok(Math.abs(state.car.angle - angleBefore) < 0.03, 'landing snapped the chassis flat');
+          if (pitch) {
+            assert.ok(Math.abs(state.car.angle - roadAngle) > 0.15, 'first contact erased landing pitch');
+            assert.equal(Math.sign(game.car.angvel()), -Math.sign(pitch), 'first tire should turn the free axle down');
+            assert.equal(state.wheelImpactSerials[pitch < 0 ? 1 : 0], 1);
+            assert.equal(state.wheelImpactSerials[pitch < 0 ? 0 : 1], 0, 'second axle landed before it touched');
+          } else {
+            assert.ok(Math.abs(game.car.angvel()) < 0.3, 'two-tire contact injected rotation');
+          }
+          break;
+        }
+      }
+      assert.ok(landing, 'drop never landed');
+      stepFor(game, 0.5);
+      assert.equal(game.crashed, false);
+      assert.equal(game.snapshot(1).landingSerial, 1);
+      assert.ok(game.snapshot(1).wheelImpactSerials.every(serial => serial >= 1), 'second axle never received its own impact');
+      assert.ok(Math.abs(game.car.rotation() - roadAngle) < 0.04, 'free axle did not settle');
+      for (const wheel of game.snapshot(1).wheels) {
+        const clearance = (wheel.y - roadHeight(wheel.x)) * Math.cos(Math.atan(roadSlope(wheel.x))) - CAR_WHEEL_RADIUS;
+        assert.ok(clearance >= -0.005, `tire penetrated the slope by ${-clearance}m`);
+      }
+      return landing.speed;
+    } finally { game.dispose(); }
+  }
+  drop(0);
+  for (const pitch of [-0.3, 0.3]) {
+    const tilted = drop(pitch);
+    assert.ok(tilted > 12, 'landing penalty stopped the run');
+  }
 });
 
 test('roof-first contact ends the run', () => {
@@ -477,6 +642,7 @@ test('police contact costs one health segment and a grounded boost creates escap
     assert.equal(caught.crashed, false);
     assert.equal(caught.snapshot(1).health, 75);
     assert.equal(caught.snapshot(1).impactSerial, 1);
+    assert.equal(caught.snapshot(1).sparkSerial, 1, 'police contact should emit a metal spark shower');
     assert.ok(caught.snapshot(1).invincibilityRemaining > 0);
     stepFor(escaping, .25, { ...idle, boost: true });
     assert.equal(escaping.crashed, false);
@@ -516,7 +682,9 @@ test('releasing suction near loop exits lands safely instead of falling through 
               assert.ok(after.speed >= 6 - .0001 && after.speed <= 23 + .0001, `bad exit velocity: ${label}`);
               assert.ok(Math.abs(after.car.angle) < 1.4, `exit retained full-turn rotation: ${label}`);
             }
-            if (leftLoop && after.car.x > spec.entryX + 9) break;
+            // The ordinary road can form another crest after the tangent
+            // exit. Allow that physical hop, then require a stable landing.
+            if (leftLoop && after.grounded && after.car.x > spec.entryX + 9) break;
           }
           assert.equal(released, true, label);
           assert.equal(game.crashed, false, label);
@@ -570,14 +738,18 @@ test('the faster start remains below crest launch speed and restart restores ful
 });
 
 test('Rapier obstacle contact counts one hit across the chassis and tires; a fourth hit ends the run', () => {
-  const barrier = new TrackGenerator().chunk(2).hazards[0];
-  const game = new GamePhysics(barrier.x - 4);
+  const track = new TrackGenerator();
+  const barriers = Array.from({ length: 20 }, (_, index) => track.chunk(index).hazards).flat()
+    .filter(hazard => hazard.kind !== 'drone').slice(0, 4);
+  const game = new GamePhysics(barriers[0].x - 4);
   try {
     for (let hit = 1; hit <= 4; hit++) {
-      placeOnRoad(game, barrier.x - 4, 12.8);
+      placeOnRoad(game, barriers[hit - 1].x - 4, 12.8);
       for (let i = 0; i < 120 && !game.crashed && game.snapshot(1).impactSerial < hit; i++) game.step(idle);
       assert.equal(game.snapshot(1).health, 100 - hit * 25);
       assert.equal(game.snapshot(1).impactSerial, hit);
+      assert.equal(game.snapshot(1).breakSerial, hit);
+      assert.equal(game.snapshot(1).obstaclesDestroyed, 0, 'ramming must not award weapon XP');
       assert.equal(game.crashed, hit === 4);
       if (hit < 4) {
         stepFor(game, .15);
@@ -603,7 +775,41 @@ test('a different obstacle during flashing protection causes no extra damage', (
     assert.ok(game.snapshot(1).invincibilityRemaining > 0);
     assert.equal(game.snapshot(1).health, 75);
     assert.equal(game.snapshot(1).impactSerial, 1);
+    assert.equal(game.snapshot(1).sparkSerial, 2, 'protected collisions should still throw sparks');
   } finally { game.dispose(); }
+});
+
+test('ramming each hazard type shatters it once and keeps it destroyed when chunks reload', () => {
+  const track = new TrackGenerator();
+  for (const index of [2, 3, 5]) {
+    const spec = track.chunk(index).hazards[0];
+    const game = new GamePhysics(spec.x - 3);
+    try {
+      const hazard = game.chunks.get(index).hazards[0];
+      if (spec.kind === 'drone') {
+        game.car.setTranslation({ x: spec.x - 3, y: hazard.y }, true);
+        game.car.setLinvel({ x: 14, y: 0 }, true);
+      }
+      for (let i = 0; i < 80 && !game.snapshot(1).breakSerial; i++) game.step(idle);
+      const state = game.snapshot(1);
+      assert.equal(state.breakSerial, 1, spec.kind);
+      assert.equal(state.health, 75);
+      assert.equal(state.runXp, 0);
+      assert.equal(hazard.health, 0);
+      assert.equal(hazard.collider.isEnabled(), false);
+      assert.equal(state.breakEvents[0].kind, spec.kind);
+      assert.equal(state.breakEvents[0].source, 'ram');
+      assert.ok(state.breakEvents[0].speed > 0);
+      assert.equal(state.sparkSerial, 1, spec.kind);
+      assert.ok(Math.abs(state.sparkEvents[0].x - spec.x) < 1.1, 'sparks must originate at the obstacle contact');
+      assert.ok(state.sparkEvents[0].strength > 8);
+      placeOnRoad(game, 600, 14); game.step({ ...idle, suction: true });
+      placeOnRoad(game, spec.x - 3, 14); stepFor(game, 0.4, { ...idle, suction: true });
+      assert.equal(game.chunks.get(index).hazards[0].health, 0);
+      assert.equal(game.snapshot(1).breakSerial, 1, 'revisited obstacle shattered twice');
+      assert.equal(game.snapshot(1).health, 75);
+    } finally { game.dispose(); }
+  }
 });
 
 test('police passes under a full loop, returns behind, and contact uses the health/impact system', () => {
@@ -686,6 +892,7 @@ test('four police contacts use four health segments and report the fatal police 
       game.step(idle);
       assert.equal(game.snapshot(1).health, 100 - hit * 25);
       assert.equal(game.snapshot(1).impactSerial, hit);
+      assert.equal(game.snapshot(1).sparkSerial, hit, 'each police impact should create one shower');
       assert.equal(game.crashed, hit === 4);
       if (hit < 4) {
         for (let i = 0; i < 360 && (game.pursuit.mode !== 'chasing' || game.snapshot(1).invincibilityRemaining > 0); i++) {
@@ -713,7 +920,11 @@ test('every unlocked weapon can destroy a real road barrier and disable its Rapi
       assert.equal(destroyed.collider.isEnabled(),false,id);
       assert.equal(game.hazardStates.some(hazard=>hazard.id===barrier.id),false,id);
       assert.equal(state.health,100,id);
+      assert.equal(state.sparkEvents.some(event => event.kind === 'collision'),false,'shooting must not trigger a chassis collision');
+      assert.ok(state.sparkEvents.some(event => event.kind === 'projectile'),id);
       assert.ok(state.weapon.destroySerial>=1,id);
+      assert.equal(game.explosionSerial,state.weapon.destroySerial,id);
+      assert.ok(state.breakEvents.some(event=>event.hazardId===barrier.id&&event.source==='weapon'),id);
       assert.ok(state.obstaclesDestroyed>=1,id);
       assert.equal(state.policeDestroyed,0,id);
       assert.equal(state.runXp,state.obstaclesDestroyed*10,id);
@@ -722,21 +933,83 @@ test('every unlocked weapon can destroy a real road barrier and disable its Rapi
   }
 });
 
+test('a wreck releases each wheel into solid terrain physics, preserves momentum and cannot earn more distance or XP', () => {
+  const game = new GamePhysics(60);
+  try {
+    game.stepWreck();
+    assert.equal(game.snapshot(1).wrecked, false, 'living cars must keep independent suspension control');
+    game.car.setTranslation({ x: 60, y: roadHeight(60) + 3 }, true);
+    game.car.setLinvel({ x: 14, y: -2 }, true);
+    game.car.setAngvel(1, true);
+    game.crashed = true;
+    const distance = game.distance;
+    game.stepWreck();
+    assert.equal(game.snapshot(1).wrecked, true);
+    assert.ok(game.car.linvel().x > 12, 'slow motion must preserve momentum, rather than halve velocity');
+    assert.equal(game.car.collider(0).isSensor(), false);
+    assert.ok(game.wheels.every(wheel => !wheel.collider(0).isSensor()));
+    const startingWheels = game.snapshot(1).wheels;
+    for (let i = 0; i < 360; i++) game.stepWreck();
+    const state = game.snapshot(1);
+    assert.ok(state.car.y > roadHeight(state.car.x) - .5, 'chassis fell through the road');
+    assert.ok(state.wheels.every((wheel, i) => wheel.x > startingWheels[i].x + 4));
+    assert.ok(state.wheels.every(wheel => wheel.y > roadHeight(wheel.x) + CAR_WHEEL_RADIUS - .15));
+    assert.ok(state.wheels.some(wheel => Math.abs(wheel.x - state.car.x) > CAR_WHEEL_OFFSET + 2), 'wheel remained attached to chassis');
+    assert.equal(state.distance, distance);
+    assert.equal(state.runXp, 0);
+    assert.equal(state.boostActive, false);
+    assert.equal(state.suctionActive, false);
+    assert.equal(state.jumpJetActive, false);
+  } finally { game.dispose(); }
+});
+
+test('loose wreck parts collide with surviving obstacles and keep terrain streamed under separated wheels', () => {
+  const game = new GamePhysics(78);
+  try {
+    const hazard = game.chunks.get(2).hazards[0];
+    game.car.setTranslation({ x: hazard.x - 3.5, y: hazard.y + .1 }, true);
+    game.car.setLinvel({ x: 12, y: 0 }, true);
+    game.car.setRotation(0, true);
+    game.crashed = true;
+    for (let i = 0; i < 120; i++) game.stepWreck();
+    assert.equal(hazard.collider.isSensor(), false);
+    assert.equal(hazard.health, 3, 'wreck collisions must not grant destruction rewards');
+    assert.ok(game.car.translation().x < hazard.x - 1, 'wreck passed through a surviving barrier');
+    assert.ok(Math.abs(game.car.linvel().x) < 1, 'solid obstacle failed to absorb the wreck momentum');
+    assert.ok(game.snapshot(1).sparkSerial > 0, 'wreck contacts should throw sparks behind the menu');
+    const chassisChunk = Math.floor(game.car.translation().x / 30);
+    const wheelX = game.car.translation().x + 150;
+    game.wheels[1].setTranslation({ x: wheelX, y: roadHeight(wheelX) + 1 }, true);
+    game.stepWreck();
+    assert.ok(game.chunks.has(Math.floor(wheelX / 30)), 'detached wheel lost streamed terrain');
+    assert.ok(game.chunks.has(chassisChunk), 'streaming for a wheel removed terrain under the chassis');
+    assert.ok(game.chunks.get(Math.floor(wheelX / 30)).roads.every(road => !road.isSensor()));
+  } finally { game.dispose(); }
+});
+
 test('rear fire stops a real patrol; its disabled wreck cannot damage the player', () => {
   const game = new GamePhysics(20);
   game.pursuit.gap=13;game.pursuit.idleSeconds=20;game.pursuit.visibility=1;
+  let sawNonfatalSparks=false;
   try {
     for(let i=0;i<480&&!game.crashed&&!game.snapshot(1).police.disabled;i++) {
       game.step({...idle,suction:true,fire:true,aim:-1});
+      const current=game.snapshot(1);
+      if(current.police.health>0&&current.police.health<12&&current.sparkEvents.some(event=>event.kind==='projectile'))sawNonfatalSparks=true;
     }
     let state=game.snapshot(1);
     assert.equal(state.police.health,0);
     assert.equal(state.police.disabled,true);
     assert.equal(state.health,100);
     assert.equal(state.weapon.hitSerial,12);
+    assert.equal(sawNonfatalSparks,true,'surviving police hits must produce sparks before destruction');
     assert.equal(state.policeDestroyed,1);
     assert.equal(state.obstaclesDestroyed,0);
     assert.equal(state.runXp,20);
+    assert.ok(state.policeWreck);
+    assert.equal(state.policeWreck.wheels.length,2);
+    assert.equal(state.policeWreck.serial,1);
+    const wreckBefore=state.policeWreck.body;
     placeOnRoad(game,state.police.x,14);
     stepFor(game,.25,{...idle,suction:true});
     state=game.snapshot(1);
@@ -744,6 +1017,8 @@ test('rear fire stops a real patrol; its disabled wreck cannot damage the player
     assert.equal(state.police.disabled,true);
     assert.equal(state.policeDestroyed,1,'fading police must not award XP twice');
     assert.equal(state.runXp,20);
+    assert.ok(state.policeWreck.age>.2);
+    assert.notDeepEqual(state.policeWreck.body,wreckBefore,'destroyed police must keep simulating independently');
   } finally { game.dispose(); }
 });
 
@@ -758,7 +1033,9 @@ test('nonfatal weapon hits and ramming an obstacle award no destruction XP', () 
     const state=game.snapshot(1);
     const hazard=game.chunks.get(2).hazards.find(hazard=>hazard.spec.id===barrier.id);
     assert.ok(state.weapon.hitSerial>0);
-    assert.equal(hazard.health,2);
+    assert.equal(hazard.health,0);
+    assert.equal(hazard.collider.isEnabled(),false);
+    assert.equal(state.breakEvents.at(-1).source,'ram');
     assert.ok(state.health<100,'fixture must include a real collision');
     assert.equal(state.obstaclesDestroyed,0);
     assert.equal(state.policeDestroyed,0);

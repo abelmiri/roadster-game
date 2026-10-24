@@ -17,5 +17,11 @@
     "@types/three": "^0.180.0",
     "typescript": "^5.9.3",
     "vite": "^5.4.21"
-  }
+  },
+  "author": {
+    "name": "abelmiri",
+    "email": "miri1888@gmail.com",
+    "url": "https://github.com/abelmiri"
+  },
+  "license": "UNLICENSED"
 }

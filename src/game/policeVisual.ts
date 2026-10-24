@@ -1,11 +1,15 @@
 import * as THREE from 'three';
 import type { GameSnapshot } from './physics';
+import type { PoliceWreckSnapshot } from './policeWreck';
+import { CarBodyDamage } from './carBodyDamage';
 import { CAR_AXLE_Y, CAR_WHEEL_OFFSET, CAR_WHEEL_RADIUS } from './vehicle';
 import { createRoadsterWheel, profileY, roadsterBodyShape } from './roadsterModel';
 
 /** Original black-and-white wedge patrol, matching the roadster reference. */
 export class PoliceVisual {
   readonly group = new THREE.Group();
+  readonly body = new THREE.Group();
+  private readonly damage?: CarBodyDamage;
   private readonly materials = new Set<THREE.Material>();
   private readonly textures: THREE.Texture[] = [];
   private readonly beacons: THREE.MeshBasicMaterial[] = [];
@@ -14,7 +18,8 @@ export class PoliceVisual {
   private previousX: number | null = null;
   private wheelAngle = 0;
 
-  constructor() {
+  constructor(wrecked = false) {
+    this.group.add(this.body);
     const white = new THREE.MeshLambertMaterial({ color: '#f5f6f2', flatShading: true });
     const black = new THREE.MeshLambertMaterial({ color: '#172532', flatShading: true });
     const darkSide = new THREE.MeshLambertMaterial({ color: '#101c27', flatShading: true });
@@ -27,17 +32,17 @@ export class PoliceVisual {
       depth: 1.02, bevelEnabled: false, curveSegments: 12,
     }), [black, darkSide]);
     body.position.z = -0.51;
-    this.group.add(body);
+    this.body.add(body);
 
     const panel = (points: [number, number][], material: THREE.Material, z = 0.519): void => {
       const shape = new THREE.Shape(points.map(([x, y]) => new THREE.Vector2(x, profileY(y))));
       shape.closePath();
       const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape), material);
-      mesh.position.z = z; this.group.add(mesh);
+      mesh.position.z = z; this.body.add(mesh);
     };
     const box = (w: number, h: number, d: number, x: number, y: number, material: THREE.Material, z = 0): void => {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
-      mesh.position.set(x, y, z); this.group.add(mesh);
+      mesh.position.set(x, y, z); this.body.add(mesh);
     };
 
     // The white door stays between the open fenders; front and rear remain black.
@@ -77,7 +82,7 @@ export class PoliceVisual {
         fragmentShader: 'varying vec2 p;uniform vec3 tint;uniform float strength;void main(){float a=exp(-4.*dot(p,p))*(1.-smoothstep(.5,1.,length(p)));gl_FragColor=vec4(tint,a*strength);}' });
       const glow = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 2.6), halo);
       glow.position.set(-0.31 + index * 0.49, 0.70, 0.76);
-      this.group.add(glow); this.halos.push(halo);
+      this.body.add(glow); this.halos.push(halo);
     }
     this.group.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return;
@@ -87,6 +92,10 @@ export class PoliceVisual {
         this.materials.add(material);
       }
     });
+    if (wrecked) {
+      this.damage = new CarBodyDamage(this.body);
+      this.damage.update(0);
+    }
   }
 
   private createDoorMarkings(ink: THREE.Material, white: THREE.Material): void {
@@ -103,7 +112,7 @@ export class PoliceVisual {
       this.textures.push(texture);
       const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false });
       const label = new THREE.Mesh(new THREE.PlaneGeometry(1.05, 0.28), material);
-      label.position.set(-0.15, -0.065, 0.538); this.group.add(label);
+      label.position.set(-0.15, -0.065, 0.538); this.body.add(label);
     }
     const shield = new THREE.Shape();
     shield.moveTo(-0.12, 0.13); shield.lineTo(-0.05, 0.15); shield.lineTo(0, 0.19);
@@ -111,7 +120,7 @@ export class PoliceVisual {
     shield.quadraticCurveTo(0.075, -0.14, 0, -0.18);
     shield.quadraticCurveTo(-0.075, -0.14, -0.105, -0.07); shield.closePath();
     const badge = new THREE.Mesh(new THREE.ShapeGeometry(shield), ink);
-    badge.position.set(0.49, -0.05, 0.536); this.group.add(badge);
+    badge.position.set(0.49, -0.05, 0.536); this.body.add(badge);
     const star = new THREE.Shape();
     for (let i = 0; i < 10; i++) {
       const angle = Math.PI / 2 + i * Math.PI / 5;
@@ -121,11 +130,11 @@ export class PoliceVisual {
     }
     star.closePath();
     const emblem = new THREE.Mesh(new THREE.ShapeGeometry(star), white);
-    emblem.position.set(0.49, -0.03, 0.54); this.group.add(emblem);
+    emblem.position.set(0.49, -0.03, 0.54); this.body.add(emblem);
   }
 
   update(state: GameSnapshot['police'], time: number): void {
-    this.group.visible = state.visibility > 0.01;
+    this.group.visible = !state.disabled && state.visibility > 0.01;
     this.group.position.set(state.x, state.y, 1.05);
     this.group.rotation.z = state.angle;
     if (this.previousX !== null && Math.abs(state.x - this.previousX) < 10) {
@@ -141,7 +150,24 @@ export class PoliceVisual {
     });
   }
 
+  updateWreck(state: PoliceWreckSnapshot): void {
+    const opacity = Math.min(1, Math.max(0, (10 - state.age) / 2));
+    this.group.visible = opacity > 0;
+    this.group.position.set(0, 0, 0);
+    this.group.rotation.z = 0;
+    this.body.position.set(state.body.x, state.body.y, 1.05);
+    this.body.rotation.z = state.body.angle;
+    state.wheels.forEach((pose, index) => {
+      this.wheels[index].position.set(pose.x, pose.y, 1.45);
+      this.wheels[index].rotation.z = pose.angle;
+    });
+    for (const material of this.materials) material.opacity = opacity;
+    for (const material of this.beacons) material.opacity = opacity * .12;
+    for (const halo of this.halos) halo.uniforms.strength.value = 0;
+  }
+
   dispose(): void {
+    this.damage?.dispose();
     this.group.traverse((object) => { if (object instanceof THREE.Mesh) object.geometry.dispose(); });
     [...this.materials, ...this.halos].forEach((material) => material.dispose());
     this.textures.forEach((texture) => texture.dispose());

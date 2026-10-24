@@ -2,14 +2,19 @@ import * as THREE from 'three';
 import type { GamePhysics, GameSnapshot } from './physics';
 import { getDistrict, hash, roadHeight, loopsBetween, loopGeometry, type LoopSpec, type HazardKind, type TrackChunk } from './track';
 import { sprungBodyPose } from './vehicle';
-import { createRoadsterWheel, profileY, roadsterBodyShape } from './roadsterModel';
+import { createRoadsterBody, createRoadsterWheel } from './roadsterModel';
 import { CarSmoke } from './smoke';
+import { CarBodyDamage } from './carBodyDamage';
+import { CityBuildings } from './cityBuildings';
+import { ObstacleDebris } from './obstacleDebris';
+import { ImpactSparks } from './impactSparks';
+import { ImpactCamera, VIEW_HALF_HEIGHT } from './impactCamera';
+import { createTerrainMaterial, createTerrainGeometry, createRoadCapGeometry } from './terrain';
+import { StartDepot } from './startDepot';
 import { BackdropBlur } from './backdropBlur';
 import { PoliceVisual } from './policeVisual';
 import { carVisibleDuringProtection } from './damage';
 import { CombatVisual, WeaponVisual } from './weaponVisual';
-
-const VIEW_HALF_HEIGHT = 10.8;
 
 interface Theme {
   sky: string; haze: string; far: string; middle: string; near: string;
@@ -22,12 +27,11 @@ const THEMES: Theme[] = [
   { sky: '#18233f', haze: '#34416b', far: '#374368', middle: '#253755', near: '#172841', road: '#172338', roadSide: '#101a2b', stripe: '#65ddda', light: '#ffb790' },
 ];
 
-const color = (value: string): THREE.Color => new THREE.Color(value);
 const ease = (t: number): number => t * t * (3 - 2 * t);
-const mix = (a: string, b: string, t: number): THREE.Color => color(a).lerp(color(b), t);
+const THEME_COLORS = THEMES.map(theme => Object.fromEntries(Object.entries(theme).map(([key, value]) =>
+  [key, new THREE.Color(value)])) as Record<keyof Theme, THREE.Color>);
 
 interface ChunkView { group: THREE.Group; hazards: Map<string, THREE.Group> }
-interface Building { mesh: THREE.Group; baseX: number; depth: number }
 interface CityMotion { mesh: THREE.Group; baseX: number; altitude: number; speed: number; phase: number }
 
 function box(w: number, h: number, d: number, material: THREE.Material): THREE.Mesh {
@@ -48,13 +52,13 @@ export class GameVisuals {
   private readonly worldGroup = new THREE.Group();
   private readonly backdrop = new THREE.Group();
   private readonly chunks = new Map<number, ChunkView>();
-  private readonly buildings: Building[] = [];
   private readonly traffic: CityMotion[] = [];
   private readonly backgroundDrones: CityMotion[] = [];
   private readonly farMat = new THREE.MeshLambertMaterial({ color: THEMES[0].far, flatShading: true });
   private readonly midMat = new THREE.MeshLambertMaterial({ color: THEMES[0].middle, flatShading: true });
   private readonly nearMat = new THREE.MeshLambertMaterial({ color: THEMES[0].near, flatShading: true });
   private readonly roadMat = new THREE.MeshLambertMaterial({ color: THEMES[0].road, flatShading: true });
+  private readonly groundMat = createTerrainMaterial(THEMES[0].road);
   private readonly roadSideMat = new THREE.MeshLambertMaterial({ color: THEMES[0].roadSide, flatShading: true });
   private readonly stripeMat = new THREE.MeshBasicMaterial({ color: THEMES[0].stripe });
   private readonly windowMat = new THREE.MeshBasicMaterial({ color: THEMES[0].light });
@@ -67,16 +71,29 @@ export class GameVisuals {
   private readonly sunMat = new THREE.MeshBasicMaterial({ color: '#fff4d9', transparent: true });
   private readonly moonMat = new THREE.MeshBasicMaterial({ color: '#cce5f6', transparent: true, opacity: 0 });
   private readonly starMat = new THREE.PointsMaterial({ color: '#e5f5ff', size: 0.07, transparent: true, opacity: 0, sizeAttenuation: false });
-  private readonly carGroup = new THREE.Group();
+  private readonly city = new CityBuildings(this.farMat, this.midMat, this.nearMat, this.windowMat);
+  private readonly depot = new StartDepot();
+  private readonly skyColor = new THREE.Color();
+  private readonly hazeColor = new THREE.Color(THEMES[0].haze);
+  private aspect = 1;
+  private themeDistance = -1;
+  private readonly carGroup = createRoadsterBody();
+  private readonly bodyDamage = new CarBodyDamage(this.carGroup);
   private readonly wheelGroups: [THREE.Group, THREE.Group];
   private readonly fanGlow: THREE.Mesh;
   private readonly smoke = new CarSmoke();
+  private readonly debris = new ObstacleDebris();
+  private readonly sparks = new ImpactSparks();
   private readonly blur = new BackdropBlur();
   private readonly police = new PoliceVisual();
+  private readonly policeWreck = new PoliceVisual(true);
+  private readonly policeSmoke = new CarSmoke();
+  private readonly impactCamera = new ImpactCamera();
   private readonly weapon = new WeaponVisual();
   private readonly combat = new CombatVisual();
   private readonly loops = new Map<number, THREE.Group>();
   private viewHeight = VIEW_HALF_HEIGHT;
+  private baseViewHeight = VIEW_HALF_HEIGHT;
   private sun!: THREE.Mesh;
   private moon!: THREE.Mesh;
   private stars!: THREE.Points;
@@ -90,7 +107,6 @@ export class GameVisuals {
   constructor(private readonly host: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
     this.renderer.setClearColor(THEMES[0].sky);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.65));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.host.appendChild(this.renderer.domElement);
 
@@ -104,12 +120,12 @@ export class GameVisuals {
     this.scene.add(light);
 
     this.createSky();
-    this.createBuildings();
+    this.backdrop.add(this.city.group);
     this.createCityMotion();
-    this.createCar();
     this.carGroup.add(this.weapon.group);
     this.wheelGroups = [createRoadsterWheel(), createRoadsterWheel()];
-    this.worldGroup.add(this.carGroup, ...this.wheelGroups, this.smoke.mesh, this.police.group, this.combat.group);
+    this.worldGroup.add(this.carGroup, ...this.wheelGroups, this.smoke.mesh, this.debris.mesh, this.sparks.mesh,
+      this.police.group, this.policeWreck.group, this.policeSmoke.mesh, this.combat.group, this.depot.group);
     this.fanGlow = box(1.8, 0.07, 0.55, new THREE.MeshBasicMaterial({ color: '#58f4dd', transparent: true, opacity: 0.8 }));
     this.fanGlow.position.set(0, -0.48, 0.08);
     this.fanGlow.visible = false;
@@ -141,51 +157,6 @@ export class GameVisuals {
       cloud.scale.set(1.7 + hash(i + 21) * 2.2, 0.23 + hash(i + 35) * 0.14, 1);
       cloud.position.set((hash(i + 18) - 0.5) * 95, 5.4 + hash(i + 37) * 5.8, -25);
       this.backdrop.add(cloud);
-    }
-  }
-
-  private createBuildings(): void {
-    const layers = [
-      { count: 37, depth: -18, material: this.farMat, base: -1.5, min: 3.0, max: 8.0, width: 2.5 },
-      { count: 33, depth: -12, material: this.midMat, base: -2.6, min: 3.8, max: 9.5, width: 3.2 },
-      { count: 28, depth: -6.3, material: this.nearMat, base: -3.9, min: 3.8, max: 10.5, width: 3.9 },
-    ];
-    for (const [layerIndex, layer] of layers.entries()) {
-      for (let i = 0; i < layer.count; i++) {
-        const group = new THREE.Group();
-        const width = layer.width * (0.7 + hash(i * 5 + layerIndex) * 0.62);
-        const height = layer.min + hash(i * 11 + layerIndex * 60) * (layer.max - layer.min);
-        const body = box(width, height, 0.9 + layerIndex * 0.2, layer.material);
-        body.position.y = layer.base + height / 2;
-        group.add(body);
-
-        if (i % 3 === 0) {
-          const roof = box(width * 0.73, 0.18, 1.4, layer.material);
-          roof.position.y = layer.base + height + 0.08;
-          group.add(roof);
-        }
-        if (i % 7 === 0) {
-          const antenna = box(0.055, 0.9, 0.055, layer.material);
-          antenna.position.set(width * 0.20, layer.base + height + 0.52, 0);
-          group.add(antenna);
-        }
-        if (layerIndex > 0 && i % 2 === 0) {
-          const cols = Math.max(1, Math.floor(width / 0.65));
-          const rows = Math.max(1, Math.floor(height / 1.05) - 1);
-          for (let row = 0; row < rows; row++) {
-            for (let col = 0; col < cols; col++) {
-              if (hash(i * 73 + row * 17 + col * 31) < 0.46) continue;
-              const window = box(0.18, 0.25, 0.02, this.windowMat);
-              window.position.set((col - (cols - 1) / 2) * 0.57, layer.base + 0.72 + row * 0.83, 0.73 + layerIndex * 0.12);
-              group.add(window);
-            }
-          }
-        }
-        const baseX = -60 + i * (150 / layer.count) + hash(i + layerIndex * 80) * 2;
-        group.position.set(baseX, 0, layer.depth);
-        this.backdrop.add(group);
-        this.buildings.push({ mesh: group, baseX, depth: layerIndex });
-      }
     }
   }
 
@@ -247,100 +218,14 @@ export class GameVisuals {
     }
   }
 
-  private createCar(): void {
-    const white = new THREE.MeshLambertMaterial({ color: '#f3f4ee', flatShading: true });
-    const top = new THREE.MeshLambertMaterial({ color: '#ffffff', flatShading: true });
-    const pale = new THREE.MeshLambertMaterial({ color: '#d3d8d9', flatShading: true });
-    const shade = new THREE.MeshLambertMaterial({ color: '#b3bdc5', flatShading: true });
-    const glass = new THREE.MeshBasicMaterial({ color: '#101c26' });
-    const glassReflection = new THREE.MeshBasicMaterial({ color: '#354851' });
-    const trim = new THREE.MeshLambertMaterial({ color: '#1b2832', flatShading: true });
-    const seam = new THREE.LineBasicMaterial({ color: '#65717a' });
-
-    const bodyShape = roadsterBodyShape();
-    const body = new THREE.Mesh(new THREE.ExtrudeGeometry(bodyShape, {
-      depth: 1.02, bevelEnabled: false, curveSegments: 12,
-    }), [white, pale]);
-    body.position.z = -0.51;
-    this.carGroup.add(body);
-
-    const panel = (points: [number, number][], material: THREE.Material, z = 0.516): THREE.Mesh => {
-      const shape = new THREE.Shape(points.map(([x, y]) => new THREE.Vector2(x, profileY(y))));
-      shape.closePath();
-      const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape), material);
-      mesh.position.z = z;
-      this.carGroup.add(mesh);
-      return mesh;
-    };
-    const line = (points: [number, number][], z = 0.531): void => {
-      const geometry = new THREE.BufferGeometry().setFromPoints(points.map(([x, y]) => new THREE.Vector3(x, profileY(y), z)));
-      this.carGroup.add(new THREE.Line(geometry, seam));
-    };
-
-    // Keep the facets between the fenders so they cannot cover the tire gaps.
-    panel([[-0.59, 0.31], [0.59, 0.21], [0.55, -0.35], [-0.59, -0.31]], pale);
-    panel([[-0.59, -0.31], [0.55, -0.35], [0.59, -0.43], [-0.59, -0.43]], shade);
-    panel([[1.95, -0.30], [2.03, -0.30], [2.03, -0.43], [1.95, -0.43]], pale);
-    panel([[-2.04, -0.04], [-1.95, -0.13], [-1.95, -0.40], [-2.04, -0.43]], trim, 0.519);
-
-    // A continuous black canopy, thin white roof and sloping windshield keep
-    // the cabin long and low instead of the upright shape of the old model.
-    panel([[-1.08, 0.43], [-0.41, 0.63], [0.43, 0.65], [1.00, 0.34], [0.24, 0.29]], glass, 0.522);
-    panel([[-0.95, 0.44], [-0.40, 0.61], [0.36, 0.63], [0.24, 0.59], [-0.41, 0.56]], glassReflection, 0.523);
-    panel([[-0.48, 0.64], [-0.43, 0.69], [0.44, 0.72], [0.50, 0.68]], top, 0.525);
-    panel([[-0.44, 0.63], [-0.39, 0.64], [-0.22, 0.30], [-0.27, 0.30]], pale, 0.526);
-    panel([[0.44, 0.65], [0.50, 0.68], [1.10, 0.35], [1.00, 0.34]], white, 0.526);
-    panel([[0.52, 0.19], [0.82, 0.17], [0.71, 0.12], [0.51, 0.14]], glass, 0.527);
-    line([[-0.58, 0.31], [-0.58, -0.29], [-0.45, -0.34], [0.53, -0.36], [0.58, 0.17]]);
-
-    const rocker = box(1.16, 0.075, 1.055, trim);
-    rocker.position.set(0, -0.425, 0.004);
-    this.carGroup.add(rocker);
-    const splitter = box(0.20, 0.065, 1.07, trim);
-    splitter.position.set(1.965, -0.43, 0.004);
-    this.carGroup.add(splitter);
-    const headlight = new THREE.MeshBasicMaterial({ color: '#e9faff' });
-    const tailLight = new THREE.MeshBasicMaterial({ color: '#ff6c66' });
-    panel([[1.82, 0.055], [2.04, -0.06], [2.04, -0.11], [1.84, 0.015]], headlight, 0.529);
-    panel([[-2.045, 0.13], [-1.85, 0.20], [-1.86, 0.15], [-2.045, 0.09]], tailLight, 0.530);
-    // Rear air-boost ports and two downward jump nozzles share the smoke emitters.
-    for (const z of [-0.33, 0.38]) {
-      const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.09, 0.17, 12), trim);
-      nozzle.rotation.z = Math.PI / 2;
-      nozzle.position.set(-2.055, -0.25, z);
-      this.carGroup.add(nozzle);
-      const rim = new THREE.Mesh(new THREE.TorusGeometry(0.072, 0.017, 5, 12), shade);
-      rim.rotation.y = Math.PI / 2;
-      rim.position.set(-2.145, -0.25, z);
-      this.carGroup.add(rim);
-    }
-    for (const x of [-0.46, 0.46]) {
-      const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.075, 0.13, 12), trim);
-      nozzle.position.set(x, -0.49, 0.38);
-      this.carGroup.add(nozzle);
-      const rim = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.017, 5, 12), shade);
-      rim.rotation.x = Math.PI / 2;
-      rim.position.set(x, -0.555, 0.38);
-      this.carGroup.add(rim);
-    }
-    this.carGroup.position.z = 1.15;
-  }
 
 
   private roadSection(start: number, end: number, group: THREE.Group): void {
-    const shape = new THREE.Shape();
     const samples = Math.max(2, Math.ceil((end - start) / 0.35));
-    shape.moveTo(start, roadHeight(start));
-    for (let i = 1; i <= samples; i++) {
-      const x = start + (end - start) * i / samples;
-      shape.lineTo(x, roadHeight(x));
-    }
-    shape.lineTo(end, -10);
-    shape.lineTo(start, -10);
-    shape.closePath();
-    const road = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 1.2, bevelEnabled: false, curveSegments: 1 }), [this.roadMat, this.roadSideMat]);
+    const road = new THREE.Mesh(createTerrainGeometry(start, end), [this.groundMat, this.roadSideMat]);
     road.position.z = -0.75;
     group.add(road);
+    group.add(new THREE.Mesh(createRoadCapGeometry(start, end), this.roadMat));
 
     const linePoints: THREE.Vector3[] = [];
     for (let i = 0; i <= samples; i++) {
@@ -487,20 +372,24 @@ export class GameVisuals {
   }
 
   private updateTheme(distance: number): void {
+    if (distance === this.themeDistance) return;
+    this.themeDistance = distance;
     const district = getDistrict(distance);
     const index = Math.min(THEMES.length - 1, Math.floor(district));
     const next = Math.min(THEMES.length - 1, index + 1);
     const t = index === next ? 0 : ease(district - index);
-    const a = THEMES[index];
-    const b = THEMES[next];
-    this.renderer.setClearColor(mix(a.sky, b.sky, t));
-    this.farMat.color.copy(mix(a.far, b.far, t));
-    this.midMat.color.copy(mix(a.middle, b.middle, t));
-    this.nearMat.color.copy(mix(a.near, b.near, t));
-    this.roadMat.color.copy(mix(a.road, b.road, t));
-    this.roadSideMat.color.copy(mix(a.roadSide, b.roadSide, t));
-    this.stripeMat.color.copy(mix(a.stripe, b.stripe, t));
-    this.windowMat.color.copy(mix(a.light, b.light, t));
+    const a = THEME_COLORS[index];
+    const b = THEME_COLORS[next];
+    this.renderer.setClearColor(this.skyColor.lerpColors(a.sky, b.sky, t));
+    this.farMat.color.lerpColors(a.far, b.far, t);
+    this.midMat.color.lerpColors(a.middle, b.middle, t);
+    this.nearMat.color.lerpColors(a.near, b.near, t);
+    this.roadMat.color.lerpColors(a.road, b.road, t);
+    this.groundMat.color.lerpColors(a.road, b.road, t);
+    this.roadSideMat.color.lerpColors(a.roadSide, b.roadSide, t);
+    this.hazeColor.lerpColors(a.haze, b.haze, t);
+    this.stripeMat.color.lerpColors(a.stripe, b.stripe, t);
+    this.windowMat.color.lerpColors(a.light, b.light, t);
     const night = index === 2 ? 1 : next === 2 ? t : 0;
     this.starMat.opacity = night * 0.9;
     this.moonMat.opacity = night * 0.95;
@@ -509,14 +398,7 @@ export class GameVisuals {
 
   private updateBackdrop(): void {
     const span = 150;
-    for (const building of this.buildings) {
-      const factor = [0.82, 0.61, 0.37][building.depth];
-      const center = this.cameraX * factor;
-      let x = building.baseX + center;
-      while (x < this.cameraX - 77) x += span;
-      while (x > this.cameraX + 80) x -= span;
-      building.mesh.position.x = x;
-    }
+    this.city.update(this.cameraX);
     for (const vehicle of this.traffic) {
       let x = vehicle.baseX + this.cameraX * 0.42 + this.elapsed * vehicle.speed;
       while (x < this.cameraX - 82) x += span;
@@ -537,7 +419,7 @@ export class GameVisuals {
     this.stars.position.set(this.cameraX, this.cameraY, 0);
   }
 
-  render(snapshot: GameSnapshot, physics: GamePhysics, delta: number, running = true, impactFrozen = false): void {
+  render(snapshot: GameSnapshot, physics: GamePhysics, delta: number, running = true, impactFrozen = false, wallDelta = delta): void {
     const sceneDelta = impactFrozen ? 0 : delta;
     this.elapsed += sceneDelta;
     if (running) this.policeTime += delta;
@@ -547,7 +429,8 @@ export class GameVisuals {
     const body = sprungBodyPose(snapshot.car, snapshot.suspensionOffset, snapshot.suspensionPitch);
     this.carGroup.position.set(body.x, body.y, 1.15);
     this.carGroup.rotation.z = body.angle;
-    const carVisible = carVisibleDuringProtection(snapshot.invincibilityRemaining, impactFrozen || !running);
+    this.bodyDamage.update(snapshot.wrecked ? 0 : snapshot.health);
+    const carVisible = carVisibleDuringProtection(snapshot.invincibilityRemaining, impactFrozen || !running || snapshot.crashed);
     this.carGroup.visible = carVisible;
     snapshot.wheels.forEach((pose, index) => {
       const wheel = this.wheelGroups[index];
@@ -557,7 +440,16 @@ export class GameVisuals {
     });
     this.fanGlow.visible = snapshot.suctionActive;
     this.smoke.update(snapshot, delta, running);
+    this.debris.update(snapshot.breakEvents, snapshot.breakSerial, delta, running, physics.generator);
+    this.sparks.update(snapshot.sparkEvents, snapshot.sparkSerial, delta, running, physics.generator);
     this.police.update(snapshot.police, this.policeTime);
+    if (snapshot.policeWreck) {
+      this.policeWreck.updateWreck(snapshot.policeWreck);
+      this.policeSmoke.updateWreck(snapshot.policeWreck.body, snapshot.policeWreck.speed, snapshot.policeWreck.age, delta, running);
+    } else {
+      this.policeWreck.group.visible = false;
+      if (this.policeSmoke.activeCount) this.policeSmoke.clear();
+    }
     this.weapon.update(snapshot.weapon);
     this.combat.update(snapshot.weapon);
 
@@ -565,27 +457,36 @@ export class GameVisuals {
     const center = snapshot.loop ? { x: snapshot.loop.centerX, y: snapshot.loop.centerY } : upcoming ? loopGeometry(upcoming) : null;
     const loopView = snapshot.loop ? 1 : upcoming ? Math.max(0, 1 - Math.abs(upcoming.entryX - snapshot.car.x) / 25) : 0;
     const smoothing = 1 - Math.exp(-sceneDelta * 4.2);
-    this.viewHeight += (VIEW_HALF_HEIGHT + loopView * 1.7 - this.viewHeight) * smoothing;
-    const aspect = this.host.clientWidth / Math.max(1, this.host.clientHeight);
-    this.camera.left = -this.viewHeight * aspect; this.camera.right = this.viewHeight * aspect;
-    this.camera.top = this.viewHeight; this.camera.bottom = -this.viewHeight;
-    this.camera.updateProjectionMatrix();
-    const width = this.camera.right - this.camera.left;
-    const targetX = snapshot.loop && center ? center.x + width * 0.08 : snapshot.car.x + width * 0.19;
+    this.impactCamera.update(snapshot.sparkEvents, snapshot.sparkSerial, snapshot.crashed, wallDelta, running || impactFrozen);
+    this.baseViewHeight += (VIEW_HALF_HEIGHT + loopView * 1.7 - this.baseViewHeight) * smoothing;
+    const nextHeight = this.baseViewHeight / this.impactCamera.zoom;
+    if (Math.abs(nextHeight - this.viewHeight) > 0.00001) {
+      this.viewHeight = nextHeight;
+      this.camera.left = -this.viewHeight * this.aspect; this.camera.right = this.viewHeight * this.aspect;
+      this.camera.top = this.viewHeight; this.camera.bottom = -this.viewHeight;
+      this.camera.updateProjectionMatrix();
+    }
+    const width = this.baseViewHeight * this.aspect * 2;
+    let targetX = snapshot.loop && center ? center.x + width * 0.08 : snapshot.car.x + width * 0.27;
     const roadY = roadHeight(snapshot.car.x + 8) + 2.0;
-    const targetY = center ? roadY + (center.y - roadY) * loopView : roadY;
-    this.cameraX += (targetX - this.cameraX) * smoothing;
-    this.cameraY += (targetY - this.cameraY) * smoothing;
+    let targetY = center ? roadY + (center.y - roadY) * loopView : roadY;
+    const focus = this.impactCamera.focus(snapshot.car);
+    const amount = this.impactCamera.amount;
+    targetX += (focus.x - targetX) * amount;
+    targetY += (focus.y - targetY) * amount;
+    const cameraDelta = sceneDelta + Math.max(0, wallDelta - sceneDelta) * amount;
+    const tracking = 1 - Math.exp(-cameraDelta * (4.2 + amount * 10));
+    this.cameraX += (targetX - this.cameraX) * tracking;
+    this.cameraY += (targetY - this.cameraY) * tracking;
     this.camera.position.set(this.cameraX, this.cameraY, 36);
-    this.camera.lookAt(this.cameraX, this.cameraY, 0);
+    this.depot.update(this.cameraX, this.viewHeight * this.aspect, this.elapsed);
     this.updateBackdrop();
-    this.blur.render(this.renderer, this.scene, this.camera, this.backdrop, this.worldGroup);
+    this.blur.render(this.renderer, this.scene, this.camera, this.backdrop, this.worldGroup, this.hazeColor, this.elapsed);
 
-    if (delta > 1 / 42) this.slowFrames++;
+    if (running && wallDelta > 1 / 50) this.slowFrames++;
     else this.slowFrames = Math.max(0, this.slowFrames - 1);
-    if (!this.qualityReduced && this.slowFrames > 100) {
+    if (!this.qualityReduced && this.slowFrames > 80) {
       this.qualityReduced = true;
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1));
       this.resize();
     }
   }
@@ -593,6 +494,10 @@ export class GameVisuals {
   readonly resize = (): void => {
     const width = this.host.clientWidth || window.innerWidth;
     const height = this.host.clientHeight || window.innerHeight;
+    this.aspect = width / height;
+    const pixelBudget = this.qualityReduced ? 1_800_000 : 3_000_000;
+    this.renderer.setPixelRatio(Math.max(0.5, Math.min(window.devicePixelRatio || 1,
+      this.qualityReduced ? 1 : 1.5, Math.sqrt(pixelBudget / (width * height)))));
     this.renderer.setSize(width, height, false);
     this.blur.resize(this.renderer);
     const halfHeight = this.viewHeight;
@@ -607,12 +512,20 @@ export class GameVisuals {
   dispose(): void {
     window.removeEventListener('resize', this.resize);
     for (const view of this.chunks.values()) disposeGroup(view.group);
+    this.bodyDamage.dispose();
     this.smoke.dispose();
+    this.debris.dispose();
+    this.sparks.dispose();
+    this.city.dispose();
+    this.depot.dispose();
     for (const group of this.loops.values()) disposeGroup(group);
     this.police.dispose();
+    this.policeWreck.dispose();
+    this.policeSmoke.dispose();
     this.weapon.dispose();
     this.combat.dispose();
     this.blur.dispose();
+    this.groundMat.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

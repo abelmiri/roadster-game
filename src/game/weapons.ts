@@ -50,6 +50,10 @@ export interface Projectile {
   targetId?: string; beamEndX?: number; beamEndY?: number;
 }
 export interface CombatEffect { id: number; x: number; y: number; age: number; size: number; destroyed: boolean; color: string }
+export interface WeaponImpact {
+  x: number; y: number; directionX: number; directionY: number;
+  surface: 'hazard' | 'police' | 'terrain'; destroyed: boolean;
+}
 export interface WeaponSnapshot {
   id: WeaponId; ammo: number; capacity: number; yaw: number; pitch: number;
   direction: AimDirection; turnRemaining: number; cooldown: number; recoil: number;
@@ -98,10 +102,12 @@ export class VehicleWeapon {
     return true;
   }
   ammoFor(id: WeaponId): number { return this.ammunition.get(id) ?? 0; }
+  get destructionSerial(): number { return this.destroySerial; }
 
   step(dt: number, controls: { fire?: boolean; aim?: AimDirection }, pose: WeaponPose,
     targets: CombatTarget[], onDamage: (target: CombatTarget, damage: number) => void,
-    floorHeight: (x: number) => number = () => -Infinity): void {
+    floorHeight: (x: number) => number = () => -Infinity,
+    onImpact: (impact: WeaponImpact) => void = () => {}): void {
     this.previousYaw = this.yaw;
     if (controls.aim === 1 || controls.aim === -1) this.direction = controls.aim;
     const spec = weaponSpec(this.id);
@@ -145,7 +151,12 @@ export class VehicleWeapon {
           const hit = this.sweep(shot, ux * spec.range, uy * spec.range, targets, floorHeight);
           shot.beamEndX = x + ux * spec.range * hit.t;
           shot.beamEndY = y + uy * spec.range * hit.t;
-          if (hit.target) this.damage(hit.target, spec.damage, spec, shot.beamEndX, shot.beamEndY, targets, onDamage);
+          if (hit.target) this.damage(hit.target, spec.damage, spec, shot.beamEndX, shot.beamEndY,
+            ux, uy, targets, onDamage, onImpact);
+          else if (hit.t < 1) {
+            this.effect(shot.beamEndX, shot.beamEndY, .2, false, spec.color);
+            this.reportImpact(shot.beamEndX, shot.beamEndY, ux, uy, 'terrain', false, onImpact);
+          }
         }
         this.projectiles.push(shot);
       }
@@ -172,8 +183,12 @@ export class VehicleWeapon {
       const hit = this.sweep(shot, dx, dy, targets, floorHeight);
       shot.x += dx * hit.t; shot.y += dy * hit.t;
       shot.distance += Math.hypot(dx, dy);
-      if (hit.target) this.damage(hit.target, shotSpec.damage, shotSpec, shot.x, shot.y, targets, onDamage);
-      else if (hit.t < 1) this.effect(shot.x, shot.y, .3, false, shotSpec.color);
+      if (hit.target) this.damage(hit.target, shotSpec.damage, shotSpec, shot.x, shot.y,
+        shot.vx, shot.vy, targets, onDamage, onImpact);
+      else if (hit.t < 1) {
+        this.effect(shot.x, shot.y, .3, false, shotSpec.color);
+        this.reportImpact(shot.x, shot.y, shot.vx, shot.vy, 'terrain', false, onImpact);
+      }
       return hit.t === 1 && !hit.target && shot.distance < shotSpec.range;
     });
   }
@@ -190,13 +205,22 @@ export class VehicleWeapon {
     for (let i = 1; i <= samples; i++) {
       const fraction = i / samples;
       if (fraction >= t) break;
-      if (shot.y + dy * fraction < floor(shot.x + dx * fraction)) { t = fraction; first = null; break; }
+      if (shot.y + dy * fraction < floor(shot.x + dx * fraction)) {
+        let low = (i - 1) / samples; let high = fraction;
+        for (let iteration = 0; iteration < 9; iteration++) {
+          const middle = (low + high) * .5;
+          if (shot.y + dy * middle < floor(shot.x + dx * middle)) high = middle;
+          else low = middle;
+        }
+        t = high; first = null; break;
+      }
     }
     return { t, target: first };
   }
 
   private damage(target: CombatTarget, amount: number, spec: WeaponSpec, x: number, y: number,
-    targets: CombatTarget[], onDamage: (target: CombatTarget, damage: number) => void): void {
+    vx: number, vy: number, targets: CombatTarget[], onDamage: (target: CombatTarget, damage: number) => void,
+    onImpact: (impact: WeaponImpact) => void): void {
     for (const victim of targets) {
       if (victim.health <= 0 || (victim !== target && (!spec.splash || Math.hypot(victim.x - x, victim.y - y) > spec.splash + victim.radius))) continue;
       const dealt = victim === target ? amount : Math.max(1, Math.round(amount * .6));
@@ -204,8 +228,16 @@ export class VehicleWeapon {
       onDamage(victim, dealt);
       this.hitSerial++;
       if (victim.health === 0) this.destroySerial++;
+      this.reportImpact(victim === target ? x : victim.x, victim === target ? y : victim.y,
+        vx, vy, victim.kind, victim.health === 0, onImpact);
       this.effect(victim.x, victim.y, victim.health === 0 ? Math.max(.9, spec.splash) : .35, victim.health === 0, spec.color);
     }
+  }
+
+  private reportImpact(x: number, y: number, vx: number, vy: number, surface: WeaponImpact['surface'],
+    destroyed: boolean, onImpact: (impact: WeaponImpact) => void): void {
+    const speed = Math.hypot(vx, vy) || 1;
+    onImpact({ x, y, directionX: vx / speed, directionY: vy / speed, surface, destroyed });
   }
 
   private effect(x: number, y: number, size: number, destroyed: boolean, color: string): void {

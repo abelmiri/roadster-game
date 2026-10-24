@@ -1,15 +1,20 @@
 import RAPIER from '@dimforge/rapier2d-compat';
 import type { Collider, EventQueue, RigidBody, World } from '@dimforge/rapier2d-compat';
-import { CHUNK_LENGTH, TrackGenerator, roadHeight, roadSlope, loopsBetween, loopGeometry, type LoopSpec, type HazardSpec, type TrackChunk } from './track';
+import { CHUNK_LENGTH, START_APRON_X, TrackGenerator, roadHeight, roadSlope, sampleRoad, loopsBetween, loopGeometry, type LoopSpec, type HazardSpec, type TrackChunk } from './track';
 import { CAR_AXLE_Y, CAR_BODY_CLEARANCE, CAR_WHEEL_OFFSET, CAR_WHEEL_RADIUS, sprungBodyPose } from './vehicle';
 import { VehicleSuspension } from './suspension';
+import { WheelContactPhysics, ROAD_GRAVITY, type ContactBody } from './wheelContact';
 import { PolicePursuit, type PoliceMode } from './pursuit';
+import { PoliceWreck, type PoliceWreckSnapshot } from './policeWreck';
 import { LOOP_XP, OBSTACLE_XP, POLICE_XP } from './experience';
 import { VehicleDamage } from './damage';
-import { VehicleWeapon, type AimDirection, type CombatTarget, type WeaponId, type WeaponSnapshot } from './weapons';
+import type { BreakEvent } from './obstacleDebris';
+import type { SparkEvent } from './impactSparks';
+import { VehicleWeapon, type AimDirection, type CombatTarget, type WeaponId, type WeaponSnapshot, type WeaponImpact } from './weapons';
 
 export const FIXED_STEP = 1 / 120;
 export const START_SPEED = 14;
+export const JUMP_THRUST_DURATION = 0.19;
 
 export interface Controls {
   jumpPressed: boolean;
@@ -24,6 +29,9 @@ export interface BodyPose { x: number; y: number; angle: number }
 export interface GameSnapshot {
   car: BodyPose;
   wheels: [BodyPose, BodyPose];
+  wheelContacts: [boolean, boolean];
+  wheelTravel: [number, number];
+  wheelImpactSerials: [number, number];
   distance: number;
   speed: number;
   boost: number;
@@ -33,17 +41,25 @@ export interface GameSnapshot {
   suspensionOffset: number;
   suspensionPitch: number;
   jumpSerial: number;
+  jumpJetActive: boolean;
+  jumpJetRemaining: number;
   jumpsUsed: number;
   landingSerial: number;
   landingImpact: number;
   crashed: boolean;
+  wrecked: boolean;
   crashReason: 'road' | 'police';
   police: BodyPose & { visibility: number; pressure: number; gap: number; mode: PoliceMode; health: number; disabled: boolean };
+  policeWreck: PoliceWreckSnapshot | null;
   weapon: WeaponSnapshot;
   loop: { id: number; progress: number; centerX: number; centerY: number } | null;
   loopCompletions: number;
   obstaclesDestroyed: number;
   policeDestroyed: number;
+  breakSerial: number;
+  breakEvents: readonly BreakEvent[];
+  sparkSerial: number;
+  sparkEvents: readonly SparkEvent[];
   runXp: number;
   health: number;
   impactSerial: number;
@@ -70,7 +86,7 @@ interface RoadSupport { y: number; angle: number; contacts: number }
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 const angleDelta = (from: number, to: number): number => Math.atan2(Math.sin(to - from), Math.cos(to - from));
-const GRAVITY = 22;
+const GRAVITY = ROAD_GRAVITY;
 
 export class GamePhysics {
   readonly generator = new TrackGenerator();
@@ -80,46 +96,53 @@ export class GamePhysics {
   readonly wheels: [RigidBody, RigidBody];
   private readonly events: EventQueue;
   private readonly carColliders = new Set<number>();
-  private readonly hazardColliders = new Set<number>();
+  private readonly hazardColliders = new Map<number, ActiveHazard>();
   private previous: [BodyPose, BodyPose, BodyPose];
   private current: [BodyPose, BodyPose, BodyPose];
   private time = 0;
   private groundGrace = 0;
   private jumpLock = 0;
   private jumpHoldTime = 0;
+  private jumpJetActive = false;
   private jumpCount = 0;
   private charge = 1;
   private isGrounded = false;
   private fansOn = false;
   private boostOn = false;
   private wheelAngle = 0;
-  private crestCooldown = 0;
+  private readonly roadContact = new WheelContactPhysics({
+    height: roadHeight, slope: roadSlope, sample: sampleRoad, exists: (x) => this.generator.hasRoad(x),
+  });
   private readonly suspension = new VehicleSuspension();
   private previousSuspensionOffset = 0;
   private previousSuspensionPitch = 0;
-  private previousSpeed = START_SPEED;
   private readonly damage = new VehicleDamage();
-  private groundAngleOffset = 0;
-  private groundAngleVelocity = 0;
-  private groundAngleAcceleration = 0;
   private jumpSerial = 0;
   private landingSerial = 0;
   private landingImpact = 0;
   private readonly pursuit: PolicePursuit;
   private readonly weapon: VehicleWeapon;
   private policeHealth = 12;
+  private policeWreck: PoliceWreck | null = null;
   private previousPoliceX: number;
   private currentPoliceX: number;
   private readonly attemptedLoops = new Set<number>();
   private activeLoop: { spec: LoopSpec; progress: number; speed: number } | null = null;
   private loopCompletions = 0;
   private obstaclesDestroyed = 0;
+  private hazardViewTime = -1;
+  private hazardView: { id: string; kind: HazardSpec['kind']; x: number; y: number; phase: number }[] = [];
+  private breakSerial = 0;
+  private readonly breakEvents: BreakEvent[] = [];
+  private sparkSerial = 0;
+  private readonly sparkEvents: SparkEvent[] = [];
   private readonly destroyedHazards = new Set<string>();
   private policeDestroyed = 0;
   private furthestX: number;
   private boostExhausted = false;
   private crashReason: 'road' | 'police' = 'road';
   crashed = false;
+  private wrecked = false;
 
   constructor(private readonly startX = 7, loadout?: { id: WeaponId; xp: number }) {
     this.furthestX = startX;
@@ -167,21 +190,19 @@ export class GamePhysics {
         wheel,
       );
       this.carColliders.add(tire.handle);
-      this.world.createImpulseJoint(
-        RAPIER.JointData.revolute({ x: offset, y: CAR_AXLE_Y }, { x: 0, y: 0 }),
-        this.car,
-        wheel,
-        true,
-      ).setContactsEnabled(false);
       wheels.push(wheel);
     }
     this.wheels = wheels as [RigidBody, RigidBody];
 
     this.car.setLinvel({ x: START_SPEED, y: START_SPEED * Math.tan(startAngle) }, true);
     this.isGrounded = support !== null;
-    this.setGravity(this.isGrounded ? 0 : 1);
+    this.setGravity(0);
+    this.roadContact.sync(this.contactBody());
     this.syncWheels();
     this.ensureChunks(startX);
+    // The depot apron behind the start is solid even after wheels detach.
+    this.world.createCollider(RAPIER.ColliderDesc.cuboid(-START_APRON_X / 2, .25)
+      .setTranslation(START_APRON_X / 2, roadHeight(0) - .25).setFriction(.65).setRestitution(.12));
     this.current = this.readPoses();
     this.previous = this.current.map((pose) => ({ ...pose })) as [BodyPose, BodyPose, BodyPose];
   }
@@ -193,10 +214,8 @@ export class GamePhysics {
     }) as [BodyPose, BodyPose, BodyPose];
   }
 
-  /** Sample the two tire contact points on the continuous track curve.
-   * Road support is solved here instead of allowing polygon edges and rigid axles
-   * to inject energy into each other on landing. Rapier integrates the airborne
-   * assembly and detects hazard overlaps; ground contact removes normal velocity.
+  /** Reference pose for spawning, police and magnetic-loop joins. Ordinary
+   * player motion is determined by independent spring/tire forces instead.
    */
   private roadSupport(x: number, angleOffset = 0): RoadSupport | null {
     let angle = Math.atan(roadSlope(x)) + angleOffset;
@@ -214,21 +233,16 @@ export class GamePhysics {
       } else {
         angle = Math.atan(roadSlope(points[0].x)) + angleOffset;
       }
-      y = Math.max(...points.map((point) => point.h + CAR_WHEEL_RADIUS -
+      y = Math.max(...points.map((point) => point.h + CAR_WHEEL_RADIUS * Math.hypot(1, roadSlope(point.x)) -
         point.offset * Math.sin(angle) - CAR_AXLE_Y * Math.cos(angle)));
     }
     return { y, angle, contacts };
   }
 
-  private tireClearance(pose: BodyPose): number {
-    let clearance = Infinity;
-    for (const offset of [-CAR_WHEEL_OFFSET, CAR_WHEEL_OFFSET]) {
-      const x = pose.x + offset * Math.cos(pose.angle) - CAR_AXLE_Y * Math.sin(pose.angle);
-      if (!this.generator.hasRoad(x)) continue;
-      const y = pose.y + offset * Math.sin(pose.angle) + CAR_AXLE_Y * Math.cos(pose.angle);
-      clearance = Math.min(clearance, y - roadHeight(x) - CAR_WHEEL_RADIUS);
-    }
-    return clearance;
+  private contactBody(): ContactBody {
+    const p = this.car.translation();
+    const v = this.car.linvel();
+    return { ...p, angle: this.car.rotation(), vx: v.x, vy: v.y, omega: this.car.angvel() };
   }
 
   private setGravity(scale: number): void {
@@ -237,78 +251,25 @@ export class GamePhysics {
 
   private syncWheels(): void {
     const p = this.car.translation();
-    const v = this.car.linvel();
     const angle = this.car.rotation();
-    const omega = this.car.angvel();
     this.wheels.forEach((wheel, index) => {
-      const offset = index === 0 ? -CAR_WHEEL_OFFSET : CAR_WHEEL_OFFSET;
-      const dx = offset * Math.cos(angle) - CAR_AXLE_Y * Math.sin(angle);
-      const dy = offset * Math.sin(angle) + CAR_AXLE_Y * Math.cos(angle);
-      wheel.setTranslation({ x: p.x + dx, y: p.y + dy }, true);
-      wheel.setLinvel({ x: v.x - omega * dy, y: v.y + omega * dx }, true);
-      wheel.setRotation(this.wheelAngle, true);
-      wheel.setAngvel(-v.x / CAR_WHEEL_RADIUS, true);
-    });
-  }
-
-  private supportedVelocityY(x: number, support: RoadSupport, speed: number): number {
-    const next = this.roadSupport(x + speed * FIXED_STEP,
-      this.groundAngleOffset + this.groundAngleVelocity * FIXED_STEP);
-    return next ? (next.y - support.y) / FIXED_STEP : speed * Math.tan(support.angle);
-  }
-
-  private settleOnRoad(support: RoadSupport): void {
-    const p = this.car.translation();
-    const v = this.car.linvel();
-    if (!this.isGrounded) {
-      const impact = Math.max(0, v.x * Math.sin(support.angle) - v.y * Math.cos(support.angle));
-      const before = this.roadSupport(p.x - 0.3);
-      const after = this.roadSupport(p.x + 0.3);
-      const roadAngularVelocity = before && after ? angleDelta(before.angle, after.angle) / 0.6 * v.x : 0;
-      // Catch the first tire at its actual pitch. Then let the wheel carrier
-      // roll toward the road tangent, rather than dropping the nose through
-      // the surface or snapping the whole car flat on first contact.
-      this.groundAngleOffset = clamp(angleDelta(support.angle, this.car.rotation()), -0.75, 0.75);
-      this.groundAngleVelocity = 0;
-      support = this.roadSupport(p.x, this.groundAngleOffset) ?? support;
-      this.landingSerial++;
-      this.landingImpact = clamp(impact / 18, 0, 1);
-      this.suspension.land(impact, angleDelta(support.angle, this.car.rotation()),
-        (p.y - support.y) * Math.cos(support.angle), this.car.angvel() - roadAngularVelocity);
-    }
-    this.car.setTranslation({ x: p.x, y: support.y }, true);
-    this.car.setRotation(support.angle, true);
-    this.car.setAngvel(0, true);
-    const speed = clamp(v.x, 6, 23);
-    this.car.setLinvel({ x: speed, y: this.supportedVelocityY(p.x, support, speed) }, true);
-    this.isGrounded = true;
-    this.setGravity(0);
-  }
-
-  /** Inertial road loads excite the two body springs independently. */
-  private updateSuspension(): void {
-    const p = this.car.translation();
-    const speed = this.car.linvel().x;
-    const acceleration = (speed - this.previousSpeed) / FIXED_STEP;
-    let normalAcceleration = 0;
-    let roadAngularAcceleration = this.isGrounded ? this.groundAngleAcceleration : 0;
-    if (this.isGrounded) {
-      const sample = 0.4;
-      const before = this.roadSupport(p.x - sample);
-      const here = this.roadSupport(p.x);
-      const after = this.roadSupport(p.x + sample);
-      if (before?.contacts === 2 && here?.contacts === 2 && after?.contacts === 2) {
-        const slope = (after.y - before.y) / (2 * sample);
-        const curvature = (before.y - 2 * here.y + after.y) / (sample * sample);
-        const angleSlope = angleDelta(before.angle, after.angle) / (2 * sample);
-        const angleCurvature = (angleDelta(here.angle, before.angle) + angleDelta(here.angle, after.angle)) / (sample * sample);
-        normalAcceleration = curvature * speed * speed + slope * acceleration;
-        roadAngularAcceleration += angleCurvature * speed * speed + angleSlope * acceleration;
+      if (this.activeLoop) {
+        const offset = index ? CAR_WHEEL_OFFSET : -CAR_WHEEL_OFFSET;
+        wheel.setTranslation({
+          x: p.x + offset * Math.cos(angle) - CAR_AXLE_Y * Math.sin(angle),
+          y: p.y + offset * Math.sin(angle) + CAR_AXLE_Y * Math.cos(angle),
+        }, true);
+        wheel.setRotation(this.wheelAngle, true);
+      } else {
+        const contact = this.roadContact.wheels[index];
+        wheel.setTranslation({ x: contact.x, y: contact.y }, true);
+        wheel.setRotation(contact.angle, true);
       }
-    }
-    this.suspension.update({ grounded: this.isGrounded, normalAcceleration, roadAngularAcceleration,
-      forwardAcceleration: acceleration, suction: this.fansOn }, FIXED_STEP);
-    this.previousSpeed = speed;
+      // Tire motion is integrated by the independent contact solver. Rapier
+      // retains the sensors for obstacles, without a rigid axle undoing travel.
+      wheel.setLinvel({ x: 0, y: 0 }, true);
+      wheel.setAngvel(0, true);
+    });
   }
 
   private makeRoad(start: number, end: number): Collider {
@@ -319,7 +280,8 @@ export class GamePhysics {
       points[i * 2] = x;
       points[i * 2 + 1] = roadHeight(x);
     }
-    return this.world.createCollider(RAPIER.ColliderDesc.polyline(points).setSensor(true));
+    return this.world.createCollider(RAPIER.ColliderDesc.polyline(points)
+      .setFriction(0.65).setRestitution(0.12));
   }
 
   private addChunk(index: number): void {
@@ -343,21 +305,22 @@ export class GamePhysics {
           ? RAPIER.ColliderDesc.cuboid(0.54, 0.68)
           : RAPIER.ColliderDesc.cuboid(0.55, 0.58);
       const collider = this.world.createCollider(
-        shape.setSensor(true).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
+        shape.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
         body,
       );
       const destroyed = this.destroyedHazards.has(hazard.id);
       collider.setEnabled(!destroyed);
-      if (!destroyed) this.hazardColliders.add(collider.handle);
-      return { spec: hazard, body, collider, x: hazard.x, y,
+      const active = { spec: hazard, body, collider, x: hazard.x, y,
         health: destroyed ? 0 : hazard.kind === 'drone' ? 2 : hazard.kind === 'pulse' ? 4 : 3 };
+      if (!destroyed) this.hazardColliders.set(collider.handle, active);
+      return active;
     });
 
     this.chunks.set(index, { spec, roads, hazards });
   }
 
-  private ensureChunks(x: number): void {
-    const first = Math.max(0, Math.floor((x - 40) / CHUNK_LENGTH));
+  private ensureChunks(x: number, rearX = x): void {
+    const first = Math.max(0, Math.floor((rearX - 40) / CHUNK_LENGTH));
     const last = Math.floor((x + 95) / CHUNK_LENGTH);
     for (let index = first; index <= last; index++) {
       if (!this.chunks.has(index)) this.addChunk(index);
@@ -377,6 +340,7 @@ export class GamePhysics {
   private updateHazards(): void {
     for (const chunk of this.chunks.values()) {
       for (const hazard of chunk.hazards) {
+        if (hazard.health <= 0) continue;
         const { spec } = hazard;
         hazard.x = spec.x + (spec.kind === 'drone' ? Math.sin(this.time * 0.9 + spec.phase) * 0.58 : 0);
         hazard.y = spec.y + (spec.kind === 'drone'
@@ -426,7 +390,8 @@ export class GamePhysics {
       this.jumpHoldTime = 1;
       this.groundGrace = 0;
       this.car.setRotation(Math.atan2(Math.sin(this.car.rotation()), Math.cos(this.car.rotation())), true);
-      this.setGravity(1);
+      this.roadContact.release(this.contactBody(), this.wheelAngle);
+      this.setGravity(0);
       return false;
     }
     const geometry = loopGeometry(active.spec);
@@ -451,7 +416,6 @@ export class GamePhysics {
     this.suspension.update({ grounded: true,
       normalAcceleration: active.speed * active.speed / radius + GRAVITY * (Math.cos(angle) - 1),
       roadAngularAcceleration: 0, forwardAcceleration: 0, suction: true }, FIXED_STEP);
-    this.previousSpeed = active.speed;
     this.pursuit.update(FIXED_STEP, this.boostOn, { x: this.car.translation().x, speed: active.speed });
     this.currentPoliceX = this.pursuit.x;
     this.furthestX = Math.max(this.furthestX, this.car.translation().x);
@@ -463,14 +427,11 @@ export class GamePhysics {
       this.jumpHoldTime = 1;
       this.jumpCount = 0;
       this.groundGrace = 0.10;
-      this.groundAngleOffset = 0;
-      this.groundAngleVelocity = 0;
-      this.groundAngleAcceleration = 0;
       this.car.setRotation(geometry.angle, true);
       const support = this.roadSupport(this.car.translation().x);
-      if (support) this.settleOnRoad(support);
+      if (support) this.car.setTranslation({ x: this.car.translation().x, y: support.y }, true);
+      this.roadContact.sync(this.contactBody());
       this.car.setAngvel(0, true);
-      this.previousSpeed = this.car.linvel().x;
       this.syncWheels();
     }
     this.updateWeapon(controls);
@@ -482,10 +443,13 @@ export class GamePhysics {
     const p = this.car.translation();
     this.pursuit.update(FIXED_STEP, this.boostOn, { x: p.x, speed: this.car.linvel().x });
     this.currentPoliceX = this.pursuit.x;
-    const policeY = this.roadSupport(this.pursuit.x)?.y ?? roadHeight(this.pursuit.x) + CAR_BODY_CLEARANCE;
-    if (!this.pursuit.disabled && Math.abs(p.x - this.pursuit.x) <= 3.9 && Math.abs(p.y - policeY) < 0.95 && this.pursuit.visibility > 0.5 &&
-        this.registerImpact('police')) {
-      this.pursuit.afterImpact();
+    if (!this.pursuit.disabled && this.pursuit.visibility > 0.5 && Math.abs(p.x - this.pursuit.x) <= 3.9) {
+      const policeY = this.roadSupport(this.pursuit.x)?.y ?? roadHeight(this.pursuit.x) + CAR_BODY_CLEARANCE;
+      if (Math.abs(p.y - policeY) < 0.95 && this.registerImpact('police')) {
+        const v = this.car.linvel();
+        this.emitSparks((p.x + this.pursuit.x) * 0.5, p.y - 0.1, v.x, v.y);
+        this.pursuit.afterImpact();
+      }
     }
   }
 
@@ -507,7 +471,8 @@ export class GamePhysics {
         radius: .95, health: this.policeHealth });
     }
     const p = this.car.translation();
-    const body = sprungBodyPose({ ...p, angle: this.car.rotation() }, this.suspension.offset, this.suspension.pitch);
+    const body = sprungBodyPose({ ...p, angle: this.car.rotation() },
+      this.activeLoop ? this.suspension.offset : 0, this.activeLoop ? this.suspension.pitch : 0);
     const v = this.car.linvel();
     this.weapon.step(FIXED_STEP, controls, { ...body, vx: v.x, vy: v.y }, targets, (target) => {
       if (target.kind === 'police') {
@@ -515,25 +480,69 @@ export class GamePhysics {
         this.policeHealth = target.health;
         if (destroyed) {
           this.policeDestroyed++;
+          const support = this.roadSupport(this.pursuit.x);
+          this.policeWreck?.dispose();
+          this.policeWreck = new PoliceWreck(this.world, this.policeDestroyed,
+            { x: this.pursuit.x, y: target.y - .2, angle: support?.angle ?? 0 }, this.pursuit.speed);
           this.pursuit.disable(8);
+          this.addBreakEvent({ hazardId: 'police', kind: 'police', x: target.x, y: target.y,
+            speed: this.car.linvel().x, source: 'weapon' });
         }
       } else {
         const hazard = active.get(target.id);
         if (!hazard || hazard.health <= 0) return;
-        hazard.health = target.health;
-        if (target.health === 0) {
-          this.destroyedHazards.add(target.id);
-          this.obstaclesDestroyed++;
-          hazard.collider.setEnabled(false);
-          this.hazardColliders.delete(hazard.collider.handle);
-        }
+        if (target.health === 0) this.breakHazard(hazard, 'weapon', this.car.linvel().x);
+        else hazard.health = target.health;
       }
-    }, roadHeight);
+    }, x => this.generator.hasRoad(x) ? roadHeight(x) : -Infinity, impact => this.emitWeaponSparks(impact));
+  }
+
+  private breakHazard(hazard: ActiveHazard, source: BreakEvent['source'], speed: number): void {
+    if (hazard.health <= 0) return;
+    hazard.health = 0;
+    this.hazardViewTime = -1;
+    hazard.collider.setEnabled(false);
+    this.hazardColliders.delete(hazard.collider.handle);
+    this.destroyedHazards.add(hazard.spec.id);
+    if (source === 'weapon') this.obstaclesDestroyed++;
+    this.addBreakEvent({ hazardId: hazard.spec.id, kind: hazard.spec.kind,
+      x: hazard.x, y: hazard.y, speed, source });
+  }
+
+  private addBreakEvent(event: Omit<BreakEvent, 'serial' | 'age'>): void {
+    this.breakEvents.push({ ...event, serial: ++this.breakSerial, age: 0 });
+    if (this.breakEvents.length > 32) this.breakEvents.shift();
+  }
+
+  private emitSparks(x: number, y: number, vx: number, vy: number): void {
+    this.sparkEvents.push({ serial: ++this.sparkSerial, x, y, vx, vy, strength: Math.hypot(vx, vy), age: 0, kind: 'collision' });
+    if (this.sparkEvents.length > 24) this.sparkEvents.shift();
+  }
+
+  private emitWeaponSparks(impact: WeaponImpact): void {
+    this.sparkEvents.push({ serial: ++this.sparkSerial, x: impact.x, y: impact.y,
+      vx: 0, vy: 0, directionX: impact.directionX, directionY: impact.directionY,
+      strength: impact.destroyed ? 24 : 10, age: 0, kind: impact.surface === 'terrain' ? 'terrain' : 'projectile' });
+    if (this.sparkEvents.length > 24) this.sparkEvents.shift();
+  }
+
+  private advancePoliceWreck(): void {
+    if (!this.policeWreck) return;
+    this.policeWreck.beforeStep(FIXED_STEP);
+    if (this.policeWreck.age > 10 || this.car.translation().x - this.policeWreck.body.translation().x > 75) {
+      this.policeWreck.dispose();
+      this.policeWreck = null;
+    }
+  }
+
+  private ageSparks(): void {
+    for (const event of this.sparkEvents) event.age += FIXED_STEP;
+    while (this.sparkEvents.length && this.sparkEvents[0].age > 2.5) this.sparkEvents.shift();
   }
 
   private registerImpact(source: 'road' | 'police'): boolean {
     if (!this.damage.hit()) return false;
-    this.suspension.land(4.5, 0, 0);
+    if (this.activeLoop) this.suspension.land(4.5, 0, 0);
     if (this.damage.health === 0) {
       this.crashed = true;
       this.crashReason = source;
@@ -543,166 +552,191 @@ export class GamePhysics {
 
   step(controls: Controls): void {
     if (this.crashed) return;
+    this.jumpJetActive = false;
     this.damage.step(FIXED_STEP);
     this.previousPoliceX = this.currentPoliceX;
     this.previousSuspensionOffset = this.suspension.offset;
     this.previousSuspensionPitch = this.suspension.pitch;
-    for (const body of [this.car, ...this.wheels]) {
-      body.resetForces(true);
-      body.resetTorques(true);
-    }
     this.previous = this.current.map((pose) => ({ ...pose })) as [BodyPose, BodyPose, BodyPose];
     this.time += FIXED_STEP;
+    this.ageSparks();
+    this.advancePoliceWreck();
+    for (const event of this.breakEvents) event.age += FIXED_STEP;
+    while (this.breakEvents.length && this.breakEvents[0].age > 2.5) this.breakEvents.shift();
     this.jumpLock = Math.max(0, this.jumpLock - FIXED_STEP);
-    this.crestCooldown = Math.max(0, this.crestCooldown - FIXED_STEP);
-    const positionBefore = this.car.translation();
-    this.ensureChunks(positionBefore.x);
+    const before = this.contactBody();
+    this.ensureChunks(before.x);
     if (this.stepLoop(controls)) return;
-    this.groundAngleAcceleration = this.isGrounded ? -140 * this.groundAngleOffset - 24 * this.groundAngleVelocity : 0;
-    if (this.isGrounded) {
-      this.groundAngleVelocity += this.groundAngleAcceleration * FIXED_STEP;
-      this.groundAngleOffset += this.groundAngleVelocity * FIXED_STEP;
-    }
-    let support = this.roadSupport(positionBefore.x, this.isGrounded ? this.groundAngleOffset : 0);
-    const tireClearanceBefore = this.tireClearance({ ...positionBefore, angle: this.car.rotation() });
-    const clearance = support ? positionBefore.y - support.y : Infinity;
-    const angle = this.car.rotation();
-    if (support && clearance < 0.30 && Math.abs(angle) > 1.65) {
+
+    const support = this.roadSupport(before.x);
+    if (support && before.y < support.y + 0.3 && Math.abs(before.angle) > 1.65) {
       this.crashed = true;
+      this.beginWreck();
       this.current = this.readPoses();
       return;
     }
-    if (!support || Math.abs(clearance) > 0.20 || this.jumpLock > 0) this.isGrounded = false;
-
-    let velocity = { ...this.car.linvel() };
-    if (!this.isGrounded && support && this.jumpLock === 0 && tireClearanceBefore <= 0.005 && tireClearanceBefore > -0.15 &&
-        velocity.y - velocity.x * Math.tan(support.angle) <= 0.2 && Math.abs(angle) < 1.4) {
-      this.settleOnRoad(support);
-      support = this.roadSupport(positionBefore.x, this.groundAngleOffset);
-      velocity = { ...this.car.linvel() };
-    }
-
-    // Only a sufficiently fast convex crest can release road support. Ordinary
-    // contours remain planted; suction also keeps fast crests planted.
-    if (this.isGrounded && support?.contacts === 2 && Math.abs(this.groundAngleOffset) < 0.025 &&
-        velocity.x > 16.5 && !controls.suction && this.crestCooldown === 0) {
-      const before = this.roadSupport(positionBefore.x - 0.2);
-      const here = this.roadSupport(positionBefore.x);
-      const after = this.roadSupport(positionBefore.x + 0.2);
-      if (before?.contacts === 2 && here?.contacts === 2 && after?.contacts === 2) {
-        const curvature = (before.y - 2 * here.y + after.y) / 0.04;
-        if (curvature * velocity.x * velocity.x < -GRAVITY * 0.95) {
-          this.isGrounded = false;
-          // Allow three steps to leave the crest. A small hop can return in
-          // less than 0.1 s, so a long jump lock would miss its landing.
-          this.jumpLock = FIXED_STEP * 3;
-          this.crestCooldown = 0.8;
-          velocity.y += 0.9;
-        }
-      }
-    }
+    if (!this.roadContact.hasContact(before)) this.isGrounded = false;
     this.groundGrace = this.isGrounded ? 0.10 : Math.max(0, this.groundGrace - FIXED_STEP);
-    if (this.isGrounded) this.jumpCount = 0;
-
+    if (this.isGrounded && this.jumpLock === 0) this.jumpCount = 0;
     if (controls.jumpPressed) {
       const firstJump = this.jumpCount === 0 && (this.isGrounded || this.groundGrace > 0);
       const secondJump = this.jumpCount === 1 && !this.isGrounded;
       if (firstJump || secondJump) {
-        // Give all three bodies the same takeoff velocity: applying an impulse
-        // only to the chassis made the rigid wheel joints kick on the next step.
-        velocity.y = firstJump ? clamp(Math.max(0, velocity.y) + 9.4, 9.4, 12) : 9.2;
+        before.vy = firstJump ? clamp(Math.max(0, before.vy) + 9.4, 9.4, 12) : 9.2;
+        this.roadContact.beginJump(before, controls.jumpHeld);
         this.jumpCount = firstJump ? 1 : 2;
         this.jumpSerial++;
-        this.suspension.takeoff();
         this.groundGrace = 0;
         this.jumpLock = 0.16;
         this.jumpHoldTime = 0;
         this.isGrounded = false;
-        this.groundAngleOffset = 0;
-        this.groundAngleVelocity = 0;
       }
     }
-
-    velocity.x = this.driveSpeed(velocity.x, controls);
-
-    if (controls.jumpHeld && this.jumpCount > 0 && this.jumpHoldTime < 0.19 && velocity.y > 0) {
-      velocity.y += 14 * FIXED_STEP;
-      this.jumpHoldTime += FIXED_STEP;
+    before.vx = this.driveSpeed(before.vx, controls);
+    if (controls.jumpHeld && this.jumpCount > 0 && this.jumpHoldTime < JUMP_THRUST_DURATION && before.vy > 0) {
+      const thrustTime = Math.min(FIXED_STEP, JUMP_THRUST_DURATION - this.jumpHoldTime);
+      before.vy += 14 * thrustTime;
+      this.jumpHoldTime += thrustTime;
+      this.jumpJetActive = true;
     } else if (!controls.jumpHeld) {
       this.jumpHoldTime = 1;
     }
 
-    this.fansOn = controls.suction && support !== null && clearance < 1.10 && clearance > -0.35 && this.jumpLock <= 0;
-    if (this.fansOn && !this.isGrounded) velocity.y -= 38 * FIXED_STEP;
-
-    if (this.isGrounded && support) {
-      velocity.y = this.supportedVelocityY(positionBefore.x, support, velocity.x);
-      this.car.setRotation(support.angle, true);
-      this.car.setAngvel(0, true);
-    } else {
-      const targetAngle = support && clearance < 1.5
-        ? support.angle
-        : clamp(velocity.y * 0.025, -0.28, 0.32);
-      this.car.setAngvel(clamp(angleDelta(angle, targetAngle) * 8, -1.6, 1.6), true);
+    // The chassis remains a free body: springs, dampers, tire impulses, gravity
+    // and finite fan forces determine its motion on the road and in the air.
+    const wasGrounded = this.isGrounded;
+    const body = this.roadContact.step(before, controls.suction && this.jumpLock <= 0.08, FIXED_STEP, this.jumpJetActive);
+    if (this.roadContact.undershot) this.crashed = true;
+    this.isGrounded = this.roadContact.wheels.some((wheel) => wheel.grounded);
+    this.fansOn = this.roadContact.suction > 0;
+    if (!wasGrounded && this.isGrounded && this.jumpLock <= 0) {
+      this.landingSerial++;
+      this.landingImpact = clamp(Math.max(...this.roadContact.wheels.map((wheel) => wheel.impact)) / 18, 0, 1);
+      this.jumpCount = 0;
+      this.jumpHoldTime = 1;
+      this.groundGrace = 0.10;
     }
-    this.car.setLinvel({ x: velocity.x, y: clamp(velocity.y, -25, 16) }, true);
-    this.setGravity(this.isGrounded ? 0 : 1);
+    this.car.setTranslation({ x: body.x, y: body.y }, true);
+    this.car.setRotation(body.angle, true);
+    this.car.setLinvel({ x: 0, y: 0 }, true);
+    this.car.setAngvel(0, true);
+    this.setGravity(0);
     this.syncWheels();
-
     this.updateHazards();
     this.world.step(this.events);
     this.events.drainCollisionEvents((first, second, started) => {
       if (!started) return;
-      if ((this.carColliders.has(first) && this.hazardColliders.has(second)) ||
-          (this.carColliders.has(second) && this.hazardColliders.has(first))) {
+      const hazard = this.carColliders.has(first) ? this.hazardColliders.get(second)
+        : this.carColliders.has(second) ? this.hazardColliders.get(first) : undefined;
+      if (hazard && hazard.health > 0) {
+        this.emitSparks(hazard.x - Math.sign(body.vx) * 0.5, hazard.y, body.vx, body.vy);
         this.registerImpact('road');
+        this.breakHazard(hazard, 'ram', body.vx);
       }
     });
-
-    const position = this.car.translation();
-    const landing = this.roadSupport(position.x, this.isGrounded ? this.groundAngleOffset : 0);
-    // A tire arriving below a broken road's far lip is an undershot gap,
-    // rather than a reason to teleport the assembly up through the road.
-    if (!support && landing && !this.isGrounded && position.y < landing.y - 0.05) this.crashed = true;
-    if (this.isGrounded) {
-      if (landing) this.settleOnRoad(landing);
-      else { this.isGrounded = false; this.setGravity(1); }
-    } else if (!this.crashed && landing && this.jumpLock <= 0 && Math.abs(this.car.rotation()) < 1.4) {
-      const depth = position.y - landing.y;
-      const tireDepth = this.tireClearance({ ...position, angle: this.car.rotation() });
-      const relativeVelocity = this.car.linvel().y - this.car.linvel().x * Math.tan(landing.angle);
-      const crossedRoad = support !== null && clearance >= 0 && depth <= 0.03;
-      const tireCrossedRoad = Number.isFinite(tireClearanceBefore) && tireClearanceBefore >= 0 && tireDepth <= 0.005;
-      const tireApproaching = tireDepth <= tireClearanceBefore + 0.0001;
-      if (tireDepth <= 0.005 && (tireDepth > -0.15 || tireCrossedRoad || crossedRoad) &&
-          (relativeVelocity <= 0.2 || tireApproaching)) {
-        this.settleOnRoad(landing);
-        this.jumpCount = 0;
-        this.jumpHoldTime = 1;
-        this.groundGrace = 0.10;
-      }
+    this.car.setLinvel({ x: body.vx, y: body.vy }, true);
+    this.car.setAngvel(body.omega, true);
+    if (body.y < roadHeight(body.x) - 5.5 || body.y < -8) this.crashed = true;
+    if (this.generator.hasRoad(body.x) && body.y - roadHeight(body.x) < CAR_BODY_CLEARANCE && Math.abs(body.angle) > 1.65) {
+      this.crashed = true;
     }
-    this.wheelAngle -= (position.x - positionBefore.x) / CAR_WHEEL_RADIUS;
-    this.syncWheels();
-    if (position.y < roadHeight(position.x) - 5.5 || position.y < -8) this.crashed = true;
-    if (this.generator.hasRoad(position.x) &&
-        position.y - roadHeight(position.x) < CAR_BODY_CLEARANCE &&
-        Math.abs(this.car.rotation()) > 1.65) this.crashed = true;
-    this.updateSuspension();
-    this.furthestX = Math.max(this.furthestX, position.x);
+    this.furthestX = Math.max(this.furthestX, body.x);
     this.updatePursuit();
     this.updateWeapon(controls);
+    if (this.crashed) this.beginWreck();
+    this.current = this.readPoses();
+  }
+
+  get impactSerial(): number { return this.damage.impactSerial; }
+  get explosionSerial(): number { return this.weapon.destructionSerial; }
+
+  /** Hand the sensors over to Rapier once the run ends. The tire solver no
+   * longer positions the wheels, and no driving or stabilization is applied. */
+  private beginWreck(): void {
+    if (this.wrecked) return;
+    this.wrecked = true;
+    this.activeLoop = null;
+    this.fansOn = this.boostOn = this.jumpJetActive = this.isGrounded = false;
+    const velocity = this.car.linvel();
+    const omega = this.car.angvel();
+    const carPosition = this.car.translation();
+    this.setGravity(1);
+    this.car.setLinearDamping(0.16);
+    this.car.setAngularDamping(0.45);
+    // Keep the broad chassis hull from interpenetrating the tire sensors at
+    // detachment. Both parts still collide with terrain and every obstacle.
+    this.car.collider(0).setCollisionGroups(0x00020001);
+    for (const handle of this.carColliders) {
+      const collider = this.world.getCollider(handle);
+      collider.setSensor(false);
+      collider.setFriction(0.6);
+      collider.setRestitution(0.16);
+    }
+    this.wheels.forEach((wheel, index) => {
+      const p = wheel.translation();
+      wheel.setLinvel({ x: velocity.x - omega * (p.y - carPosition.y) + (index ? 2.4 : -1.8),
+        y: velocity.y + omega * (p.x - carPosition.x) + 1.8 + index * 0.7 }, true);
+      wheel.setAngvel(-velocity.x / CAR_WHEEL_RADIUS + (index ? 3 : -3), true);
+      wheel.setLinearDamping(0.12);
+      wheel.setAngularDamping(0.3);
+      wheel.collider(0).setCollisionGroups(0x00040005);
+    });
+    this.car.setAngvel(omega + 0.7, true);
+    for (const chunk of this.chunks.values()) {
+      for (const road of chunk.roads) road.setSensor(false);
+      for (const hazard of chunk.hazards) hazard.collider.setSensor(false);
+    }
+  }
+
+  /** Fixed simulation time; the caller supplies a quarter as many steps in the
+   * game-over scene. Momentum is preserved rather than halving velocities. */
+  stepWreck(): void {
+    if (!this.crashed) return;
+    this.beginWreck();
+    this.previous = this.current.map(pose => ({ ...pose })) as [BodyPose, BodyPose, BodyPose];
+    this.time += FIXED_STEP;
+    this.ageSparks();
+    this.advancePoliceWreck();
+    for (const event of this.breakEvents) event.age += FIXED_STEP;
+    const partXs = [this.car, ...this.wheels].map(part => part.translation().x);
+    this.ensureChunks(Math.max(...partXs), Math.min(...partXs));
+    this.updateHazards();
+    const velocityBefore = this.car.linvel();
+    const spinBefore = this.car.angvel();
+    this.world.step(this.events);
+    this.events.drainCollisionEvents((first, second, started) => {
+      if (!started) return;
+      const partHandle = this.carColliders.has(first) ? first : this.carColliders.has(second) ? second : undefined;
+      if (partHandle === undefined) return;
+      const other = partHandle === first ? second : first;
+      const hazard = this.hazardColliders.get(other);
+      const part = this.world.getCollider(partHandle).parent();
+      if (!part || part.handle !== this.car.handle) return;
+      const p = part.translation();
+      if (Math.hypot(velocityBefore.x, velocityBefore.y) + Math.abs(spinBefore) < 2) return;
+      this.emitSparks(hazard ? (p.x + hazard.x) * 0.5 : p.x, hazard ? hazard.y : p.y - 0.25,
+        velocityBefore.x, velocityBefore.y);
+    });
+    const p = this.car.translation();
+    const v = this.car.linvel();
+    this.weapon.step(FIXED_STEP, {}, { ...p, angle: this.car.rotation(), vx: v.x, vy: v.y }, [], () => {}, roadHeight);
     this.current = this.readPoses();
   }
 
   get distance(): number {
-    return Math.max(0, Math.max(this.furthestX, this.car.translation().x) - this.startX);
+    return Math.max(0, (this.wrecked ? this.furthestX : Math.max(this.furthestX, this.car.translation().x)) - this.startX);
   }
 
   get hazardStates(): ReadonlyArray<{ id: string; kind: HazardSpec['kind']; x: number; y: number; phase: number }> {
-    return [...this.chunks.values()].flatMap((chunk) => chunk.hazards.filter(hazard => hazard.health > 0).map((hazard) => ({
-      id: hazard.spec.id, kind: hazard.spec.kind, x: hazard.x, y: hazard.y, phase: hazard.spec.phase,
-    })));
+    if (this.hazardViewTime !== this.time) {
+      this.hazardViewTime = this.time;
+      this.hazardView = [];
+      for (const chunk of this.chunks.values()) for (const hazard of chunk.hazards) {
+        if (hazard.health > 0) this.hazardView.push({ id: hazard.spec.id, kind: hazard.spec.kind,
+          x: hazard.x, y: hazard.y, phase: hazard.spec.phase });
+      }
+    }
+    return this.hazardView;
   }
 
   snapshot(alpha: number): GameSnapshot {
@@ -716,22 +750,30 @@ export class GamePhysics {
     const loopCenter = this.activeLoop ? loopGeometry(this.activeLoop.spec) : null;
     return {
       car: pose(0), wheels: [pose(1), pose(2)], distance: this.distance,
+      wheelContacts: this.roadContact.wheels.map((wheel) => this.activeLoop !== null || wheel.grounded) as [boolean, boolean],
+      wheelTravel: this.roadContact.wheels.map((wheel) => this.activeLoop ? 0 : wheel.travel) as [number, number],
+      wheelImpactSerials: this.roadContact.wheels.map((wheel) => wheel.impactSerial) as [number, number],
       speed: this.activeLoop?.speed ?? this.car.linvel().x, boost: this.charge, grounded: this.isGrounded,
-      suctionActive: this.fansOn, boostActive: this.boostOn, crashed: this.crashed,
-      suspensionOffset: lerp(this.previousSuspensionOffset, this.suspension.offset, alpha),
-      suspensionPitch: lerp(this.previousSuspensionPitch, this.suspension.pitch, alpha),
+      suctionActive: this.fansOn, boostActive: this.boostOn, crashed: this.crashed, wrecked: this.wrecked,
+      suspensionOffset: this.activeLoop ? lerp(this.previousSuspensionOffset, this.suspension.offset, alpha) : 0,
+      suspensionPitch: this.activeLoop ? lerp(this.previousSuspensionPitch, this.suspension.pitch, alpha) : 0,
       jumpSerial: this.jumpSerial, jumpsUsed: this.jumpCount,
+      jumpJetActive: this.jumpJetActive,
+      jumpJetRemaining: this.jumpCount > 0 ? Math.max(0, JUMP_THRUST_DURATION - this.jumpHoldTime) : 0,
       landingSerial: this.landingSerial, landingImpact: this.landingImpact,
       crashReason: this.crashReason,
       police: { x: policeX, y: policeSupport?.y ?? roadHeight(policeX) + CAR_BODY_CLEARANCE,
         angle: policeSupport?.angle ?? Math.atan(roadSlope(policeX)),
         visibility: this.pursuit.visibility, pressure: this.pursuit.pressure, gap: this.pursuit.gap, mode: this.pursuit.mode,
         health: this.policeHealth, disabled: this.pursuit.disabled },
+      policeWreck: this.policeWreck?.snapshot(alpha) ?? null,
       weapon: this.weapon.snapshot(alpha),
       loop: this.activeLoop && loopCenter ? { id: this.activeLoop.spec.id, progress: this.activeLoop.progress / (Math.PI * 2),
         centerX: loopCenter.x, centerY: loopCenter.y } : null,
       loopCompletions: this.loopCompletions,
       obstaclesDestroyed: this.obstaclesDestroyed, policeDestroyed: this.policeDestroyed,
+      breakSerial: this.breakSerial, breakEvents: this.breakEvents,
+      sparkSerial: this.sparkSerial, sparkEvents: this.sparkEvents,
       runXp: this.loopCompletions * LOOP_XP + this.obstaclesDestroyed * OBSTACLE_XP + this.policeDestroyed * POLICE_XP,
       health: this.damage.health, impactSerial: this.damage.impactSerial,
       invincibilityRemaining: this.damage.invincibilityRemaining,

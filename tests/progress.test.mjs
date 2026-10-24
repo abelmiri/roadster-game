@@ -20,12 +20,12 @@ function advance(pursuit, seconds, boost = false) {
 }
 test('police gives warning before closing and boost drives it back', () => {
   const pursuit = new PolicePursuit();
-  advance(pursuit, 9);
+  advance(pursuit, 11);
   assert.equal(pursuit.visibility, 0);
   advance(pursuit, 3);
   assert.ok(pursuit.visibility > .8);
   assert.ok(pursuit.gap >= 29.9);
-  advance(pursuit, 4);
+  advance(pursuit, 5);
   assert.ok(pursuit.gap < 20);
   const before = pursuit.gap;
   advance(pursuit, 1, true);
@@ -33,7 +33,7 @@ test('police gives warning before closing and boost drives it back', () => {
   assert.equal(pursuit.idleSeconds, 0);
   advance(pursuit, 3);
   assert.ok(pursuit.visibility < .2);
-  advance(pursuit, 22);
+  advance(pursuit, 25);
   assert.equal(pursuit.gap, 3.5);
 });
 test('police drives straight forward during a loop even when the player travels backward', () => {
@@ -64,7 +64,7 @@ test('a hidden patrol cannot bypass a loop and later spawn ahead when the warnin
     pursuit.finishLoop(completed);
     assert.equal(pursuit.visibility, 0);
     let x = 300;
-    for (let i = 0; i < 1201; i++) {
+    for (let i = 0; i < 1441; i++) {
       x += 14 / 120;
       pursuit.update(1 / 120, false, { x, speed: 14 });
     }
@@ -80,7 +80,7 @@ test('a hidden patrol cannot bypass a loop and later spawn ahead when the warnin
 
 test('a pursuit starting during a loop appears behind and then drives forward on the road', () => {
   const pursuit = new PolicePursuit(300);
-  advance(pursuit, 9.5);
+  advance(pursuit, 11.5);
   const loopX = pursuit.x + pursuit.gap;
   pursuit.beginLoop(loopX, 16);
   let previous = null;
@@ -240,7 +240,7 @@ test('a disabled patrol fades in place and a replacement waits before approachin
   assert.equal(pursuit.disabled,false);
   assert.equal(pursuit.visibility,0);
   assert.ok(pursuit.gap>=29.9);
-  advance(pursuit,9);
+  advance(pursuit,11);
   assert.equal(pursuit.visibility,0);
   advance(pursuit,1);
   assert.ok(pursuit.visibility>0);

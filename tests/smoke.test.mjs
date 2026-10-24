@@ -15,8 +15,31 @@ before(async () => {
 
 const snapshot = (patch = {}) => ({
   car: { x: 10, y: 4, angle: 0 }, distance: 3, speed: 12,
-  grounded: false, boostActive: false, crashed: false,
+  grounded: false, boostActive: false, crashed: false, health: 100, wrecked: false,
   suspensionOffset: 0, suspensionPitch: 0, jumpSerial: 0, ...patch,
+});
+
+test('the final damage stage emits rising black smoke during the game-over simulation and clears on restart', () => {
+  const smoke = new CarSmoke();
+  try {
+    smoke.update(snapshot({ health: 25 }), 0.06);
+    assert.equal(smoke.activeCount, 0, 'black smoke should start at the final stage');
+    const wreck = snapshot({ health: 0, wrecked: true, crashed: true, speed: 0 });
+    smoke.update(wreck, 0.06);
+    const before = positions(smoke);
+    assert.ok(before.length > 0);
+    const darkness = smoke.mesh.geometry.getAttribute('smokeDarkness');
+    assert.ok(Array.from({ length: smoke.activeCount }, (_, i) => darkness.getX(i)).every(value => value > 0.9));
+    smoke.update(wreck, 0.01);
+    assert.ok(positions(smoke).every((puff, i) => puff.y > before[i].y));
+    const frozen = positions(smoke);
+    smoke.update(wreck, 1, false);
+    assert.deepEqual(positions(smoke), frozen);
+    for (let i = 0; i < 600; i++) smoke.update(wreck, 1 / 60);
+    assert.ok(smoke.activeCount > 30 && smoke.activeCount <= 128);
+    smoke.update(snapshot(), 0);
+    assert.equal(smoke.activeCount, 0, 'restart kept smoke from the previous wreck');
+  } finally { smoke.dispose(); }
 });
 
 function positions(smoke) {
@@ -59,14 +82,31 @@ test('each accepted jump emits underneath, including the double jump', () => {
   } finally { smoke.dispose(); }
 });
 
+test('downward smoke follows active jump thrust and stops emitting as soon as it ends', () => {
+  const smoke = new CarSmoke();
+  try {
+    smoke.update(snapshot({ jumpSerial: 1, jumpJetActive: true }), 1 / 120);
+    const burst = smoke.activeCount;
+    smoke.update(snapshot({ jumpSerial: 1, jumpJetActive: true }), 0.06);
+    assert.ok(smoke.activeCount > burst);
+    const held = smoke.activeCount;
+    smoke.update(snapshot({ jumpSerial: 1, jumpJetActive: false }), 0.06);
+    assert.equal(smoke.activeCount, held, 'released jets kept emitting fresh smoke');
+    for (let i = 0; i < 90; i++) smoke.update(snapshot({ jumpSerial: 1, jumpJetActive: false }), 1 / 60);
+    assert.equal(smoke.activeCount, 0);
+  } finally { smoke.dispose(); }
+});
+
 test('smoke freezes when paused, clears on restart, and stays in its fixed pool', () => {
   const smoke = new CarSmoke();
   try {
     for (let i = 0; i < 1000; i++) smoke.update(snapshot({ boostActive: true }), 1 / 60);
     assert.ok(smoke.activeCount > 0 && smoke.activeCount <= 128);
     const before = positions(smoke);
+    const uploadVersion = smoke.mesh.instanceMatrix.version;
     smoke.update(snapshot({ boostActive: true }), 1, false);
     assert.deepEqual(positions(smoke), before);
+    assert.equal(smoke.mesh.instanceMatrix.version, uploadVersion, 'paused smoke uploaded unchanged instances');
     smoke.update(snapshot({ distance: 0, jumpSerial: 0 }), 0, false);
     assert.equal(smoke.activeCount, 0);
   } finally { smoke.dispose(); }

@@ -116,6 +116,31 @@ test('terrain blocks bullets and laser beams before an occluded target',()=>{
     assert.equal(target.health,3,id);
   }
 });
+
+test('bullet and laser impacts report the incoming direction on terrain and surviving police',()=>{
+  for(const id of ['machine-gun','laser-gun'])for(const direction of [1,-1]){
+    const weapon=new VehicleWeapon(id);advance(weapon,.7,{aim:direction});
+    const target={id:'police',kind:'police',x:direction*9,y:1.08,radius:.7,health:12};
+    const impacts=[];
+    for(let i=0;i<60&&!impacts.length;i++)weapon.step(1/120,{fire:i===0,aim:direction},pose,[target],()=>{},()=>-10,hit=>impacts.push(hit));
+    assert.equal(impacts.length,1,id);
+    assert.equal(impacts[0].surface,'police');
+    assert.equal(impacts[0].destroyed,false);
+    assert.ok(impacts[0].directionX*direction>.9);
+    assert.ok(Math.abs(Math.hypot(impacts[0].directionX,impacts[0].directionY)-1)<1e-9);
+    assert.ok(target.health>0&&target.health<12);
+    const groundWeapon=new VehicleWeapon(id);
+    const ground=[];
+    const floor=x=>x>5?.85+(x-5)*.3:-10;
+    for(let i=0;i<60&&!ground.length;i++)groundWeapon.step(1/120,{fire:i===0},pose,[],()=>{},floor,hit=>ground.push(hit));
+    assert.equal(ground.length,1,id);
+    assert.equal(ground[0].surface,'terrain');
+    assert.equal(ground[0].destroyed,false);
+    assert.ok(Math.abs(ground[0].x-5)<.02);
+    assert.ok(ground[0].directionX>.99);
+    assert.equal(groundWeapon.snapshot().destroySerial,0);
+  }
+});
 test('all eight 3D models animate from snapshots, reuse projectile/effect pools, and dispose cleanly',()=>{
   const visual=new WeaponVisual();const combat=new CombatVisual();
   const pool=combat.group.children.length;

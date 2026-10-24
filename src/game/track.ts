@@ -1,4 +1,5 @@
 export const CHUNK_LENGTH = 30;
+export const START_APRON_X = -64;
 
 export type HazardKind = 'barrier' | 'drone' | 'pulse';
 
@@ -23,12 +24,15 @@ export interface LoopSpec { id: number; entryX: number; radius: number }
 const loops: LoopSpec[] = [];
 
 /** Stable procedural spacing, including when chunks are visited out of order. */
-export function loopsBetween(start: number, end: number): LoopSpec[] {
+function ensureLoops(end: number): void {
   while (!loops.length || loops[loops.length - 1].entryX < end + 30) {
     const id = loops.length;
     const previous = id ? loops[id - 1].entryX : 7;
     loops.push({ id, entryX: previous + 200 + Math.floor(hash(id + 770) * 201), radius: 5.6 + hash(id + 811) * 0.4 });
   }
+}
+
+function firstLoopAt(start: number): number {
   let low = 0;
   let high = loops.length;
   while (low < high) {
@@ -36,6 +40,12 @@ export function loopsBetween(start: number, end: number): LoopSpec[] {
     if (loops[mid].entryX < start) low = mid + 1;
     else high = mid;
   }
+  return low;
+}
+
+export function loopsBetween(start: number, end: number): LoopSpec[] {
+  ensureLoops(end);
+  const low = firstLoopAt(start);
   const result: LoopSpec[] = [];
   for (let i = low; i < loops.length && loops[i].entryX <= end; i++) result.push(loops[i]);
   return result;
@@ -44,19 +54,27 @@ export function loopsBetween(start: number, end: number): LoopSpec[] {
 const baseHeight = (x: number): number => 1.15 + 0.72 * Math.sin(x * 0.105) + 0.92 * Math.sin(x * 0.30);
 const baseSlope = (x: number): number => 0.72 * 0.105 * Math.cos(x * 0.105) + 0.92 * 0.30 * Math.cos(x * 0.30);
 
-/** A tangent run-in keeps the circular branch and the ordinary road continuous. */
-function loopRoad(x: number): { height: number; slope: number } | null {
-  const loop = loopsBetween(x - 17, x + 17)[0];
-  if (!loop) return null;
+export interface RoadSample { height: number; slope: number }
+
+/** Shared allocation-free sample for suspension contacts. */
+export function sampleRoad(x: number, result: RoadSample): void {
+  if (x < 0) { result.height = baseHeight(0); result.slope = 0; return; }
+  ensureLoops(x + 17);
+  const loop = loops[firstLoopAt(x - 17)];
+  const height = baseHeight(x);
+  const slope = baseSlope(x);
+  if (!loop || loop.entryX > x + 17) { result.height = height; result.slope = slope; return; }
   const dx = x - loop.entryX;
   const a = Math.abs(dx);
   const t = Math.max(0, Math.min(1, (a - 8) / 9));
   const weight = 1 - t * t * (3 - 2 * t);
   const derivative = a <= 8 ? 0 : -6 * t * (1 - t) * Math.sign(dx) / 9;
-  const line = baseHeight(loop.entryX) + baseSlope(loop.entryX) * dx;
-  return { height: baseHeight(x) + weight * (line - baseHeight(x)),
-    slope: baseSlope(x) + weight * (baseSlope(loop.entryX) - baseSlope(x)) + derivative * (line - baseHeight(x)) };
+  const entrySlope = baseSlope(loop.entryX);
+  const line = baseHeight(loop.entryX) + entrySlope * dx;
+  result.height = height + weight * (line - height);
+  result.slope = slope + weight * (entrySlope - slope) + derivative * (line - height);
 }
+const roadSample: RoadSample = { height: 0, slope: 0 };
 
 export function loopGeometry(loop: LoopSpec): { x: number; y: number; angle: number } {
   const angle = Math.atan(roadSlope(loop.entryX));
@@ -72,11 +90,13 @@ export function hash(seed: number): number {
 
 /** The same continuous curve drives the visible road and its physics collider. */
 export function roadHeight(x: number): number {
-  return loopRoad(x)?.height ?? baseHeight(x);
+  sampleRoad(x, roadSample);
+  return roadSample.height;
 }
 
 export function roadSlope(x: number): number {
-  return loopRoad(x)?.slope ?? baseSlope(x);
+  sampleRoad(x, roadSample);
+  return roadSample.slope;
 }
 
 export function getDistrict(distance: number): number {
@@ -117,7 +137,7 @@ export class TrackGenerator {
   }
 
   hasRoad(x: number): boolean {
-    if (x < 0) return false;
+    if (x < 0) return x >= START_APRON_X;
     const chunk = this.chunk(Math.floor(x / CHUNK_LENGTH));
     return !chunk.gap || x < chunk.gap.start || x > chunk.gap.end;
   }
