@@ -3,22 +3,22 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
-let VehicleDamage, ImpactPause, carVisibleDuringProtection, vehicleDamageStage, HIT_RECOVERY_SECONDS, EXPLOSION_PAUSE_SECONDS;
+let VehicleDamage, ImpactPause, ExplosionSlowMotion, carVisibleDuringProtection, vehicleDamageStage, HIT_RECOVERY_SECONDS;
 before(async () => {
   const outdir = path.resolve('node_modules/.cache/roadster-damage-tests');
   await build({ entryPoints: ['src/game/damage.ts'], bundle: true, platform: 'node',
     format: 'esm', outdir, outExtension: { '.js': '.mjs' } });
-  ({ VehicleDamage, ImpactPause, carVisibleDuringProtection, vehicleDamageStage, HIT_RECOVERY_SECONDS, EXPLOSION_PAUSE_SECONDS } = await import(pathToFileURL(path.join(outdir, 'damage.mjs')).href));
+  ({ VehicleDamage, ImpactPause, ExplosionSlowMotion, carVisibleDuringProtection, vehicleDamageStage, HIT_RECOVERY_SECONDS } = await import(pathToFileURL(path.join(outdir, 'damage.mjs')).href));
 });
-test('health maps to the four reference damage percentages and explosion hit stop never shortens a collision freeze', () => {
+test('health maps to the four reference damage percentages and explosions cannot shorten a collision freeze', () => {
   assert.deepEqual([100, 75, 50, 25, 0].map(vehicleDamageStage), [0, 1, 2, 3, 4]);
   const pause = new ImpactPause();
-  pause.start(EXPLOSION_PAUSE_SECONDS);
-  assert.equal(pause.consume(EXPLOSION_PAUSE_SECONDS - .001), 0);
-  assert.ok(pause.consume(.011) < .001, 'an explosion must ease out of its freeze');
-  assert.equal(pause.active, false);
-  assert.equal(pause.recovering, true);
-  pause.start(); pause.start(EXPLOSION_PAUSE_SECONDS);
+  const explosion = new ExplosionSlowMotion();
+  pause.start(); explosion.start();
+  assert.equal(Math.min(pause.consume(.2), explosion.consume(.2)), 0);
+  assert.ok(explosion.timeScale > 0);
+  assert.equal(pause.remaining, .3);
+  pause.start();
   assert.equal(pause.remaining, .5);
 });
 test('four separate impacts remove 25% each; protection blocks repeated collider events', () => {
@@ -70,8 +70,8 @@ test('hit stop handles long display frames, partial frames, pause, and reset', (
 
 test('speed eases monotonically from zero to normal with the same result for one frame or many', () => {
   const pause = new ImpactPause();
-  pause.start(EXPLOSION_PAUSE_SECONDS);
-  assert.equal(pause.consume(EXPLOSION_PAUSE_SECONDS), 0);
+  pause.start();
+  assert.equal(pause.consume(.5), 0);
   assert.equal(pause.timeScale, 0);
   let previous = 0;
   let total = 0;
@@ -87,10 +87,64 @@ test('speed eases monotonically from zero to normal with the same result for one
   assert.equal(pause.recovering, false);
   assert.equal(pause.consume(.016), .016);
   const single = new ImpactPause();
-  single.start(EXPLOSION_PAUSE_SECONDS);
-  assert.ok(Math.abs(single.consume(EXPLOSION_PAUSE_SECONDS + HIT_RECOVERY_SECONDS) - total) < 1e-9);
+  single.start();
+  assert.ok(Math.abs(single.consume(.5 + HIT_RECOVERY_SECONDS) - total) < 1e-9);
   single.start();
   assert.equal(single.timeScale, 0, 'a new hit must restart the freeze and recovery');
+});
+
+test('explosions ease down over 200 ms and recover over 1000 ms without ever stopping', () => {
+  const slow = new ExplosionSlowMotion();
+  slow.start();
+  assert.equal(slow.timeScale, 1);
+  let previous = 1;
+  for (let i = 0; i < 10; i++) {
+    assert.ok(slow.consume(.02) > 0);
+    assert.ok(slow.timeScale < previous && slow.timeScale >= .25);
+    previous = slow.timeScale;
+  }
+  assert.ok(Math.abs(slow.timeScale - .25) < 1e-9);
+  for (let i = 0; i < 20; i++) {
+    assert.ok(slow.consume(.05) > 0);
+    assert.ok(slow.timeScale > previous);
+    previous = slow.timeScale;
+  }
+  assert.equal(slow.active, false);
+  assert.equal(slow.timeScale, 1);
+  assert.equal(slow.consume(.016), .016);
+});
+
+test('explosion timing is frame-rate independent, including long frames and retriggered effects', () => {
+  for (const retrigger of [false, true]) {
+    const run = hz => {
+      const slow = new ExplosionSlowMotion();
+      slow.start();
+      let elapsed = 0;
+      for (let i = 0; i < hz * .5; i++) elapsed += slow.consume(1 / hz);
+      if (retrigger) {
+        const before = slow.timeScale;
+        slow.start();
+        assert.equal(slow.timeScale, before, 'retrigger jumped back to full speed');
+      }
+      for (let i = 0; i < hz * 2; i++) elapsed += slow.consume(1 / hz);
+      return elapsed;
+    };
+    const slow = new ExplosionSlowMotion(); slow.start();
+    let expected = slow.consume(.5);
+    if (retrigger) slow.start();
+    expected += slow.consume(2);
+    for (const hz of [30, 60, 144]) assert.ok(Math.abs(run(hz) - expected) < 1e-9, `${hz} Hz, retrigger=${retrigger}`);
+  }
+});
+
+test('zero elapsed time holds explosion slow motion and reset restores normal speed', () => {
+  const slow = new ExplosionSlowMotion(); slow.start(); slow.consume(.3);
+  const paused = slow.timeScale;
+  assert.equal(slow.consume(0), 0);
+  assert.equal(slow.timeScale, paused);
+  slow.reset();
+  assert.equal(slow.timeScale, 1);
+  assert.equal(slow.consume(.2), .2);
 });
 test('flashing shares the immunity timer; the impact freeze and final recovery are visible', () => {
   assert.equal(carVisibleDuringProtection(1.5, true), true);

@@ -1,7 +1,9 @@
 export const MAX_HEALTH = 100;
 export const IMPACT_DAMAGE = 25;
 export const IMPACT_PAUSE_SECONDS = 0.5;
-export const EXPLOSION_PAUSE_SECONDS = 0.03;
+export const EXPLOSION_SLOWDOWN_SECONDS = 0.2;
+export const EXPLOSION_RECOVERY_SECONDS = 1;
+export const EXPLOSION_MIN_TIME_SCALE = 0.25;
 export const HIT_RECOVERY_SECONDS = 0.8;
 export const RESTART_DELAY_SECONDS = 3;
 export const WRECK_TIME_SCALE = 0.25;
@@ -61,6 +63,53 @@ export class ImpactPause {
     const after = this.recoveryElapsed / HIT_RECOVERY_SECONDS;
     const integral = (t: number): number => t ** 3 - 0.5 * t ** 4;
     return unfrozen - recovering + HIT_RECOVERY_SECONDS * (integral(after) - integral(before));
+  }
+}
+
+/** Explosions dip into slow motion without freezing. Both eased phases use
+ * wall time and an exact integral, including frames crossing phase boundaries. */
+export class ExplosionSlowMotion {
+  private elapsed = EXPLOSION_SLOWDOWN_SECONDS + EXPLOSION_RECOVERY_SECONDS;
+  private entryScale = 1;
+
+  get active(): boolean { return this.elapsed < EXPLOSION_SLOWDOWN_SECONDS + EXPLOSION_RECOVERY_SECONDS; }
+  get timeScale(): number {
+    const slowing = this.elapsed < EXPLOSION_SLOWDOWN_SECONDS;
+    const t = slowing ? this.elapsed / EXPLOSION_SLOWDOWN_SECONDS
+      : Math.min(1, (this.elapsed - EXPLOSION_SLOWDOWN_SECONDS) / EXPLOSION_RECOVERY_SECONDS);
+    const eased = t * t * (3 - 2 * t);
+    return slowing ? this.entryScale + (EXPLOSION_MIN_TIME_SCALE - this.entryScale) * eased
+      : EXPLOSION_MIN_TIME_SCALE + (1 - EXPLOSION_MIN_TIME_SCALE) * eased;
+  }
+
+  start(): void {
+    // A second explosion deepens the current effect without jumping to full speed.
+    this.entryScale = this.timeScale;
+    this.elapsed = 0;
+  }
+  reset(): void {
+    this.elapsed = EXPLOSION_SLOWDOWN_SECONDS + EXPLOSION_RECOVERY_SECONDS;
+    this.entryScale = 1;
+  }
+  consume(elapsed: number): number {
+    const dt = Math.max(0, elapsed);
+    if (!this.active) return dt;
+    const before = this.elapsed;
+    this.elapsed = Math.min(EXPLOSION_SLOWDOWN_SECONDS + EXPLOSION_RECOVERY_SECONDS, before + dt);
+    if (EXPLOSION_SLOWDOWN_SECONDS + EXPLOSION_RECOVERY_SECONDS - this.elapsed < 1e-9) {
+      this.elapsed = EXPLOSION_SLOWDOWN_SECONDS + EXPLOSION_RECOVERY_SECONDS;
+    }
+    return dt - (this.elapsed - before) + this.integral(this.elapsed) - this.integral(before);
+  }
+
+  private integral(elapsed: number): number {
+    const primitive = (t: number): number => t ** 3 - 0.5 * t ** 4;
+    const down = Math.min(elapsed, EXPLOSION_SLOWDOWN_SECONDS);
+    const up = Math.max(0, elapsed - EXPLOSION_SLOWDOWN_SECONDS);
+    return this.entryScale * down + (EXPLOSION_MIN_TIME_SCALE - this.entryScale)
+      * EXPLOSION_SLOWDOWN_SECONDS * primitive(down / EXPLOSION_SLOWDOWN_SECONDS)
+      + EXPLOSION_MIN_TIME_SCALE * up + (1 - EXPLOSION_MIN_TIME_SCALE)
+      * EXPLOSION_RECOVERY_SECONDS * primitive(up / EXPLOSION_RECOVERY_SECONDS);
   }
 }
 

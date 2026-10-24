@@ -101,7 +101,7 @@ async function page(language = 'en-US', saved = {}, development = false, reduced
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
     performance: { now: () => context.now }, requestAnimationFrame: callback => { context.frame = callback; },
     console, Intl, now: 0, steps: 0, wreckSteps: 0, sounds: [], dead: false, impactNext: false, explosionNext: false,
-    snapshot: { car: { x: 7, y: 1, angle: 0 }, wheels: [], distance: 0, speed: 14, boost: 1,
+    snapshot: { car: { x: 7, y: 1, angle: 0 }, wheels: [], distance: 0, speed: 60 / 3.6, boost: 1,
       grounded: true, suctionActive: false, boostActive: false, crashed: false, jumpSerial: 0, jumpsUsed: 0,
       landingSerial: 0, landingImpact: 0, loop: null, loopCompletions: 0, obstaclesDestroyed: 0, policeDestroyed: 0, runXp: 0, crashReason: 'road',
       police: { x: -23, y: 1, angle: 0, visibility: 0, pressure: 0, gap: 30 } },
@@ -310,61 +310,72 @@ test('restart inputs are locked for three real seconds, and held Space cannot re
   assert.equal(p.context.snapshot.jumpSerial, 0, 'a restart press must not carry a jump into the new run');
 });
 
-test('weapon destruction freezes the scene for 30 ms without showing collision damage feedback', async () => {
+test('weapon destruction keeps moving while easing down for 200 ms and recovering for 1000 ms', async () => {
   const p = await page();
   await p.click('primary-button');
-  p.context.explosionNext = true;
-  p.advance(17);
-  const stoppedAt = p.context.steps;
-  assert.equal(p.context.lastRender.frozen, true);
+  p.context.explosionNext = true; p.advance(17);
+  const stepsAtExplosion = p.context.steps;
+  assert.equal(p.context.lastRender.frozen, false);
   assert.equal(p.context.snapshot.health, 100);
   assert.equal(p.ids.get('impact-flash').style.opacity, '0');
   assert.equal(p.ids.get('challenge-hint').hidden, true);
-  assert.equal(p.context.sounds.filter(event => event === 'explosion').length, 1);
-  p.advance(46.9);
-  assert.equal(p.context.steps, stoppedAt);
-  assert.equal(p.context.lastRender.frozen, true);
-  p.advance(64);
-  assert.equal(p.context.steps, stoppedAt, 'explosion recovery should also start gently');
-  assert.equal(p.context.lastRender.frozen, false);
-  for (let i = 1; i <= 12; i++) p.advance(64 + i * 17);
-  assert.ok(p.context.steps > stoppedAt);
-  assert.equal(p.context.lastRender.frozen, false);
+  let previous = .02;
+  let simulationTime = 0;
+  for (let i = 1; i <= 10; i++) {
+    p.advance(17 + i * 20);
+    const dt = p.context.lastRender.dt;
+    assert.equal(p.context.lastRender.frozen, false);
+    assert.ok(dt > 0 && dt < previous, `slowdown delta=${dt}`);
+    previous = dt;
+    simulationTime += dt;
+  }
+  assert.ok(p.context.steps > stepsAtExplosion, 'physics stopped during the explosion');
+  previous = 0;
+  for (let i = 1; i <= 20; i++) {
+    p.advance(217 + i * 50);
+    const dt = p.context.lastRender.dt;
+    assert.equal(p.context.lastRender.frozen, false);
+    assert.ok(dt > previous && dt < .05, `recovery delta=${dt}`);
+    previous = dt;
+    simulationTime += dt;
+  }
+  assert.ok(Math.abs((p.context.steps - stepsAtExplosion) / 120 - simulationTime) < 1 / 120,
+    'physics and effects used different time scales');
+  p.advance(1267);
+  assert.ok(Math.abs(p.context.lastRender.dt - .05) < 1e-9);
   assert.equal(p.context.sounds.filter(event => event === 'explosion').length, 1);
 });
 
-test('physics and visual effects share a smooth 800 ms recovery after either kind of hit stop', async () => {
-  for (const [trigger, freeze] of [['impactNext', 500], ['explosionNext', 30]]) {
-    const p = await page();
-    await p.click('primary-button');
-    p.context[trigger] = true; p.advance(17);
-    const stoppedAt = p.context.steps;
-    p.advance(17 + freeze);
-    let previousDelta = 0;
-    for (let i = 1; i <= 20; i++) {
-      p.advance(17 + freeze + i * 40);
-      assert.equal(p.context.lastRender.frozen, false);
-      assert.ok(p.context.lastRender.dt > previousDelta);
-      assert.ok(p.context.lastRender.dt < .04);
-      previousDelta = p.context.lastRender.dt;
-    }
-    assert.ok(Math.abs(p.context.steps - stoppedAt - 48) <= 1);
-    p.advance(17 + freeze + 840);
-    assert.ok(Math.abs(p.context.lastRender.dt - .04) < 1e-9);
+test('physics and visual effects share a smooth 800 ms recovery after collision hit stop', async () => {
+  const p = await page();
+  await p.click('primary-button');
+  p.context.impactNext = true; p.advance(17);
+  const stoppedAt = p.context.steps;
+  p.advance(517);
+  let previousDelta = 0;
+  for (let i = 1; i <= 20; i++) {
+    p.advance(517 + i * 40);
+    assert.equal(p.context.lastRender.frozen, false);
+    assert.ok(p.context.lastRender.dt > previousDelta);
+    assert.ok(p.context.lastRender.dt < .04);
+    previousDelta = p.context.lastRender.dt;
   }
+  assert.ok(Math.abs(p.context.steps - stoppedAt - 48) <= 1);
+  p.advance(1357);
+  assert.ok(Math.abs(p.context.lastRender.dt - .04) < 1e-9);
 });
 
 test('manually pausing during recovery preserves its speed ramp', async () => {
   const p = await page();
   await p.click('primary-button');
-  p.context.explosionNext = true; p.advance(17); p.advance(47);
-  p.advance(82); p.advance(117);
+  p.context.explosionNext = true; p.advance(17); p.advance(217);
+  p.advance(252); p.advance(287);
   const previous = p.context.lastRender.dt;
   const stoppedAt = p.context.steps;
-  await p.click('pause-button'); p.advance(10117);
+  await p.click('pause-button'); p.advance(10287);
   assert.equal(p.context.steps, stoppedAt);
-  await p.click('primary-button'); p.advance(10152);
-  assert.ok(p.context.lastRender.dt > previous && p.context.lastRender.dt < .01);
+  await p.click('primary-button'); p.advance(10322);
+  assert.ok(p.context.lastRender.dt > previous && p.context.lastRender.dt < .02);
 });
 
 test('police warnings and edge lights follow the patrol ahead of or behind the player', async () => {

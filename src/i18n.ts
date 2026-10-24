@@ -249,15 +249,18 @@ export function t(key: MessageKey, values: Record<string, string | number> = {})
 }
 
 export function formatNumber(value: number, minimumIntegerDigits = 1): string {
-  const key = `${language}-${minimumIntegerDigits}`;
+  const integer = Math.max(0, Math.floor(value));
+  // Group actual thousands without separating the HUD's leading zero padding.
+  const useGrouping = integer >= 1000;
+  const key = `${language}-${minimumIntegerDigits}-${useGrouping}`;
   let formatter = formatters.get(key);
   if (!formatter) {
     formatter = new Intl.NumberFormat(language === 'fa' ? 'fa-IR' : 'en-US', {
-      maximumFractionDigits: 0, minimumIntegerDigits, useGrouping: false,
+      maximumFractionDigits: 0, minimumIntegerDigits, useGrouping,
     });
     formatters.set(key, formatter);
   }
-  return formatter.format(Math.max(0, Math.floor(value)));
+  return formatter.format(integer);
 }
 
 export function formatPercent(value: number): string {

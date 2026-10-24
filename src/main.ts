@@ -5,7 +5,7 @@ import { GameAudio } from './game/audio';
 import { HudFeedback } from './game/hudFeedback';
 import { ExperienceProgress, LEVEL_XP } from './game/experience';
 import { loopsBetween } from './game/track';
-import { ImpactPause, IMPACT_DAMAGE, IMPACT_PAUSE_SECONDS, EXPLOSION_PAUSE_SECONDS, RESTART_DELAY_SECONDS, WRECK_TIME_SCALE, MAX_HEALTH } from './game/damage';
+import { ImpactPause, IMPACT_DAMAGE, IMPACT_PAUSE_SECONDS, ExplosionSlowMotion, RESTART_DELAY_SECONDS, WRECK_TIME_SCALE, MAX_HEALTH } from './game/damage';
 import { WeaponLoadout, WEAPONS, weaponSpec, type AimDirection } from './game/weapons';
 import { weaponIcon } from './game/weaponIcon';
 import { formatNumber, formatPercent, getLanguage, setLanguage, t, type MessageKey } from './i18n';
@@ -177,7 +177,7 @@ const hudFeedback = new HudFeedback({
   ammo: element('weapon-ammo'), weaponPanel: element('weapon-panel'),
 });
 const impactPause = new ImpactPause();
-const explosionPause = new ImpactPause();
+const explosionSlowMotion = new ExplosionSlowMotion();
 let lastImpactSerial = 0;
 let lastExplosionSerial = 0;
 let rewardTime = 0;
@@ -393,7 +393,7 @@ function start(): void {
     experience.resetRun();
     rewardTime = 0;
     impactPause.reset();
-    explosionPause.reset();
+    explosionSlowMotion.reset();
     lastImpactSerial = 0;
     lastExplosionSerial = 0;
     clearHeld();
@@ -422,7 +422,7 @@ function crash(): void {
   status = 'crashed';
   restartAvailableAt = performance.now() + RESTART_DELAY_SECONDS * 1000;
   impactPause.reset();
-  explosionPause.reset();
+  explosionSlowMotion.reset();
   accumulator = 0;
   holdInterpolation = false;
   clearHeld();
@@ -622,7 +622,7 @@ function renderFrame(now: number): void {
   lastFrame = now;
   let playDelta = 0;
   if (status === 'running') {
-    playDelta = Math.min(impactPause.consume(wallDelta), explosionPause.consume(wallDelta), 0.06);
+    playDelta = Math.min(impactPause.consume(wallDelta), explosionSlowMotion.consume(wallDelta), 0.06);
     if (physics.crashed) crash();
   }
   if (status === 'running' && playDelta > 0) {
@@ -653,11 +653,11 @@ function renderFrame(now: number): void {
         audio.play('explosion');
       }
       // A fatal hit shows the menu immediately and starts the loose wreck;
-      // it must not inherit either kind of hit stop from the living car.
+      // it must not inherit hit stop or explosion slow motion from the living car.
       if (physics.crashed) { crash(); break; }
-      if (impacted || exploded) {
-        if (impacted) impactPause.start();
-        if (exploded) explosionPause.start(EXPLOSION_PAUSE_SECONDS);
+      if (exploded) explosionSlowMotion.start();
+      if (impacted) {
+        impactPause.start();
         accumulator = 0;
         holdInterpolation = true;
         break;
@@ -673,7 +673,7 @@ function renderFrame(now: number): void {
       accumulator -= FIXED_STEP;
     }
   }
-  const frozen = impactPause.active || explosionPause.active;
+  const frozen = impactPause.active;
   const snapshot = physics.snapshot(frozen || holdInterpolation ? 1 : Math.min(1, accumulator / FIXED_STEP));
   const simulating = status === 'running' && !frozen;
   const gained = experience.collect(snapshot.loopCompletions, snapshot.obstaclesDestroyed, snapshot.policeDestroyed);

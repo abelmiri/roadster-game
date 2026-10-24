@@ -8,6 +8,8 @@ const DROOP = 0.075;
 const COMPRESSION = CAR_SUSPENSION_TRAVEL - 0.005;
 const SPRING_RATE = 148;
 const SUBSTEPS = 4;
+const LANDING_GRIP_SECONDS = 0.28;
+const MAX_LANDING_SPEED_LOSS = 0.8;
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 
 export interface ContactBody {
@@ -56,6 +58,10 @@ export class WheelContactPhysics {
   private cos = 1;
   private jumpLeveling = false;
   private jumpAirborne = false;
+  private airborneTime = 0;
+  private landingRemaining = 0;
+  private landingSpeed = 0;
+  private landingLoss = 0;
 
   constructor(private readonly surface: Surface) {}
 
@@ -65,11 +71,13 @@ export class WheelContactPhysics {
     if (stabilize) body.omega = 0;
     this.jumpLeveling = stabilize;
     this.jumpAirborne = false;
+    this.landingRemaining = this.airborneTime = 0;
   }
 
   release(body: ContactBody, wheelAngle: number): void {
     this.jumpLeveling = false;
     this.jumpAirborne = false;
+    this.landingRemaining = this.airborneTime = 0;
     for (let index = 0; index < 2; index++) {
       this.touching[index] = false;
       this.wheels[index].grounded = false;
@@ -125,6 +133,9 @@ export class WheelContactPhysics {
     const h = dt / SUBSTEPS;
     this.suction = 0;
     this.undershot = false;
+    // Preserve the driver's current speed through touchdown, including any
+    // deliberate drive deceleration, rather than restoring a stale boost speed.
+    this.landingSpeed = Math.min(this.landingSpeed, initial.vx + this.landingLoss);
     if (!jumpJetActive) this.jumpLeveling = false;
     for (const wheel of this.wheels) { wheel.impact = 0; wheel.load = 0; }
     for (let step = 0; step < SUBSTEPS; step++) {
@@ -154,7 +165,8 @@ export class WheelContactPhysics {
         if (contact && sample) {
           const compression = DROOP - sample.clearance;
           const endTravel = Math.max(0, -sample.clearance - 0.09);
-          const damping = (sample.normalVelocity < 0 ? 10 : 8.5) + endTravel * 90;
+          // Rebound damping absorbs the spring's return after a touchdown.
+          const damping = (sample.normalVelocity < 0 ? 10 : 24) + endTravel * 90;
           const spring = SPRING_RATE * compression + endTravel * endTravel * 7500;
           // Neither a tire nor its damper can pull the road upward.
           const load = Math.max(0, spring - damping * sample.normalVelocity);
@@ -168,10 +180,19 @@ export class WheelContactPhysics {
             const impact = -sample.normalVelocity;
             wheel.impactSerial++;
             wheel.impact = Math.max(wheel.impact, impact);
-            // Small rolling scrub dissipates tangential energy at each axle's
-            // touchdown, including when the other axle is already grounded.
+            if ((this.airborneTime >= 0.025 || impact > 4) && this.landingRemaining <= 0) {
+              this.landingRemaining = LANDING_GRIP_SECONDS;
+              this.landingSpeed = body.vx;
+              this.landingLoss = 0;
+            }
+            const pitch = body.angle - Math.atan2(-sample.nx, sample.ny);
+            const alignmentError = Math.abs(Math.atan2(Math.sin(pitch), Math.cos(pitch)));
+            const severity = Math.max(clamp((alignmentError - 0.2) / 0.6, 0, 1), clamp((impact - 14) / 14, 0, 1));
+            this.landingLoss = Math.max(this.landingLoss, MAX_LANDING_SPEED_LOSS * severity);
+            // Aligned landings roll cleanly. A tilted or very hard impact has
+            // a small scrub at each tire; vertical damping still absorbs energy.
             const tangentVelocity = body.vx * sample.ny - body.vy * sample.nx;
-            const scrub = Math.sign(tangentVelocity) * Math.min(Math.abs(tangentVelocity), impact * 0.025, 0.55);
+            const scrub = Math.sign(tangentVelocity) * Math.min(Math.abs(tangentVelocity), impact * 0.006, 0.12) * severity;
             body.vx -= sample.ny * scrub;
             body.vy += sample.nx * scrub;
             wheel.energyLost += Math.max(0, scrub * tangentVelocity - 0.5 * scrub * scrub);
@@ -238,6 +259,17 @@ export class WheelContactPhysics {
         }
         if (!corrected) break;
       }
+      if (this.landingRemaining > 0 && supported && nearby) {
+        // Rolling grip carries forward momentum through the spring's short
+        // settling stroke. Restore along the road tangent so this cannot add
+        // a normal rebound or cancel either axle's independent pitch impulse.
+        const carry = Math.max(0, this.landingSpeed - this.landingLoss - body.vx);
+        body.vx += carry;
+        body.vy += carry * Math.tan(roadAngle / nearby);
+      }
+      this.landingRemaining = Math.max(0, this.landingRemaining - h);
+      this.airborneTime = supported ? 0 : this.airborneTime + h;
+      if (this.airborneTime >= 0.025) this.landingRemaining = 0;
     }
     this.sync(body, dt);
     return body;

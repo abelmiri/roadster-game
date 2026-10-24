@@ -13,7 +13,7 @@ import type { SparkEvent } from './impactSparks';
 import { VehicleWeapon, type AimDirection, type CombatTarget, type WeaponId, type WeaponSnapshot, type WeaponImpact } from './weapons';
 
 export const FIXED_STEP = 1 / 120;
-export const START_SPEED = 14;
+export const START_SPEED = 60 / 3.6;
 export const JUMP_THRUST_DURATION = 0.19;
 
 export interface Controls {
@@ -356,11 +356,11 @@ export class GamePhysics {
   private driveSpeed(speed: number, controls: Controls): number {
     if (!controls.boost) this.boostExhausted = false;
     this.boostOn = controls.boost && !this.boostExhausted && this.charge > 0.01;
-    const target = START_SPEED + Math.min(18 - START_SPEED, Math.max(0, this.distance) / 160) + (this.boostOn ? 4.5 : 0);
-    const acceleration = this.boostOn ? 12 : this.isGrounded ? 7 : 3;
+    const target = START_SPEED + Math.min(18 - START_SPEED, Math.max(0, this.distance) / 160) + (this.boostOn ? 9 : 0);
+    const acceleration = this.boostOn ? 18 : this.isGrounded ? 7 : 3;
     this.charge = clamp(this.charge + FIXED_STEP * (this.boostOn ? -0.48 : 0.19), 0, 1);
     if (this.boostOn && this.charge <= 0.01) this.boostExhausted = true;
-    return clamp(speed + clamp(target - speed, -5 * FIXED_STEP, acceleration * FIXED_STEP), 6, 23);
+    return clamp(speed + clamp(target - speed, -5 * FIXED_STEP, acceleration * FIXED_STEP), 6, 27);
   }
 
   /** The magnetic branch is an exact circular contact constraint. The ordinary

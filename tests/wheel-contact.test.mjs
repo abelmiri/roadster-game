@@ -15,6 +15,71 @@ const flat = { height: () => 0, slope: () => 0, exists: () => true };
 const bodyAt = (overrides = {}) => ({ x: 0, y: 0.79, angle: 0, vx: 0, vy: 0, omega: 0, ...overrides });
 const dt = 1 / 120;
 
+test('aligned landings preserve forward speed on level and sloped roads while the springs absorb the drop', () => {
+  for (const slope of [-0.25, 0, 0.25]) {
+    const contact = new WheelContactPhysics({ height: x => x * slope, slope: () => slope, exists: () => true });
+    let body = bodyAt({ y: 1.8, angle: Math.atan(slope), vx: 20, vy: 20 * slope - 8 });
+    let landedAt = -1;
+    for (let i = 0; i < 120; i++) {
+      body = contact.step(body, false, dt);
+      if (landedAt < 0 && contact.wheels.some(wheel => wheel.impactSerial)) landedAt = i;
+      if (landedAt >= 0) {
+        assert.ok(body.vx >= 20 - 1e-9, `aligned landing lost speed on slope ${slope}: ${body.vx}`);
+        if (i - landedAt === 24) break;
+      }
+    }
+    assert.ok(landedAt >= 0);
+    assert.ok(contact.wheels.every(wheel => wheel.energyLost > 10), 'suspension stopped absorbing vertical impact energy');
+    assert.ok(Math.abs(body.vy - body.vx * slope) < .5, 'landing caused a normal rebound');
+  }
+});
+
+test('tilted or hard landings lose at most a small amount of forward speed, with independent axle reactions', () => {
+  for (const [pitch, descent] of [[-.5, 8], [.5, 8], [0, 22]]) {
+    const slope = .25;
+    const contact = new WheelContactPhysics({ height: x => x * slope, slope: () => slope, exists: () => true });
+    let body = bodyAt({ y: 2.5, angle: Math.atan(slope) + pitch, vx: 20, vy: 20 * slope - descent });
+    let landedAt = -1;
+    let firstSerials;
+    let minimum = 20;
+    for (let i = 0; i < 120; i++) {
+      body = contact.step(body, false, dt);
+      if (landedAt < 0 && contact.wheels.some(wheel => wheel.impactSerial)) {
+        landedAt = i;
+        firstSerials = contact.wheels.map(wheel => wheel.impactSerial);
+      }
+      if (landedAt >= 0) {
+        minimum = Math.min(minimum, body.vx);
+        if (i - landedAt === 24) break;
+      }
+    }
+    assert.ok(landedAt >= 0);
+    assert.ok(minimum < 20, 'bad landing had no speed penalty');
+    assert.ok(minimum >= 19.2 - 1e-9, `landing lost too much speed: ${minimum}`);
+    if (pitch) assert.equal(firstSerials.filter(serial => serial > 0).length, 1, 'both tires hit simultaneously during a tilted landing');
+    assert.ok(contact.wheels.every(wheel => wheel.energyLost > 0));
+  }
+});
+
+test('a short hard drop also preserves momentum when the tires were recently grounded', () => {
+  const slope = .25;
+  const contact = new WheelContactPhysics({ height: x => x * slope, slope: () => slope, exists: () => true });
+  let body = bodyAt({ angle: Math.atan(slope), vx: 20, vy: 5 });
+  for (let i = 0; i < 60; i++) body = contact.step(body, false, dt);
+  const serial = contact.wheels.reduce((sum, wheel) => sum + wheel.impactSerial, 0);
+  body = { ...body, y: body.y + .35, vx: 20, vy: -20 };
+  let landedAt = -1;
+  for (let i = 0; i < 60; i++) {
+    body = contact.step(body, false, dt);
+    if (landedAt < 0 && contact.wheels.reduce((sum, wheel) => sum + wheel.impactSerial, 0) > serial) landedAt = i;
+    if (landedAt >= 0) {
+      assert.ok(body.vx >= 19.2 - 1e-9, `short landing lost speed: ${body.vx}`);
+      if (i - landedAt === 24) break;
+    }
+  }
+  assert.ok(landedAt >= 0 && landedAt < 3, 'drop did not exercise a brief airborne interval');
+});
+
 test('requested jumps cancel inherited spin and ease either pitch toward level without snapping', () => {
   for (const pitch of [-0.6, -0.25, 0.25, 0.6]) {
     for (const spin of [-3, 3]) {

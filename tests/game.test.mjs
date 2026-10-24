@@ -132,7 +132,9 @@ test('the launch depot has a continuous level apron and supports detached wreck 
 });
 
 test('jump landings preserve forward motion and do not launch the car back into the air', () => {
-  for (const [startX, held] of [[7, false], [20, true], [37, false]]) {
+  // Isolate tap/held landings on the level depot apron, plus a sloped landing.
+  // Hill and crest tests below cover natural lift-off at the faster cruise speed.
+  for (const [startX, held] of [[-60, false], [-48, true], [37, false]]) {
     const game = new GamePhysics(startX);
     try {
       stepFor(game, 0.15);
@@ -153,7 +155,7 @@ test('jump landings preserve forward motion and do not launch the car back into 
           settledSteps++;
           const velocity = game.car.linvel();
           const normalVelocity = velocity.y - velocity.x * roadSlope(state.car.x);
-          assert.ok(normalVelocity < 1.5, `landing rebound velocity=${normalVelocity}`);
+          assert.ok(normalVelocity < 1.5, `start=${startX}, step=${i}: landing rebound velocity=${normalVelocity}`);
           const clearance = Math.min(...state.wheels.map((wheel) => wheel.y - roadHeight(wheel.x)));
           assert.ok(clearance < CAR_WHEEL_RADIUS + 0.35, `landing rebound clearance=${clearance}`);
           if (settledSteps >= 36) break;
@@ -197,6 +199,7 @@ test('soft suspension compresses on landing and keeps space around both tires', 
       if (landingFrame >= 0 && i - landingFrame < 36) {
         maximumLandingTravel = Math.max(maximumLandingTravel, ...state.wheelTravel);
       }
+      if (landingFrame >= 0 && i - landingFrame >= 24) break;
     }
     assert.equal(game.crashed, false);
     assert.equal(game.snapshot(1).landingSerial, 1);
@@ -338,6 +341,23 @@ test('Space jumps and double jumps neutralize takeoff spin and gradually level t
   }
 });
 
+test('boost adds substantial speed quickly on the road and recharges after release', () => {
+  const boosted = new GamePhysics(-48);
+  const coast = new GamePhysics(-48);
+  try {
+    stepFor(boosted, .65, { ...idle, boost: true });
+    stepFor(coast, .65);
+    assert.ok(boosted.snapshot(1).speed - coast.snapshot(1).speed > 8,
+      'boost should add more than 28 km/h within 650 ms');
+    assert.ok(boosted.car.translation().x > coast.car.translation().x + 3);
+    const spent = boosted.snapshot(1).boost;
+    assert.ok(spent < .75);
+    stepFor(boosted, .25);
+    assert.equal(boosted.snapshot(1).boostActive, false);
+    assert.ok(boosted.snapshot(1).boost > spent);
+  } finally { boosted.dispose(); coast.dispose(); }
+});
+
 test('air boost drains and then recharges', () => {
   const game = new GamePhysics();
   const coast = new GamePhysics();
@@ -430,6 +450,7 @@ test('crest departures preserve momentum and produce one touchdown per hop', () 
       placeOnRoad(game, 1105, speed);
       let departures = 0;
       let grounded = true;
+      let landingStep = -1;
       for (let i = 0; i < 145 && !game.crashed; i++) {
         const velocityBefore = game.car.linvel().y;
         game.step({ ...idle, boost: true });
@@ -440,6 +461,10 @@ test('crest departures preserve momentum and produce one touchdown per hop', () 
           assert.ok(Math.abs(game.car.angvel()) > 0.1, 'takeoff erased road rotation');
         }
         grounded = state.grounded;
+        if (state.landingSerial && landingStep < 0) landingStep = i;
+        // The stronger boost reaches the following hill sooner. Check one
+        // full hop and its first settled tire strokes before that second crest.
+        if (landingStep >= 0 && i - landingStep >= 12) break;
       }
       assert.equal(game.crashed, false);
       assert.equal(departures, 1, `speed=${speed}: repeated crest release`);
@@ -679,7 +704,7 @@ test('releasing suction near loop exits lands safely instead of falling through 
                 assert.ok(wheel.y - roadHeight(wheel.x) >= CAR_WHEEL_RADIUS - .025,
                   `tire tunneled through the exit road: ${label}`);
               }
-              assert.ok(after.speed >= 6 - .0001 && after.speed <= 23 + .0001, `bad exit velocity: ${label}`);
+              assert.ok(after.speed >= 6 - .0001 && after.speed <= 28, `bad exit velocity=${after.speed}: ${label}`);
               assert.ok(Math.abs(after.car.angle) < 1.4, `exit retained full-turn rotation: ${label}`);
             }
             // The ordinary road can form another crest after the tangent
@@ -727,7 +752,7 @@ test('suspension preserves tire clearance through a loop and resolves heave in t
 test('the faster start remains below crest launch speed and restart restores full health', () => {
   const game = new GamePhysics();
   try {
-    assert.ok(Math.abs(game.snapshot(1).speed - 14) < .01);
+    assert.ok(Math.abs(game.snapshot(1).speed * 3.6 - 60) < .01);
     assert.equal(game.snapshot(1).health, 100);
     assert.equal(game.snapshot(1).impactSerial, 0);
     assert.equal(game.snapshot(1).invincibilityRemaining, 0);
@@ -909,7 +934,8 @@ test('four police contacts use four health segments and report the fatal police 
 test('every unlocked weapon can destroy a real road barrier and disable its Rapier collider', () => {
   const barrier = new TrackGenerator().chunk(2).hazards[0];
   for (const id of ['machine-gun','twin-gun','gatling-gun','cannon','rocket-launcher','missile-launcher','laser-gun','plasma-cannon']) {
-    const game = new GamePhysics(barrier.x - 14, { id, xp: 950 });
+    // Allow the heavy weapons their firing interval before contact at 60 km/h.
+    const game = new GamePhysics(barrier.x - 20, { id, xp: 950 });
     try {
       for (let i=0;i<240&&!game.crashed&&game.car.translation().x<barrier.x+3;i++) {
         game.step({...idle,suction:true,fire:true,aim:1});
