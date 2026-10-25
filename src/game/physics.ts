@@ -1,6 +1,6 @@
 import RAPIER from '@dimforge/rapier2d-compat';
 import type { Collider, EventQueue, RigidBody, World } from '@dimforge/rapier2d-compat';
-import { CHUNK_LENGTH, START_APRON_X, TrackGenerator, roadHeight, roadSlope, sampleRoad, loopsBetween, loopGeometry, type LoopSpec, type HazardSpec, type TrackChunk } from './track';
+import { CHUNK_LENGTH, START_APRON_X, TrackGenerator, roadHeight, roadSlope, sampleRoad, loopsBetween, loopGeometry, rampAt, RAMP_BOOSTER_LENGTH, type LoopSpec, type HazardSpec, type TrackChunk } from './track';
 import { CAR_AXLE_Y, CAR_BODY_CLEARANCE, CAR_WHEEL_OFFSET, CAR_WHEEL_RADIUS, sprungBodyPose } from './vehicle';
 import { VehicleSuspension } from './suspension';
 import { WheelContactPhysics, ROAD_GRAVITY, type ContactBody } from './wheelContact';
@@ -16,6 +16,7 @@ import { CAR_UPGRADE_IDS, carUpgradeLevel, carUpgradeStats, type CarUpgrades } f
 export const FIXED_STEP = 1 / 120;
 export const START_SPEED = 60 / 3.6;
 export const JUMP_THRUST_DURATION = 0.19;
+export const RAMP_BOOST_SPEED = 7;
 
 export interface Controls {
   jumpPressed: boolean;
@@ -45,6 +46,7 @@ export interface GameSnapshot {
   grounded: boolean;
   suctionActive: boolean;
   boostActive: boolean;
+  rampBoostSerial: number;
   suspensionOffset: number;
   suspensionPitch: number;
   jumpSerial: number;
@@ -127,6 +129,10 @@ export class GamePhysics {
   private isGrounded = false;
   private fansOn = false;
   private boostOn = false;
+  private rampBoostSpeed = 0;
+  private rampBoostTime = 0;
+  private rampBoostSerial = 0;
+  private readonly usedRampBoosters = new Set<number>();
   private wheelAngle = 0;
   private readonly roadContact = new WheelContactPhysics({
     height: roadHeight, slope: roadSlope, sample: sampleRoad, exists: (x) => this.generator.hasRoad(x),
@@ -379,11 +385,34 @@ export class GamePhysics {
     if (!controls.boost) this.boostExhausted = false;
     this.boostOn = controls.boost && !this.boostExhausted && this.charge > 0.01;
     const stats = this.carStats;
-    const target = START_SPEED + Math.min(18 - START_SPEED, Math.max(0, this.distance) / 160) + (this.boostOn ? 9 * stats.boostPower : 0);
+    this.rampBoostSpeed = Math.max(0, this.rampBoostSpeed - 5 * FIXED_STEP);
+    this.rampBoostTime = Math.max(0, this.rampBoostTime - FIXED_STEP);
+    const target = Math.max(this.rampBoostSpeed, START_SPEED + Math.min(18 - START_SPEED, Math.max(0, this.distance) / 160) + (this.boostOn ? 9 * stats.boostPower : 0));
     const acceleration = this.boostOn ? 18 * stats.boostPower : this.isGrounded ? 7 : 3;
     this.charge = clamp(this.charge + FIXED_STEP * (this.boostOn ? -0.48 : 0.19) / stats.boostCapacity, 0, 1);
     if (this.boostOn && this.charge <= 0.01) this.boostExhausted = true;
-    return clamp(speed + clamp(target - speed, -5 * FIXED_STEP, acceleration * FIXED_STEP), 6, 18 + 9 * stats.boostPower);
+    return clamp(speed + clamp(target - speed, -5 * FIXED_STEP, acceleration * FIXED_STEP), 6, Math.max(this.rampBoostSpeed, 18 + 9 * stats.boostPower));
+  }
+
+  private applyRampBooster(body: ContactBody): void {
+    if (body.vx <= 0 || this.crashed) return;
+    for (const wheel of this.roadContact.wheels) {
+      if (!wheel.grounded) continue;
+      const ramp = rampAt(wheel.x);
+      if (!ramp || this.usedRampBoosters.has(ramp.id) || body.x < ramp.boosterX - 1 ||
+          Math.abs(wheel.x - ramp.boosterX) > RAMP_BOOSTER_LENGTH / 2) continue;
+      this.usedRampBoosters.add(ramp.id);
+      this.rampBoostSerial++;
+      // Apply an impulse along the road tangent while the tire is on the pad.
+      // The extra speed decays gently and uses no player boost reserve. Reduce
+      // inherited pitch spin without changing the car's current takeoff angle.
+      body.vx += RAMP_BOOST_SPEED;
+      body.vy += RAMP_BOOST_SPEED * roadSlope(wheel.x);
+      body.omega *= .35;
+      this.rampBoostSpeed = body.vx;
+      this.rampBoostTime = RAMP_BOOST_SPEED / 5;
+      break;
+    }
   }
 
   /** The magnetic branch is an exact circular contact constraint. The ordinary
@@ -647,6 +676,7 @@ export class GamePhysics {
       { front: controls.frontJet, rear: controls.rearJet });
     if (this.roadContact.undershot) this.crashed = true;
     this.isGrounded = this.roadContact.wheels.some((wheel) => wheel.grounded);
+    if (!this.roadContact.undershot) this.applyRampBooster(body);
     this.frontJetActive = !this.isGrounded && this.roadContact.frontJetActive;
     this.rearJetActive = !this.isGrounded && this.roadContact.rearJetActive;
     this.fansOn = this.roadContact.suction > 0;
@@ -819,7 +849,8 @@ export class GamePhysics {
       wheelTravel: this.roadContact.wheels.map((wheel) => this.activeLoop ? 0 : wheel.travel) as [number, number],
       wheelImpactSerials: this.roadContact.wheels.map((wheel) => wheel.impactSerial) as [number, number],
       speed: this.activeLoop?.speed ?? this.car.linvel().x, boost: this.charge, grounded: this.isGrounded,
-      suctionActive: this.fansOn, boostActive: this.boostOn, crashed: this.crashed, wrecked: this.wrecked,
+      suctionActive: this.fansOn, boostActive: this.boostOn || (!this.crashed && this.rampBoostTime > 0),
+      rampBoostSerial: this.rampBoostSerial, crashed: this.crashed, wrecked: this.wrecked,
       crashPosition: this.crashPosition ? { ...this.crashPosition } : null,
       suspensionOffset: this.activeLoop ? lerp(this.previousSuspensionOffset, this.suspension.offset, alpha) : 0,
       suspensionPitch: this.activeLoop ? lerp(this.previousSuspensionPitch, this.suspension.pitch, alpha) : 0,

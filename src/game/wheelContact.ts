@@ -209,10 +209,10 @@ export class WheelContactPhysics {
       }
       this.suction = Math.max(this.suction, attraction);
       // Test both tires at every substep: a single grounded axle disables the
-      // air controls. Thrust follows the chassis; opposing jets cancel torque.
+      // air controls. Thrust follows the chassis; opposing requests are rejected.
       if (!this.touching[0] && !this.touching[1]) {
-        const front = airJets?.front === true;
-        const rear = airJets?.rear === true;
+        const front = airJets?.front === true && airJets?.rear !== true;
+        const rear = airJets?.rear === true && airJets?.front !== true;
         if (front || rear) {
           this.frontJetActive ||= front;
           this.rearJetActive ||= rear;

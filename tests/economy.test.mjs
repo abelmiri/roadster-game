@@ -35,6 +35,51 @@ test('each 200 meters earns 10 coins, skipped milestones are retained, and rever
   assert.equal(new PlayerProgress(s.storage).coins, 50);
 });
 
+test('the last score checkpoints at most once per second, flushes the newest distance, and survives a reload', () => {
+  const s=store(40,{'roadster-xp':'250'});
+  const p=new PlayerProgress(s.storage);
+  p.trackScore(123.9,100);
+  assert.equal(new PlayerProgress(s.storage).score,123);
+  const writes=s.writes.length;
+  for(let i=1;i<=9;i++)p.trackScore(123+i,100+i*50);
+  assert.equal(s.writes.length,writes,'frame updates must not synchronously write localStorage each time');
+  assert.equal(p.score,132);
+  p.flushScore();
+  assert.equal(new PlayerProgress(s.storage).score,132);
+  assert.equal(s.writes.length,writes+1);
+  p.flushScore();
+  assert.equal(s.writes.length,writes+1,'unchanged scores need no storage write');
+  p.trackScore(141.6,1100);
+  assert.equal(new PlayerProgress(s.storage).score,141);
+  p.trackScore(130,2100);
+  assert.equal(p.score,141,'reversing cannot reduce the stored score');
+  assert.equal(p.finishRun(1500).newRecord,true);
+  assert.equal(new PlayerProgress(s.storage).score,1500);
+  p.trackScore(9999,9999);
+  p.flushScore();
+  assert.equal(new PlayerProgress(s.storage).score,1500,'wreck motion cannot change the final score');
+  p.resetRun();
+  const restored=new PlayerProgress(s.storage);
+  assert.equal(restored.score,0);
+  assert.equal(restored.record.distance,1500);
+  assert.equal(restored.coins,50);
+  assert.equal(s.values.get('roadster-xp'),'250');
+});
+
+test('old saves and corrupt score values retain coins and records with a safe score default', () => {
+  for(const score of [undefined,-1,1.5,'500',null,{},Infinity]) {
+    const s=store(80);
+    s.values.set('roadster-progress',JSON.stringify({version:1,coins:80,score,record:{distance:900,name:'Driver',needsName:false}}));
+    const p=new PlayerProgress(s.storage);
+    assert.equal(p.score,0);
+    assert.equal(p.coins,80);
+    assert.equal(p.record.distance,900);
+    assert.equal(p.record.name,'Driver');
+    for(const distance of [NaN,Infinity,-1])p.trackScore(distance,1000);
+    assert.equal(p.score,0);
+  }
+});
+
 test('loops pay 5 coins and destroyed patrols pay 10, once per cumulative counter', () => {
   const p = new PlayerProgress();
   assert.equal(p.collect(0, 1, 0), 5);

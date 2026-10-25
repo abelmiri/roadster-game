@@ -1,0 +1,186 @@
+/* Desktop keeps its original anchors; mobile groups health with experience. */
+.progress-stack { display: contents; }
+.resources-panel { position: fixed; }
+.touch-meter, .touch-meter-value { display: none; }
+.coin-method-mobile { display: none; }
+
+@media (max-width: 900px), (pointer: coarse) and (orientation: landscape) {
+  :root { --hud-scale: .8; --hud-resource-width: 110px; --hud-weapon-width: 0px; --hud-edge: 18px; }
+  .topbar { height: 46px; padding: max(7px,env(safe-area-inset-top)) 18px 0; align-items: flex-start; }
+  .topbar-tools, .settings-controls, .hud { gap: 7px; }
+  .brand, html[lang=fa] .brand { font-size: 14px; gap: 6px; }
+  .brand .app-icon { width: 22px; height: 22px; border-radius: 5px; }
+  .brand-edition { display: none; }
+  .hud-stat, html[lang=fa] .hud-stat { min-width: 45px; gap: 1px; }
+  .hud-label, html[lang=fa] .hud-label { font-size: 7px; }
+  .hud-stat strong, html[lang=fa] .hud-stat strong { font-size: 14px; }
+  .hud-stat small, html[lang=fa] .hud-stat small { font-size: 7px; }
+  .hud-divider { height: 25px; }
+  .icon-button { width: 30px; height: 30px; }
+  .icon-button svg { width: 17px; height: 17px; }
+  .language-button { min-height: 30px; padding: 0 8px; font-size: 9px; gap: 4px; }
+  .district-tag { display: none; }
+  .distance-rewards { top: max(49px,calc(env(safe-area-inset-top) + 42px)); left: 50%; right: auto; width: min(390px,calc(100% - 36px)); padding: 4px 8px 6px; transform: translateX(-50%) scale(var(--distance-reward-scale,1)); }
+  .distance-reward-heading, html[lang=fa] .distance-reward-heading { font-size: 7px; gap: 1px 8px; margin-bottom: 4px; }
+  .distance-reward-track { height: 3px; }
+  .distance-reward-mark { width: 5px; height: 5px; }
+  .challenge-hint, .xp-toast { left: 50%; top: 88px; max-width: min(360px,calc(100% - 36px)); font-size: 9px; padding: 4px 9px; }
+  .xp-toast { top: 121px; }
+  .coin-toast { top: 153px; font-size: 9px; padding: 4px 10px; }
+
+  .bottom-hud { left: 50%; bottom: max(12px,env(safe-area-inset-bottom)); transform: translateX(-50%); gap: 10px; align-items: center; }
+  .progress-stack { display: flex; flex-direction: column; gap: 6px; width: 112px; color: #fff; }
+  .resources-panel { display: contents; }
+  .resources-panel .boost-panel { display: none; }
+  .health-panel, .experience-panel { width: 100%; }
+  .health-panel .boost-heading, html[lang=fa] .health-panel .boost-heading { font-size: 8px; margin-bottom: 3px; }
+  .health-track { height: 4px; }
+  .experience-panel > div:first-child, html[lang=fa] .experience-panel > div:first-child { font-size: 8px; margin-bottom: 3px; gap: 5px; }
+  .experience-panel strong { font-size: 9px; }
+  .xp-track { height: 2px; }
+  .coin-wallet, html[lang=fa] .coin-wallet { position: static; margin-top: 4px; width: 100%; min-height: 20px; padding: 2px 5px; gap: 4px; font-size: 8px; background: #18304466; }
+  .coin-wallet strong { font-size: 9px; margin-inline-start: auto; }
+  .speed-panel { padding-left: 9px; }
+  .speed-panel span { display: none; }
+  .speed-panel strong, html[lang=fa] .speed-panel strong { font-size: 19px; }
+  .speed-panel small, html[lang=fa] .speed-panel small { font-size: 7px; }
+  .weapon-panel { display: none; }
+  .touch-controls { top: max(104px,env(safe-area-inset-top)); }
+  .touch-controls .touch-fire, .touch-controls .touch-boost { gap: 2px; }
+  .touch-fire .touch-icon, .touch-boost .touch-icon { width: 36%; height: 36%; max-width: 27px; max-height: 27px; }
+  .touch-meter { display: block; position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; transform: rotate(-90deg); }
+  .touch-meter circle { fill: none; stroke-width: 3; }
+  .touch-meter-track { stroke: #ffffff25; }
+  .touch-meter-fill { stroke: var(--touch-meter-color,#a6f4df); stroke-linecap: round; transition: stroke-dashoffset .16s linear; }
+  .touch-fire { --touch-meter-color: #ffda8b; }
+  .touch-meter-value { display: block; font-size: clamp(9px,1.4vw,12px); line-height: 1; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .touch-meter-label { display: none; }
+  .touch-layout-editor { padding: 9px 12px; font-size: 8px; }
+  .touch-layout-heading { margin-bottom: 7px; }
+  .touch-layout-heading strong { font-size: 9px; }
+  .touch-layout-heading > span, html[lang=fa] .touch-layout-heading > span { font-size: 8px; }
+  .touch-layout-options select, .touch-layout-options button { min-height: 34px; font-size: 8px; }
+  .touch-layout-options output { font-size: 8px; }
+  .touch-fire.is-empty { --touch-meter-color: #ff8c9d; }
+  .game-shell:has(#touch-boost[hidden]) .resources-panel .boost-panel { display: block; width: 100%; }
+  .game-shell:has(#touch-fire[hidden]) .weapon-panel { display: block; top: 88px; right: 18px; width: 115px; }
+
+  /* Menu text is about 35% smaller, with tighter spacing to match. */
+  .overlay { padding: max(54px,calc(env(safe-area-inset-top) + 46px)) 6vw max(10px,env(safe-area-inset-bottom)); }
+  .overlay .overlay-card { max-width: 540px; padding-top: 0; }
+  html[lang] .overlay h1, html[lang] .overlay.is-compact h1 { font-size: clamp(30px,4.55vw,49px); margin: 10px 0 8px; line-height: 1.05; }
+  html[lang=fa] .overlay h1, html[lang=fa] .overlay.is-compact h1 { font-size: clamp(22px,2.99vw,36px); line-height: 1.3; }
+  html[lang] .overlay-description, html[lang] .overlay.is-compact .overlay-description { font-size: 9px; line-height: 1.6; max-width: 380px; margin-bottom: 10px; }
+  html[lang] .eyebrow { font-size: 7.5px; gap: 7px; }
+  .eyebrow-line { width: 17px; }
+  html[lang] .control-summary { margin-bottom: 10px; max-width: 400px; }
+  html[lang] .control-summary div { padding-top: 6px; padding-bottom: 6px; }
+  html[lang] .control-summary span { font-size: 6.5px; }
+  html[lang] .control-summary strong { font-size: 8px; }
+  html[lang] .control-summary small { font-size: 7px; line-height: 1.4; }
+  html[lang] .primary-button { height: 44px; font-size: 9px; width: min(280px,100%); padding: 0 16px; }
+  .button-arrow { font-size: 17px; }
+  .menu-coin-wallet { min-height: 30px; padding: 5px 9px; margin-bottom: 9px; gap: 7px; font-size: 8px; }
+  .menu-coin-wallet strong { font-size: 13px; }
+  .coin-info-label { font-size: 7px; }
+  html[lang] .overlay-foot { font-size: 6px; margin-top: 8px; }
+  .overlay-side { display: none; }
+  .app-credits { margin-top: 9px; font-size: 7px; gap: 3px 9px; line-height: 1.5; }
+
+  .armory, .coin-dialog, .record-dialog { padding: max(10px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left)); }
+  .armory-card, .coin-dialog-card { max-height: 100%; padding: 10px; border-radius: 14px; }
+  .armory-card { display: grid; grid-template-columns: auto 1fr; gap: 6px; }
+  .armory-heading, .armory-card > section { grid-column: 1 / -1; }
+  .armory-heading, .coin-dialog-heading { gap: 10px; }
+  html[lang] .armory-heading h2 { font-size: 14px; margin: 0; }
+  .coin-dialog-heading h2 { font-size: 18px; margin: 0; line-height: 1.3; }
+  .coin-eyebrow { font-size: 6.5px; }
+  html[lang] .armory-close { min-height: 30px; padding: 6px 10px; font-size: 8px; }
+  .armory-tabs { margin: 6px 0; padding-bottom: 5px; gap: 5px; }
+  .armory-tabs button { min-height: 29px; min-width: 72px; padding: 5px 12px; font-size: 8px; }
+  .armory-card > .armory-tabs { grid-column: 1; margin: 0; padding-bottom: 0; border-bottom: 0; }
+  .armory-card > .armory-wallet { grid-column: 2; grid-row: 2; justify-self: end; margin: 0; min-height: 24px; padding: 4px 8px; gap: 6px; font-size: 8px; }
+  .armory-wallet strong { font-size: 11px; }
+  .armory-description, .armory-help, .armory-coin-help, .armory-upgrade-help, .armory-note { display: none; }
+  .weapon-grid { grid-template-columns: repeat(8,minmax(0,1fr)); gap: 4px; }
+  .weapon-card { padding: 5px; border-radius: 8px; }
+  .weapon-card > svg { height: 18px; margin-bottom: 2px; }
+  .weapon-card-index { font-size: 6px; top: 5px; right: 6px; }
+  html[lang] .weapon-card strong { font-size: 7.5px; line-height: 1.4; }
+  .weapon-english, .weapon-power { display: none; }
+  html[lang] .weapon-stats { font-size: 6.5px; line-height: 1.45; }
+  html[lang] .weapon-unlock, html[lang] .weapon-price { font-size: 6.5px; line-height: 1.45; margin-top: 3px; }
+  .weapon-card:not(.is-locked) .weapon-price, .weapon-card:not(.is-locked) .weapon-unlock { display: none; }
+  .weapon-upgrades { margin-top: 4px; padding: 4px; border-radius: 7px; }
+  html[lang] .weapon-level-row { font-size: 6.5px; gap: 3px; }
+  .weapon-upgrades .weapon-level-row > span:first-child { display: none; }
+  .upgrade-steps { gap: 2px; }
+  .upgrade-steps i { width: 6px; height: 3px; }
+  html[lang] .weapon-upgrade-preview { min-height: 0; margin: 4px 0; font-size: 6.5px; line-height: 1.4; }
+  html[lang] .weapon-upgrade-button { min-height: 29px; padding: 4px; font-size: 6.5px; }
+  .garage-vehicle { margin-bottom: 8px; border-radius: 10px; }
+  .garage-car-preview svg { max-height: 66px; }
+  .garage-vehicle h3 { font-size: 11px; }
+  .garage-vehicle p { font-size: 8px; margin: 3px 0 6px; }
+  .car-upgrade-grid { gap: 7px; }
+  .car-upgrade-card { padding: 9px; }
+  .car-upgrade-card h3 { font-size: 8px; margin-bottom: 7px; }
+  .car-current-stats, .car-next-stats, .car-level-requirement { font-size: 7px; line-height: 1.5; }
+  .car-current-stats { margin: 6px 0 3px; }
+  .car-next-stats { min-height: 0; margin-bottom: 6px; }
+  .car-level-requirement { margin-bottom: 6px; }
+  .garage-help { display: none; }
+
+  .coin-dialog-card { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+  .coin-dialog-heading { grid-column: 1; grid-row: 1; }
+  .coin-guide-hero { grid-column: 2; grid-row: 1; margin: 0; }
+  .coin-dialog-card > .armory-tabs, .coin-dialog-card > section { grid-column: 1 / -1; margin: 0; }
+  .coin-dialog-card > .armory-tabs { padding-bottom: 5px; }
+  .coin-guide-hero > p { display: none; }
+  .coin-guide-balance { display: flex; align-items: center; gap: 6px; min-width: 90px; padding: 4px 8px; border-radius: 8px; }
+  .coin-guide-balance > span, .coin-guide-balance small { font-size: 6.5px; }
+  .coin-guide-balance strong { font-size: 14px; margin: 0; }
+  .coin-guide-balance small { display: none; }
+  .coin-milestone-guide { padding: 8px; border-radius: 9px; }
+  .coin-route-heading { gap: 8px; }
+  .coin-guide-symbol { width: 22px; height: 22px; font-size: 15px; border-radius: 6px; }
+  .coin-route-heading h3, .coin-method h3 { font-size: 9px; line-height: 1.2; }
+  .coin-route-heading p, .coin-method p { font-size: 7.5px; line-height: 1.5; margin-top: 3px; }
+  .coin-route-heading p { display: none; }
+  .coin-method p[data-i18n] { display: none; }
+  .coin-method p.coin-method-mobile { display: block; }
+  .coin-milestone-grid { margin-top: 6px; gap: 4px; grid-template-columns: repeat(6,minmax(0,1fr)); }
+  .coin-milestone { gap: 2px; padding: 3px; border-radius: 6px; }
+  .coin-milestone span { font-size: 6.5px; line-height: 1.3; }
+  .coin-milestone strong { font-size: 8px; line-height: 1.3; }
+  .coin-milestone-xp { font-size: 7px; line-height: 1.3; }
+  .coin-method-grid { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 4px; margin-top: 6px; }
+  .coin-method { padding: 5px; border-radius: 8px; }
+  .coin-method .coin-guide-symbol { display: none; }
+  .coin-guide-note { font-size: 7.5px; line-height: 1.5; margin: 6px 0 0; padding: 6px 8px; }
+  .coin-buy-pane { padding: 16px; }
+  .coin-buy-symbol { width: 40px; height: 40px; font-size: 24px; margin-bottom: 10px; }
+  .coin-buy-pane h3 { font-size: 13px; }
+  .coin-buy-pane p { font-size: 8px; line-height: 1.5; margin-bottom: 12px; }
+  .coin-back-earn { min-height: 34px; font-size: 8px; padding: 6px 10px; }
+
+  .record-card { padding: 14px 20px; }
+  .record-medal { width: 30px; height: 36px; margin-bottom: 5px; }
+  .record-card h2 { font-size: 15px; }
+  .record-distance { font-size: 13px; }
+  .record-card p, .record-card label { font-size: 8px; line-height: 1.5; }
+  .record-card p { margin: 6px 0; }
+  .record-card label { margin: 8px 0 5px; }
+  html[lang] .record-card .primary-button { width: 100%; font-size: 9px; height: 44px; margin-top: 8px; }
+}
+
+@media (max-width: 900px) and (max-height: 350px), (pointer: coarse) and (max-height: 350px) and (orientation: landscape) {
+  .overlay { padding-top: 48px; }
+  .control-summary { display: none; }
+  .coin-route-heading .coin-guide-symbol { display: none; }
+  .garage-car-preview svg { max-height: 42px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .touch-meter-fill { transition: none; }
+}

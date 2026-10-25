@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { GamePhysics, GameSnapshot } from './physics';
-import { getDistrict, hash, roadHeight, loopsBetween, loopGeometry, type LoopSpec, type HazardKind, type TrackChunk } from './track';
+import { getDistrict, hash, roadHeight, loopsBetween, loopGeometry, rampsBetween, type LoopSpec, type HazardKind, type TrackChunk } from './track';
 import { sprungBodyPose } from './vehicle';
 import { createRoadsterBody, createRoadsterWheel } from './roadsterModel';
 import { CarSmoke } from './smoke';
@@ -11,6 +11,7 @@ import { ObstacleDebris } from './obstacleDebris';
 import { ImpactSparks } from './impactSparks';
 import { ImpactCamera, VIEW_HALF_HEIGHT, CAMERA_LOOK_AHEAD } from './impactCamera';
 import { DrivingCamera } from './drivingCamera';
+import { createRampBooster } from './rampBooster';
 import { createTerrainMaterial, createTerrainGeometry, createRoadCapGeometry } from './terrain';
 import { StartDepot } from './startDepot';
 import { BackdropBlur } from './backdropBlur';
@@ -292,6 +293,11 @@ export class GameVisuals {
       this.roadSection(spec.gap.end, spec.end, group);
     } else {
       this.roadSection(spec.start, spec.end, group);
+    }
+    for (const ramp of rampsBetween(spec.start, spec.end)) {
+      if (ramp.boosterX >= spec.start && ramp.boosterX < spec.end) {
+        group.add(createRampBooster(ramp, this.roadMat, this.cyanMat, this.stripeMat));
+      }
     }
 
     for (let i = 0; i < 3; i++) {

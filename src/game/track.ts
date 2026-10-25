@@ -24,24 +24,34 @@ export interface LoopSpec { id: number; entryX: number; radius: number }
 const loops: LoopSpec[] = [];
 
 export const RAMP_UNLOCK_DISTANCE = 1000;
-const FIRST_RAMP_X = 7 + RAMP_UNLOCK_DISTANCE + 30;
-const RAMP_SPACING = 280;
+const RAMP_UNLOCK_X = 7 + RAMP_UNLOCK_DISTANCE;
+export const RAMP_MIN_SPACING = 400;
+export const RAMP_MAX_SPACING = 800;
 const RAMP_RUN_UP = 24;
 const RAMP_CREST = 4;
 const RAMP_DESCENT = 20;
 const RAMP_LENGTH = RAMP_RUN_UP + RAMP_CREST + RAMP_DESCENT;
 export const RAMP_APPROACH = 12;
 export const RAMP_LANDING = 110;
-export interface RampSpec { id: number; start: number; end: number; takeoffX: number; rise: number }
+export const RAMP_BOOSTER_LENGTH = 5;
+export interface RampSpec { id: number; start: number; end: number; takeoffX: number; boosterX: number; rise: number }
 interface RampProfile extends RampSpec { baseStart: number; baseEnd: number; slopeStart: number; slopeEnd: number }
-const ramps: (RampProfile | null)[] = [];
+const ramps: RampProfile[] = [];
 
 /** Stable procedural spacing, including when chunks are visited out of order. */
 function ensureLoops(end: number): void {
   while (!loops.length || loops[loops.length - 1].entryX < end + 30) {
     const id = loops.length;
     const previous = id ? loops[id - 1].entryX : 7;
-    loops.push({ id, entryX: previous + 200 + Math.floor(hash(id + 770) * 201), radius: 5.6 + hash(id + 811) * 0.4 });
+    let entryX = previous + 200 + Math.floor(hash(id + 770) * 201);
+    const ramp = rampsBetween(entryX - RAMP_LANDING - 20, entryX + RAMP_APPROACH + 20)[0];
+    if (ramp) {
+      // Keep every scheduled ramp. Move the optional loop to a clear join
+      // rather than skipping a ramp and exceeding its 800m spacing limit.
+      const before = ramp.start - RAMP_APPROACH - 21;
+      entryX = before >= previous + 200 ? before : ramp.end + RAMP_LANDING + 21;
+    }
+    loops.push({ id, entryX, radius: 5.6 + hash(id + 811) * 0.4 });
   }
 }
 
@@ -65,37 +75,49 @@ export function loopsBetween(start: number, end: number): LoopSpec[] {
 }
 
 function ensureRamps(end: number): void {
-  const last = Math.floor((end - FIRST_RAMP_X) / RAMP_SPACING);
-  while (ramps.length <= last) {
+  if (end < RAMP_UNLOCK_X + RAMP_MIN_SPACING) return;
+  while (!ramps.length || ramps[ramps.length - 1].start <= end) {
     const id = ramps.length;
-    const start = FIRST_RAMP_X + id * RAMP_SPACING + hash(id + 1201) * 60;
+    const previous = id ? ramps[id - 1].start : RAMP_UNLOCK_X;
+    const start = previous + RAMP_MIN_SPACING + Math.floor(hash(id + 1201) * (RAMP_MAX_SPACING - RAMP_MIN_SPACING + 1));
     const rampEnd = start + RAMP_LENGTH;
-    // Keep the approach and the entire landing clear of magnetic loop joins.
-    const reserved = loopsBetween(start - RAMP_APPROACH - 20, rampEnd + RAMP_LANDING + 20).length > 0;
-    ramps.push(reserved ? null : { id, start, end: rampEnd, takeoffX: start + RAMP_RUN_UP,
+    ramps.push({ id, start, end: rampEnd, takeoffX: start + RAMP_RUN_UP, boosterX: start + RAMP_RUN_UP - 3,
       rise: 8 + hash(id + 1259) * 1.5, baseStart: baseHeight(start), baseEnd: baseHeight(rampEnd),
       slopeStart: baseSlope(start), slopeEnd: baseSlope(rampEnd) });
   }
 }
 
+function firstRampAt(start: number): number {
+  let low = 0;
+  let high = ramps.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (ramps[mid].start < start) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
 export function rampsBetween(start: number, end: number): RampSpec[] {
   ensureRamps(end);
-  const first = Math.max(0, Math.floor((start - FIRST_RAMP_X - 60 - RAMP_LENGTH) / RAMP_SPACING));
+  const first = firstRampAt(start - RAMP_LENGTH);
   const result: RampSpec[] = [];
-  for (let i = first; i < ramps.length && FIRST_RAMP_X + i * RAMP_SPACING <= end; i++) {
-    const ramp = ramps[i];
-    if (ramp && ramp.end >= start && ramp.start <= end) result.push(ramp);
-  }
+  for (let i = first; i < ramps.length && ramps[i].start <= end; i++) result.push(ramps[i]);
   return result;
+}
+
+export function rampAt(x: number): RampProfile | undefined {
+  if (x < RAMP_UNLOCK_X + RAMP_MIN_SPACING) return undefined;
+  ensureRamps(x);
+  const ramp = ramps[firstRampAt(x - RAMP_LENGTH)];
+  return ramp && x >= ramp.start && x <= ramp.end ? ramp : undefined;
 }
 
 /** C1-continuous climb, short convex crest, and a gentle return to the road.
  * The tires launch naturally as the road falls away beneath their momentum. */
 function sampleRamp(x: number, result: RoadSample): void {
-  if (x < FIRST_RAMP_X) return;
-  ensureRamps(x);
-  const ramp = ramps[Math.floor((x - FIRST_RAMP_X) / RAMP_SPACING)];
-  if (!ramp || x < ramp.start || x > ramp.end) return;
+  const ramp = rampAt(x);
+  if (!ramp) return;
   const dx = x - ramp.start;
   // Smooth out the ordinary short waves beneath the ramp so they cannot kick
   // a tire into an early, uncontrolled takeoff. Match both road joins exactly.

@@ -14,6 +14,7 @@ const cleanName = (value: string): string => value.replace(/[\u0000-\u001f\u007f
 export class PlayerProgress {
   coins = 0;
   runCoins = 0;
+  score = 0;
   playerName = '';
   record: RecordEntry = { distance: 0, name: '', needsName: false };
   private readonly owned = new Set<WeaponId>(['machine-gun']);
@@ -22,12 +23,16 @@ export class PlayerProgress {
   private collected = [0, 0, 0, 0];
   private finished = false;
   private distanceRewardsCollected = 0;
+  private runScore = 0;
+  private savedScore = 0;
+  private scoreSavedAt = -Infinity;
 
   constructor(private readonly storage?: ProgressStorage) {
     try {
       const saved = JSON.parse(storage?.getItem(STORAGE_KEY) ?? 'null');
       if (saved?.version === 1) {
         if (validCount(saved.coins)) this.coins = saved.coins;
+        if (validCount(saved.score)) this.score = saved.score;
         if (typeof saved.playerName === 'string') this.playerName = cleanName(saved.playerName);
         if (validCount(saved.record?.distance)) {
           this.record = { distance: saved.record.distance,
@@ -53,6 +58,24 @@ export class PlayerProgress {
         this.record = { distance: legacyBest, name: '', needsName: false };
       }
     } catch { /* The session remains playable without browser storage. */ }
+    this.savedScore = this.score;
+  }
+
+  /** Save the last run's distance without synchronously writing every frame. */
+  trackScore(distance: number, now: number): void {
+    if (this.finished) return;
+    const score = Math.floor(distance);
+    if (!validCount(score)) return;
+    this.runScore = Math.max(this.runScore, score);
+    this.score = this.runScore;
+    if (this.score !== this.savedScore && now - this.scoreSavedAt >= 1000) {
+      this.persist();
+      this.scoreSavedAt = now;
+    }
+  }
+
+  flushScore(): void {
+    if (this.score !== this.savedScore) this.persist();
   }
 
   ownsWeapon(id: string): boolean { return this.owned.has(id as WeaponId); }
@@ -128,7 +151,11 @@ export class PlayerProgress {
     if (this.finished) return { newRecord: false, bonus: 0 };
     this.finished = true;
     const score = Math.floor(distance);
-    if (!validCount(score) || score <= this.record.distance) return { newRecord: false, bonus: 0 };
+    if (validCount(score)) this.score = this.runScore = Math.max(this.runScore, score);
+    if (!validCount(score) || score <= this.record.distance) {
+      this.flushScore();
+      return { newRecord: false, bonus: 0 };
+    }
     this.record = { distance: score, name: '', needsName: true };
     const bonus = score > 2000 ? 25 : score > 1000 ? 10 : 0;
     this.coins += bonus;
@@ -153,6 +180,9 @@ export class PlayerProgress {
     this.finished = false;
     this.distanceRewardsCollected = 0;
     this.runCoins = 0;
+    this.runScore = this.score = 0;
+    this.scoreSavedAt = -Infinity;
+    this.flushScore();
   }
 
   private credit(amount: number): number {
@@ -166,8 +196,10 @@ export class PlayerProgress {
   private persist(): void {
     try {
       this.storage?.setItem(STORAGE_KEY, JSON.stringify({ version: 1, coins: this.coins,
+        score: this.score,
         ownedWeapons: [...this.owned], weaponUpgrades: this.upgrades, carUpgrades: this.vehicleUpgrades,
         record: this.record, playerName: this.playerName }));
+      this.savedScore = this.score;
     } catch { /* Keep progress for this session when persistence is unavailable. */ }
   }
 }

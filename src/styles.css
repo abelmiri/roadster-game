@@ -10,6 +10,18 @@
 @media (pointer:coarse) and (orientation:landscape){.keyboard-guide{display:none}.touch-controls{display:flex}.bottom-hud{left:50%;bottom:24px;transform:translateX(-50%);gap:10px}.boost-panel{width:140px}.speed-panel{padding-left:10px}.speed-panel span{display:none}}
 @media (max-width:900px) and (orientation:landscape){.bottom-hud{left:50%;bottom:24px;transform:translateX(-50%);gap:10px}.boost-panel{width:140px}.speed-panel{padding-left:10px}.speed-panel span{display:none}}
 
+/* Keep repeated taps and long presses from selecting button text or artwork. */
+button, button * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+}
+button {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 /* Layout follows the car's fixed driving direction; translated copy has its
    own text direction so switching languages never swaps the touch pedals. */
 .game-shell{direction:ltr}

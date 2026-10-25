@@ -20,6 +20,7 @@ import './hud.css';
 import './touchLayout.css';
 import './progress.css';
 import './coins.css';
+import './mobile.css';
 
 type GameStatus = 'loading' | 'ready' | 'running' | 'paused' | 'crashed' | 'error';
 const carUpgradeNames: Record<CarUpgradeId, MessageKey> = { armor:'carArmor', 'boost-reserve':'carBoostReserve', 'boost-power':'carBoostPower' };
@@ -36,7 +37,7 @@ app.innerHTML = `
       <div class="brand"><img class="brand-mark app-icon" src="/icons/icon-192.png" width="32" height="32" alt="" /><span data-i18n="brand"></span><span class="brand-edition" data-i18n="edition"></span></div>
       <div class="topbar-tools">
         <div class="hud" aria-live="off">
-          <div class="hud-stat"><span class="hud-label" data-i18n="distance"></span><strong id="distance"></strong></div>
+          <div class="hud-stat"><span id="distance-title" class="hud-label" data-i18n="distance"></span><strong id="distance"></strong></div>
           <div class="hud-divider"></div>
           <div class="hud-stat"><span class="hud-label" data-i18n="best"></span><strong id="best"></strong><small id="best-player" class="best-player"></small></div>
           <button id="pause-button" class="icon-button" type="button"><span class="pause-icon" aria-hidden="true"></span></button>
@@ -61,25 +62,27 @@ app.innerHTML = `
     <div id="challenge-hint" class="challenge-hint" role="status"></div>
     <div id="xp-toast" class="xp-toast" role="status"></div>
     <div id="coin-toast" class="coin-toast" role="status" hidden></div>
-    <div class="resources-panel">
-        <div id="health-panel" class="health-panel"><div class="boost-heading"><span data-i18n="health"></span><span id="health-value"></span></div><div id="health-meter" class="health-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div id="health-trail" class="health-trail" aria-hidden="true"></div><div id="health-fill" class="health-fill"></div></div></div>
-        <div id="boost-panel" class="boost-panel"><div class="boost-heading"><span data-i18n="boostReserve"></span><span id="boost-value"></span></div><div id="boost-meter" class="boost-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div id="boost-fill" class="boost-fill"></div></div></div>
-    </div>
     <div id="weapon-panel" class="weapon-panel">
       <div class="weapon-heading"><span id="weapon-name"></span><strong id="weapon-ammo" dir="ltr"></strong></div>
       <div id="ammo-meter" class="ammo-track" role="progressbar" aria-valuemin="0"><span id="ammo-fill"></span></div>
       <div class="weapon-status-row"><button id="weapon-aim" class="aim-button" type="button"><span id="weapon-direction"></span><kbd lang="en" dir="ltr">Q</kbd></button><span id="weapon-status" role="status"></span></div>
     </div>
     <div class="bottom-hud">
+      <div class="progress-stack">
+      <div class="resources-panel">
+        <div id="health-panel" class="health-panel"><div class="boost-heading"><span data-i18n="health"></span><span id="health-value"></span></div><div id="health-meter" class="health-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div id="health-trail" class="health-trail" aria-hidden="true"></div><div id="health-fill" class="health-fill"></div></div></div>
+        <div id="boost-panel" class="boost-panel"><div class="boost-heading"><span data-i18n="boostReserve"></span><span id="boost-value"></span></div><div id="boost-meter" class="boost-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div id="boost-fill" class="boost-fill"></div></div></div>
+      </div>
       <div class="experience-panel"><div><span id="xp-level"></span><strong id="xp-total"></strong></div><div id="xp-meter" class="xp-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><span id="xp-fill"></span></div><button id="coin-wallet-button" class="coin-wallet" type="button" aria-haspopup="dialog" aria-controls="coin-dialog" aria-expanded="false"><span class="coin-symbol" aria-hidden="true">●</span><span data-i18n="coins"></span><strong id="coin-total"></strong></button></div>
+      </div>
       <div class="speed-panel"><span data-i18n="speed"></span><strong id="speed"></strong><small data-i18n="speedUnit"></small></div>
     </div>
     <div class="keyboard-guide" aria-hidden="true"><span><kbd lang="en" dir="ltr" data-i18n="spaceKey"></kbd><span data-i18n="jumpGuide"></span></span><span><kbd lang="en" dir="ltr">↓</kbd><span data-i18n="suction"></span></span><span><kbd lang="en" dir="ltr" data-i18n="shiftKey"></kbd><span data-i18n="airBoost"></span></span><span><kbd lang="en" dir="ltr">← / →</kbd><span data-i18n="turnWeapon"></span></span><span><kbd lang="en" dir="ltr">F</kbd><span data-i18n="fire"></span></span><span><kbd lang="en" dir="ltr">1–8</kbd><span data-i18n="selectWeapon"></span></span><span><kbd lang="en" dir="ltr">G</kbd><span data-i18n="armory"></span></span><span><kbd lang="en" dir="ltr">Z / X</kbd><span data-i18n="airJets"></span></span></div>
     <div id="touch-controls" class="touch-controls">
-      <button id="touch-fire" class="touch-button touch-fire" type="button">${touchIcon('fire')}<span data-i18n="fire"></span></button>
+      <button id="touch-fire" class="touch-button touch-fire" type="button"><svg class="touch-meter" viewBox="0 0 100 100" aria-hidden="true"><circle class="touch-meter-track" cx="50" cy="50" r="46"/><circle id="touch-ammo-ring" class="touch-meter-fill" cx="50" cy="50" r="46" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0"/></svg>${touchIcon('fire')}<span class="touch-meter-value" id="touch-ammo-value" aria-hidden="true"></span><span class="touch-meter-label" data-i18n="fire"></span></button>
       <button id="touch-suction" class="touch-button touch-suction" type="button">${touchIcon('suction')}<span data-i18n="suction"></span></button>
       <button id="touch-aim" class="touch-button touch-aim" type="button">${touchIcon('aim')}</button>
-      <button id="touch-boost" class="touch-button touch-boost" type="button">${touchIcon('boost')}<span data-i18n="boost"></span></button>
+      <button id="touch-boost" class="touch-button touch-boost" type="button"><svg class="touch-meter" viewBox="0 0 100 100" aria-hidden="true"><circle class="touch-meter-track" cx="50" cy="50" r="46"/><circle id="touch-boost-ring" class="touch-meter-fill" cx="50" cy="50" r="46" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0"/></svg>${touchIcon('boost')}<span class="touch-meter-value" id="touch-boost-value" aria-hidden="true"></span><span class="touch-meter-label" data-i18n="boost"></span></button>
       <button id="touch-front-jet" class="touch-button touch-front-jet" type="button">${touchIcon('front-jet')}<span data-i18n="frontJet"></span></button>
       <button id="touch-rear-jet" class="touch-button touch-rear-jet" type="button">${touchIcon('rear-jet')}<span data-i18n="rearJet"></span></button>
       <button id="touch-jump" class="touch-button touch-jump" type="button">${touchIcon('jump')}<span data-i18n="jump"></span></button>
@@ -159,7 +162,7 @@ app.innerHTML = `
             ['↗','coinDrivingTitle','coinDrivingDescription'],['↻','coinLoopTitle','coinLoopDescription'],
             ['⌖','coinPoliceTitle','coinPoliceDescription'],['★','coinRecordTitle','coinRecordDescription'],
             ['⟳','coinFlipTitle','coinFlipDescription'],
-          ].map(([symbol,heading,copy])=>`<article class="coin-method"><span class="coin-guide-symbol" aria-hidden="true">${symbol}</span><h3 data-i18n="${heading}"></h3><p data-i18n="${copy}"></p></article>`).join('')}</div>
+          ].map(([symbol,heading,copy])=>`<article class="coin-method"><span class="coin-guide-symbol" aria-hidden="true">${symbol}</span><h3 data-i18n="${heading}"></h3><p data-i18n="${copy}"></p><p class="coin-method-mobile" data-i18n="${copy}Mobile"></p></article>`).join('')}</div>
           <p class="coin-guide-note" data-i18n="coinXpNote"></p>
         </section>
         <section id="coin-buy-pane" class="coin-buy-pane" role="tabpanel" aria-labelledby="coin-tab-buy" hidden><span class="coin-buy-symbol" aria-hidden="true">●</span><h3 id="coin-buy-unavailable" data-i18n="coinBuyUnavailable"></h3><p data-i18n="coinBuyDescription"></p><button id="coin-back-earn" class="coin-back-earn" type="button" data-i18n="coinBackEarn"></button></section>
@@ -233,7 +236,7 @@ const soundButton = element<HTMLButtonElement>('sound-button');
 const languageButton = element<HTMLButtonElement>('language-button');
 const audio = new GameAudio();
 let progressStorage: Storage | undefined;
-try { progressStorage = localStorage; } catch { /* Session-only XP if storage is unavailable. */ }
+try { progressStorage = localStorage; } catch { /* Keep the game playable when browser storage is unavailable. */ }
 const experience = new ExperienceProgress(progressStorage);
 const player = new PlayerProgress(progressStorage);
 const loadout = new WeaponLoadout(experience.total, progressStorage, id => player.ownsWeapon(id));
@@ -440,6 +443,7 @@ function updateDistanceRewards(distance: number): void {
 }
 
 function updateHud(snapshot?: GameSnapshot): void {
+  const showingLastScore = (status === 'ready' || status === 'loading') && player.score > 0;
   const charge = snapshot?.boost ?? 1;
   const maxHealth = snapshot?.maxHealth ?? carUpgradeStats(player.carUpgrades).maxHealth;
   const health = snapshot?.health ?? maxHealth;
@@ -451,7 +455,8 @@ function updateHud(snapshot?: GameSnapshot): void {
     speed: Math.max(0, snapshot?.speed ?? 0) * 3.6, xp: experience.total, level: experience.level,
     progress: experience.levelProgress / LEVEL_XP, distance: snapshot?.distance ?? 0, best,
     ammo, capacity: spec.ammo, weapon: spec.id }, performance.now(), status === 'running' || status === 'crashed');
-  htmlIfChanged(distanceLabel, formatDistance(snapshot?.distance ?? 0));
+  htmlIfChanged(distanceLabel, formatDistance(status === 'ready' || status === 'loading' ? player.score : snapshot?.distance ?? 0));
+  textIfChanged(element('distance-title'), t(showingLastScore ? 'lastScore' : 'distance'));
   htmlIfChanged(bestLabel, formatDistance(best));
   textIfChanged(element('best-player'), player.record.name);
   element('best-player').hidden = !player.record.name;
@@ -466,6 +471,9 @@ function updateHud(snapshot?: GameSnapshot): void {
   const percentage = Math.round(charge * 100);
   fillIfChanged(boostFill, charge);
   textIfChanged(boostValue, formatPercent(charge));
+  textIfChanged(element('touch-boost-value'), formatPercent(charge));
+  attributeIfChanged(element('touch-boost-ring'), 'stroke-dashoffset', String((1 - charge) * 100));
+  attributeIfChanged(element('touch-boost'), 'aria-label', `${t('boost')} · ${t('boostMeter', { charge: formatPercent(charge) })}`);
   attributeIfChanged(boostMeter, 'aria-valuenow', String(percentage));
   attributeIfChanged(boostMeter, 'aria-label', t('boostReserve'));
   attributeIfChanged(boostMeter, 'aria-valuetext', t('boostMeter', { charge: formatPercent(charge) }));
@@ -490,6 +498,9 @@ function updateHud(snapshot?: GameSnapshot): void {
   fillIfChanged(xpFill, experience.levelProgress / LEVEL_XP);
   attributeIfChanged(xpMeter, 'aria-valuenow', String(experience.levelProgress));
   attributeIfChanged(xpMeter, 'aria-label', t('xpProgress', { xp: formatNumber(experience.levelProgress), target: formatNumber(LEVEL_XP) }));
+  textIfChanged(element('touch-ammo-value'), formatNumber(ammo));
+  attributeIfChanged(element('touch-ammo-ring'), 'stroke-dashoffset', String((1 - ammo / spec.ammo) * 100));
+  attributeIfChanged(element('touch-fire'), 'aria-label', `${t('fire')} · ${weaponName(spec.id)} · ${formatNumber(ammo)} / ${formatNumber(spec.ammo)}`);
   const rewardText = t(lastRewardMessage, { xp: formatNumber(lastReward) });
   if (xpToast.textContent !== rewardText) textIfChanged(xpToast, rewardText);
   const police = snapshot?.police;
@@ -606,6 +617,7 @@ function start(): void {
   if (status === 'loading' || status === 'error' || status === 'running') return;
   if (status === 'crashed' && performance.now() < restartAvailableAt) return;
   const resuming = status === 'paused';
+  if (status === 'ready') player.resetRun();
   if (status === 'crashed') {
     restartAvailableAt = 0;
     primaryButton.disabled = false;
@@ -634,10 +646,19 @@ function start(): void {
   lastFrame = performance.now();
   primaryButton.blur();
   updatePauseButton();
+  updateHud(physics.snapshot(1));
   void audio.unlock().then(() => audio.play(resuming ? 'resume' : 'start'));
 }
 
+function saveRunScore(): void {
+  if (status !== 'ready' && status !== 'loading' && status !== 'error') {
+    player.trackScore(physics.distance, performance.now());
+  }
+  player.flushScore();
+}
+
 function pause(): void {
+  saveRunScore();
   if (status !== 'running') { audio.suspend(); return; }
   status = 'paused';
   jumpQueued = false;
@@ -728,6 +749,18 @@ function jumpDown(source: string): void {
   if (status === 'running') jumpQueued = true;
 }
 
+function syncAirJetButtons(): void {
+  element('touch-front-jet').classList.toggle('is-pressed', held.frontJet.size > 0);
+  element('touch-rear-jet').classList.toggle('is-pressed', held.rearJet.size > 0);
+}
+
+function holdAction(action: keyof typeof held, source: string): void {
+  if (action === 'frontJet') held.rearJet.clear();
+  if (action === 'rearJet') held.frontJet.clear();
+  held[action].add(source);
+  if (action === 'frontJet' || action === 'rearJet') syncAirJetButtons();
+}
+
 function bindTouch(id: string, action: keyof typeof held): void {
   const button = element<HTMLButtonElement>(id);
   button.addEventListener('pointerdown', (event) => {
@@ -738,11 +771,12 @@ function bindTouch(id: string, action: keyof typeof held): void {
     button.classList.add('is-pressed');
     const source = `pointer-${event.pointerId}`;
     if (action === 'jump') jumpDown(source);
-    else held[action].add(source);
+    else holdAction(action, source);
   });
   const release = (event: PointerEvent): void => {
     button.classList.remove('is-pressed');
     held[action].delete(`pointer-${event.pointerId}`);
+    if (action === 'frontJet' || action === 'rearJet') syncAirJetButtons();
   };
   button.addEventListener('pointerup', release);
   button.addEventListener('pointercancel', release);
@@ -972,7 +1006,7 @@ window.addEventListener('keydown', (event) => {
     if (event.repeat) return;
     void audio.unlock();
     if (action === 'jump') jumpDown(`key-${event.code}`);
-    else held[action].add(`key-${event.code}`);
+    else holdAction(action, `key-${event.code}`);
   } else if (['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD', 'KeyQ'].includes(event.code)) {
     event.preventDefault();
     if (!event.repeat) turnWeapon(['ArrowLeft', 'KeyA'].includes(event.code) ? -1 : ['ArrowRight', 'KeyD'].includes(event.code) ? 1 : undefined);
@@ -990,9 +1024,10 @@ window.addEventListener('keydown', (event) => {
 window.addEventListener('keyup', (event) => {
   const action = actionForKey(event.code);
   if (action) held[action].delete(`key-${event.code}`);
+  if (action === 'frontJet' || action === 'rearJet') syncAirJetButtons();
 });
 window.addEventListener('blur', pause);
-window.addEventListener('pagehide', () => audio.suspend());
+window.addEventListener('pagehide', () => { saveRunScore(); audio.suspend(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
 primaryButton.addEventListener('click', start);
 pauseButton.addEventListener('click', () => { if (status === 'running') pause(); else if (status === 'paused') start(); });
@@ -1091,6 +1126,7 @@ function renderFrame(now: number): void {
   const frozen = impactPause.active;
   const snapshot = physics.snapshot(frozen || holdInterpolation ? 1 : Math.min(1, accumulator / FIXED_STEP));
   const simulating = status === 'running' && !frozen;
+  if (status === 'running') player.trackScore(snapshot.distance, now);
   awardCoins(player.collect(snapshot.distance, snapshot.loopCompletions, snapshot.policeDestroyed, snapshot.flipCoins));
   if (simulating) coinRewardTime = Math.max(0, coinRewardTime - playDelta);
   const gained = awardExperience(snapshot);

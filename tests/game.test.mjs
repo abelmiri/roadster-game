@@ -140,6 +140,25 @@ test('ramps begin after 1000m, stream deterministically, and reserve a continuou
   assert.deepEqual(new TrackGenerator().chunk(38), track.chunk(38));
 });
 
+test('every actual ramp is randomly spaced 400–800m after the unlock and previous ramp, including distant streamed sections', async () => {
+  assert.deepEqual(rampsBetween(0, 1406), []);
+  const ramps = rampsBetween(0, 100000);
+  const spacings = new Set();
+  let previous = 1007;
+  for (const [index, ramp] of ramps.entries()) {
+    const spacing = ramp.start - previous;
+    assert.ok(spacing >= 400 && spacing <= 800, `ramp ${ramp.id}: spacing=${spacing}`);
+    assert.equal(ramp.id, index, 'loop conflicts must not skip scheduled ramps');
+    spacings.add(spacing);
+    previous = ramp.start;
+  }
+  assert.ok(spacings.size > 50, 'spacing must vary rather than repeat a fixed interval');
+  const fresh = await import(`${pathToFileURL(path.resolve('node_modules/.cache/roadster-tests/track.mjs')).href}?ramp-order`);
+  assert.deepEqual(fresh.rampsBetween(80000, 81000), rampsBetween(80000, 81000));
+  assert.deepEqual(fresh.loopsBetween(0, 100000), loopsBetween(0, 100000));
+  assert.deepEqual(fresh.rampsBetween(0, 10000), rampsBetween(0, 10000));
+});
+
 test('boosting over ramps produces long natural jumps and clean landings without pressing jump', () => {
   for (const ramp of rampsBetween(0, 10000)) for (const upgraded of [false, true]) {
     const game = new GamePhysics(ramp.start - 10, { id:'machine-gun', xp:0,
@@ -181,6 +200,61 @@ test('the launch depot has a continuous level apron and supports detached wreck 
     assert.ok(state.car.y > roadHeight(state.car.x) - .1, 'the shell fell through the launch apron');
     assert.ok(state.wheels.every(wheel => wheel.y > roadHeight(wheel.x) + CAR_WHEEL_RADIUS - .15));
   } finally { game.dispose(); }
+});
+
+test('ramp booster pads add launch speed without fuel and pay their impulse once across both axles and chunk reloads', () => {
+  const ramp=rampsBetween(0,2000)[0];
+  const game=new GamePhysics(ramp.start-10);
+  try {
+    let previous=game.snapshot(1);
+    for(let i=0;i<500&&!game.snapshot(1).rampBoostSerial;i++) {
+      game.step(idle);
+      const state=game.snapshot(1);
+      if(state.rampBoostSerial) {
+        assert.ok(state.speed>previous.speed+6,'pad must give an immediate speed impulse');
+        assert.equal(state.boost,1,'ground pads must not spend the player reserve');
+        assert.equal(state.boostActive,true,'pad impulse should produce boost exhaust');
+      }
+      previous=state;
+    }
+    assert.equal(game.snapshot(1).rampBoostSerial,1);
+    stepFor(game,.4);
+    assert.equal(game.snapshot(1).rampBoostSerial,1,'the rear axle must not fire the same pad again');
+    game.ensureChunks(ramp.end+220);
+    placeOnRoad(game,ramp.boosterX,18);
+    stepFor(game,.1);
+    assert.equal(game.snapshot(1).rampBoostSerial,1,'a reloaded or revisited pad must not stack speed');
+  } finally {game.dispose();}
+  const airborne=new GamePhysics(ramp.boosterX-4);
+  try {
+    airborne.car.setTranslation({x:ramp.boosterX-4,y:roadHeight(ramp.boosterX)+25},true);
+    airborne.car.setLinvel({x:27,y:0},true);
+    stepFor(airborne,.5);
+    assert.equal(airborne.snapshot(1).rampBoostSerial,0,'flying over a pad cannot activate it');
+  } finally {airborne.dispose();}
+});
+
+test('a fresh ramp booster makes a higher and longer jump than an already spent pad', () => {
+  const ramp=rampsBetween(0,2000)[0];
+  const jumps=[];
+  for(const spent of [false,true]) {
+    const game=new GamePhysics(ramp.start-10);
+    if(spent)game.usedRampBoosters.add(ramp.id);
+    let height=0,airTime=0,longestFlight=0;
+    try {
+      for(let i=0;i<1000&&!game.crashed&&game.car.translation().x<ramp.end+100;i++) {
+        game.step({...idle,boost:true});
+        const state=game.snapshot(1);
+        height=Math.max(height,state.car.y-roadHeight(state.car.x));
+        airTime=state.grounded?0:airTime+FIXED_STEP;
+        longestFlight=Math.max(longestFlight,airTime);
+      }
+      assert.equal(game.crashed,false);
+      jumps.push({height,longestFlight});
+    } finally {game.dispose();}
+  }
+  assert.ok(jumps[0].height>jumps[1].height+4);
+  assert.ok(jumps[0].longestFlight>jumps[1].longestFlight+.2);
 });
 
 test('jump landings preserve forward motion and do not launch the car back into the air', () => {
@@ -704,14 +778,18 @@ test('ground boost accelerates without a jump, spends charge, and recharges', ()
   } finally { game.dispose(); coast.dispose(); }
 });
 
-test('loop spacing is 200–400 meters and the shared ordinary road stays clear', () => {
+test('loop spacing stays 200–400m with small adjustments for reserved ramp landings, and the road stays clear', () => {
   const loops = loopsBetween(0, 25000);
   assert.ok(loops.length > 70);
   let previous = 7;
   const generator = new TrackGenerator();
   for (const loop of loops) {
     const spacing = loop.entryX - previous;
-    assert.ok(spacing >= 200 && spacing <= 400, `spacing=${spacing}`);
+    assert.ok(spacing >= 200 && spacing <= 412, `spacing=${spacing}`);
+    if (spacing > 400) {
+      const ramp = rampsBetween(previous, loop.entryX)[0];
+      assert.ok(ramp && loop.entryX > ramp.end + RAMP_LANDING + 20, 'longer loop spacing must clear a ramp landing');
+    }
     previous = loop.entryX;
     for (let x = loop.entryX - 19; x <= loop.entryX + 19; x += 2) {
       const chunk = generator.chunk(Math.floor(x / 30));

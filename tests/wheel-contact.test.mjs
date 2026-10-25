@@ -15,7 +15,7 @@ const flat = { height: () => 0, slope: () => 0, exists: () => true };
 const bodyAt = (overrides = {}) => ({ x: 0, y: 0.79, angle: 0, vx: 0, vy: 0, omega: 0, ...overrides });
 const dt = 1 / 120;
 
-test('air nozzles lift opposite ends, balance together, and yield to even a single grounded tire', () => {
+test('air nozzles lift opposite ends, reject simultaneous directions, and yield to a grounded tire', () => {
   for (const surface of [flat, { ...flat, exists: x => x < 0 }, { ...flat, exists: x => x > 0 }]) {
     const idleContact = new WheelContactPhysics(surface);
     const jetContact = new WheelContactPhysics(surface);
@@ -26,7 +26,13 @@ test('air nozzles lift opposite ends, balance together, and yield to even a sing
     assert.equal(jetContact.frontJetActive, false);
     assert.equal(jetContact.rearJetActive, false);
   }
-  for (const [front, rear, sign] of [[true,false,1], [false,true,-1], [true,true,0]]) {
+  const rejected = new WheelContactPhysics(flat);
+  const idleAir = new WheelContactPhysics(flat);
+  const airborne = bodyAt({y:20});
+  assert.deepEqual(rejected.step(airborne,false,dt,false,{front:true,rear:true}),idleAir.step(airborne,false,dt));
+  assert.equal(rejected.frontJetActive,false);
+  assert.equal(rejected.rearJetActive,false);
+  for (const [front, rear, sign] of [[true,false,1], [false,true,-1]]) {
     const contact = new WheelContactPhysics(flat);
     let body = bodyAt({y:20});
     contact.beginJump(body, true);

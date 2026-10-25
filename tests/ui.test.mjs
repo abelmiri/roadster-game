@@ -144,6 +144,7 @@ async function page(language = 'en-US', saved = {}, development = false, reduced
     context, ids, storage,
     async click(id) { ids.get(id).dispatch('click'); await settle(); },
     key(code, event = 'keydown', fields = {}) { for (const handler of windowEvents.get(event) ?? []) handler({ code, repeat:false, preventDefault(){}, ...fields }); },
+    windowEvent(event) { for(const handler of windowEvents.get(event)??[])handler({}); },
     pointer(id, event, fields = {}) { ids.get(id).dispatch(event, fields); },
     resize(width, height) {
       context.window.innerWidth = width; context.window.innerHeight = height;
@@ -573,6 +574,60 @@ test('touch layout cancel and Escape discard edits; reset restores defaults and 
   await p.click('touch-layout-save'); p.advance(17);
   assert.equal(p.context.audioRunning, false);
   assert.equal(JSON.parse(p.storage.get('roadster-touch-layout')).buttons.jump.size, 76);
+});
+
+test('score, record, XP, coins and mobile control positions, sizes and visibility all survive reloading together', async () => {
+  const p=await page('fa-IR',{'roadster-xp':'75','roadster-progress':progressSave(1000,['machine-gun'],{distance:2000,name:'آبل',needsName:false})});
+  await p.click('primary-button');
+  p.context.snapshot.distance=1534.8;
+  p.context.snapshot.loopCompletions=1;
+  p.advance(17);
+  p.context.snapshot.distance=1539.6;
+  p.advance(77);
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).score,1534,'subsecond distance-only updates are buffered');
+  await p.click('touch-layout-button');
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).score,1539,'pausing must flush the newest score');
+  const fire=p.ids.get('touch-fire').getBoundingClientRect();
+  p.pointer('touch-fire','pointerdown',{clientX:fire.left+10,clientY:fire.top+10});
+  p.pointer('touch-fire','pointermove',{clientX:350,clientY:230});
+  p.pointer('touch-fire','pointerup');
+  p.ids.get('touch-layout-size').value='88';p.ids.get('touch-layout-size').dispatch('input');
+  p.ids.get('touch-layout-control').value='front-jet';p.ids.get('touch-layout-control').dispatch('change');
+  await p.click('touch-layout-visibility');
+  await p.click('touch-layout-save');
+  const savedLayout=p.storage.get('roadster-touch-layout');
+  const reloaded=await page('fa-IR',Object.fromEntries(p.storage));
+  assert.match(reloaded.ids.get('distance').innerHTML,/۱٬۵۳۹/);
+  assert.equal(reloaded.ids.get('distance-title').textContent,'امتیاز قبلی');
+  assert.match(reloaded.ids.get('best').innerHTML,/۲٬۰۰۰/);
+  assert.equal(reloaded.ids.get('best-player').textContent,'آبل');
+  assert.equal(reloaded.ids.get('xp-total').textContent,'۲۵۰ XP');
+  assert.equal(reloaded.ids.get('coin-total').textContent,'۱٬۱۷۵');
+  for(const property of ['width','left','top'])assert.equal(reloaded.ids.get('touch-fire').style[property],p.ids.get('touch-fire').style[property]);
+  assert.equal(reloaded.ids.get('touch-front-jet').hidden,true);
+  reloaded.resize(568,320);
+  assert.equal(reloaded.storage.get('roadster-touch-layout'),savedLayout,'orientation and size changes must preserve the saved layout');
+  reloaded.advance(17);
+  assert.equal(reloaded.storage.get('roadster-xp'),'250','showing the last score must not repay its distance XP');
+  await reloaded.click('primary-button');
+  assert.match(reloaded.ids.get('distance').innerHTML,/۰۰۰۰/);
+  assert.equal(JSON.parse(reloaded.storage.get('roadster-progress')).score,0);
+  assert.equal(reloaded.storage.get('roadster-xp'),'250');
+  assert.equal(reloaded.storage.get('roadster-touch-layout'),savedLayout);
+});
+
+test('leaving the page flushes a score newer than the last rendered checkpoint', async () => {
+  const p=await page('en-US');
+  await p.click('primary-button');
+  p.context.snapshot.distance=10.7;p.advance(17);
+  p.context.snapshot.distance=19.5;p.advance(77);
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).score,10);
+  p.context.snapshot.distance=20.9;
+  p.windowEvent('pagehide');
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).score,20);
+  const reloaded=await page('en-US',Object.fromEntries(p.storage));
+  assert.match(reloaded.ids.get('distance').innerHTML,/0020/);
+  assert.equal(reloaded.ids.get('distance-title').textContent,'LAST RUN');
 });
 
 test('touch placement stays within resized bounds, clamps saved values, and tolerates unavailable storage', async () => {
@@ -1068,14 +1123,14 @@ test('car upgrades require the displayed player level and never spend XP when pu
 });
 
 
-test('Z and X hold separate air nozzles, Shift retains boost, and modal/pointer releases clear input', async () => {
+test('the newest flip direction replaces the previous keyboard or touch hold, and releases clear input', async () => {
   const p = await page('en-US', {'roadster-touch-layout':JSON.stringify({version:1, buttons:{'rear-jet':{x:.8,y:.5,size:48,hidden:false}}})});
   await p.click('primary-button');
   p.key('KeyZ'); p.advance(17);
   assert.equal(p.context.lastControls.frontJet, true);
   assert.equal(p.context.lastControls.rearJet, false);
   p.key('KeyX'); p.advance(34);
-  assert.equal(p.context.lastControls.frontJet, true);
+  assert.equal(p.context.lastControls.frontJet, false);
   assert.equal(p.context.lastControls.rearJet, true);
   assert.equal(p.context.lastControls.boost, false, 'X must no longer trigger boost');
   p.key('ShiftLeft'); p.advance(51);
@@ -1083,15 +1138,43 @@ test('Z and X hold separate air nozzles, Shift retains boost, and modal/pointer 
   p.key('KeyZ', 'keyup'); p.key('KeyX', 'keyup'); p.key('ShiftLeft', 'keyup');
   p.pointer('touch-front-jet', 'pointerdown', {pointerId:2});
   p.pointer('touch-rear-jet', 'pointerdown', {pointerId:3}); p.advance(68);
-  assert.equal(p.context.lastControls.frontJet, true);
+  assert.equal(p.context.lastControls.frontJet, false);
   assert.equal(p.context.lastControls.rearJet, true);
+  assert.equal(p.ids.get('touch-front-jet').classList.contains('is-pressed'), false);
+  assert.equal(p.ids.get('touch-rear-jet').classList.contains('is-pressed'), true);
   p.pointer('touch-front-jet', 'pointercancel', {pointerId:2});
   p.pointer('touch-rear-jet', 'lostpointercapture', {pointerId:3}); p.advance(85);
   assert.equal(p.context.lastControls.frontJet, false);
   assert.equal(p.context.lastControls.rearJet, false);
-  p.key('KeyZ'); p.key('KeyG'); p.key('KeyX'); p.key('KeyG'); p.advance(102);
+  p.key('KeyZ'); p.pointer('touch-rear-jet', 'pointerdown', {pointerId:4}); p.advance(102);
+  assert.equal(p.context.lastControls.frontJet, false, 'touch must replace an opposite keyboard hold');
+  assert.equal(p.context.lastControls.rearJet, true);
+  p.pointer('touch-rear-jet', 'pointerup', {pointerId:4}); p.advance(119);
+  assert.equal(p.context.lastControls.frontJet, false, 'releasing the new direction must not revive an old hold');
+  assert.equal(p.context.lastControls.rearJet, false);
+  p.key('KeyZ', 'keyup');
+  p.key('KeyZ'); p.key('KeyG'); p.key('KeyX'); p.key('KeyG'); p.advance(136);
   assert.equal(p.context.lastControls.frontJet, false);
   assert.equal(p.context.lastControls.rearJet, false);
+});
+
+test('circular touch meters show localized ammunition and boost, and track firing without changing reserves', async () => {
+  const p = await page('fa-IR');
+  assert.equal(p.ids.get('touch-ammo-value').textContent,'۸۰');
+  assert.equal(p.ids.get('touch-ammo-ring').getAttribute('stroke-dashoffset'),'0');
+  assert.equal(p.ids.get('touch-boost-value').textContent,'۱۰۰٪');
+  await p.click('primary-button');
+  p.key('KeyF'); p.advance(17); p.key('KeyF','keyup');
+  assert.equal(p.ids.get('touch-ammo-value').textContent,'۷۹');
+  assert.ok(Math.abs(Number(p.ids.get('touch-ammo-ring').getAttribute('stroke-dashoffset'))-1.25)<1e-9);
+  assert.match(p.ids.get('touch-fire').getAttribute('aria-label'),/شلیک.*۷۹ \/ ۸۰/);
+  p.context.snapshot.boost=.4; p.advance(34);
+  assert.equal(p.ids.get('touch-boost-value').textContent,'۴۰٪');
+  assert.equal(p.ids.get('touch-boost-ring').getAttribute('stroke-dashoffset'),'60');
+  assert.match(p.ids.get('touch-boost').getAttribute('aria-label'),/۴۰٪/);
+  await p.click('language-button');
+  assert.equal(p.ids.get('touch-ammo-value').textContent,'79');
+  assert.equal(p.ids.get('touch-boost-value').textContent,'40%');
 });
 
 test('flip coins reach the wallet, toast and save once, and reset for the next run', async () => {
