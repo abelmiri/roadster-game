@@ -2,7 +2,7 @@ export type WeaponId = 'machine-gun' | 'twin-gun' | 'gatling-gun' | 'cannon' |
   'rocket-launcher' | 'missile-launcher' | 'laser-gun' | 'plasma-cannon';
 export type AimDirection = 1 | -1;
 export interface WeaponSpec {
-  id: WeaponId; name: string; power: number; xp: number; ammo: number;
+  id: WeaponId; name: string; power: number; xp: number; price: number; ammo: number;
   interval: number; turnSeconds: number; damage: number; speed: number;
   range: number; radius: number; splash: number; barrels: number;
   muzzle: number; color: string;
@@ -10,17 +10,36 @@ export interface WeaponSpec {
 
 /** Ammo is per weapon per run; changing equipment never refills it. */
 export const WEAPONS: readonly WeaponSpec[] = [
-  { id: 'machine-gun', name: 'MACHINE GUN', power: 1, xp: 0, ammo: 80, interval: .18, turnSeconds: .55, damage: 1, speed: 62, range: 38, radius: .07, splash: 0, barrels: 1, muzzle: 1.5, color: '#ffe2a1' },
-  { id: 'twin-gun', name: 'TWIN GUN', power: 2, xp: 50, ammo: 100, interval: .23, turnSeconds: .60, damage: 1, speed: 66, range: 40, radius: .07, splash: 0, barrels: 2, muzzle: 1.5, color: '#ffe2a1' },
-  { id: 'gatling-gun', name: 'GATLING GUN', power: 3, xp: 125, ammo: 150, interval: .065, turnSeconds: .75, damage: 1, speed: 72, range: 40, radius: .07, splash: 0, barrels: 1, muzzle: 1.6, color: '#ffd16b' },
-  { id: 'cannon', name: 'CANNON', power: 4, xp: 225, ammo: 16, interval: .75, turnSeconds: .85, damage: 5, speed: 52, range: 42, radius: .14, splash: 1.3, barrels: 1, muzzle: 1.5, color: '#ffbd6b' },
-  { id: 'rocket-launcher', name: 'ROCKET LAUNCHER', power: 5, xp: 350, ammo: 12, interval: .70, turnSeconds: .95, damage: 6, speed: 36, range: 44, radius: .16, splash: 2.3, barrels: 1, muzzle: 1.05, color: '#ff8d68' },
-  { id: 'missile-launcher', name: 'MISSILE LAUNCHER', power: 5, xp: 500, ammo: 10, interval: .85, turnSeconds: .80, damage: 7, speed: 34, range: 48, radius: .16, splash: 1.5, barrels: 1, muzzle: 1.25, color: '#ffb395' },
-  { id: 'laser-gun', name: 'LASER GUN', power: 6, xp: 700, ammo: 50, interval: .15, turnSeconds: .65, damage: 2, speed: 0, range: 44, radius: .10, splash: 0, barrels: 1, muzzle: 1.3, color: '#66f8ee' },
-  { id: 'plasma-cannon', name: 'PLASMA CANNON', power: 6, xp: 950, ammo: 18, interval: .42, turnSeconds: .90, damage: 10, speed: 44, range: 46, radius: .28, splash: 2.8, barrels: 1, muzzle: 1.6, color: '#e98bff' },
+  { id: 'machine-gun', name: 'MACHINE GUN', power: 1, xp: 0, price: 0, ammo: 80, interval: .18, turnSeconds: .55, damage: 1, speed: 62, range: 38, radius: .07, splash: 0, barrels: 1, muzzle: 1.5, color: '#ffe2a1' },
+  { id: 'twin-gun', name: 'TWIN GUN', power: 2, xp: 100, price: 1000, ammo: 100, interval: .23, turnSeconds: .60, damage: 1, speed: 66, range: 40, radius: .07, splash: 0, barrels: 2, muzzle: 1.5, color: '#ffe2a1' },
+  { id: 'gatling-gun', name: 'GATLING GUN', power: 3, xp: 250, price: 2000, ammo: 150, interval: .065, turnSeconds: .75, damage: 1, speed: 72, range: 40, radius: .07, splash: 0, barrels: 1, muzzle: 1.6, color: '#ffd16b' },
+  { id: 'cannon', name: 'CANNON', power: 4, xp: 450, price: 3000, ammo: 16, interval: .75, turnSeconds: .85, damage: 5, speed: 52, range: 42, radius: .14, splash: 1.3, barrels: 1, muzzle: 1.5, color: '#ffbd6b' },
+  { id: 'rocket-launcher', name: 'ROCKET LAUNCHER', power: 5, xp: 700, price: 4000, ammo: 12, interval: .70, turnSeconds: .95, damage: 6, speed: 36, range: 44, radius: .16, splash: 2.3, barrels: 1, muzzle: 1.05, color: '#ff8d68' },
+  { id: 'missile-launcher', name: 'MISSILE LAUNCHER', power: 5, xp: 1000, price: 5000, ammo: 10, interval: .85, turnSeconds: .80, damage: 7, speed: 34, range: 48, radius: .16, splash: 1.5, barrels: 1, muzzle: 1.25, color: '#ffb395' },
+  { id: 'laser-gun', name: 'LASER GUN', power: 6, xp: 1400, price: 6000, ammo: 50, interval: .15, turnSeconds: .65, damage: 2, speed: 0, range: 44, radius: .10, splash: 0, barrels: 1, muzzle: 1.3, color: '#66f8ee' },
+  { id: 'plasma-cannon', name: 'PLASMA CANNON', power: 6, xp: 1900, price: 7000, ammo: 18, interval: .42, turnSeconds: .90, damage: 10, speed: 44, range: 46, radius: .28, splash: 2.8, barrels: 1, muzzle: 1.6, color: '#e98bff' },
 ];
 
-export function weaponSpec(id: string): WeaponSpec { return WEAPONS.find(spec => spec.id === id) ?? WEAPONS[0]; }
+export const MAX_WEAPON_UPGRADE = 5;
+export type WeaponUpgrades = Partial<Record<WeaponId, number>>;
+export function weaponUpgradeLevel(level: number): number {
+  return Number.isSafeInteger(level) ? Math.max(0, Math.min(MAX_WEAPON_UPGRADE, level)) : 0;
+}
+const upgradedSpecs = new Map(WEAPONS.map(base => [base.id, Array.from({ length: MAX_WEAPON_UPGRADE + 1 }, (_, level) => {
+  if (!level) return base;
+  const multiplier = 1 + level * .2;
+  return { ...base, power: base.power * multiplier, damage: base.damage * multiplier,
+    interval: base.interval / multiplier, ammo: Math.ceil(base.ammo * multiplier / base.barrels) * base.barrels };
+})]));
+export function weaponSpec(id: string, level = 0): WeaponSpec {
+  return (upgradedSpecs.get(id as WeaponId) ?? upgradedSpecs.get('machine-gun')!)[weaponUpgradeLevel(level)];
+}
+/** The free starter uses the same 1,000-coin upgrade basis as the first paid gun. */
+export function weaponUpgradeCost(id: string, level: number): number | null {
+  const spec = WEAPONS.find(weapon => weapon.id === id);
+  if (!spec || !Number.isSafeInteger(level) || level < 0 || level >= MAX_WEAPON_UPGRADE) return null;
+  return Math.ceil(Math.max(1000, spec.price) * 1.5 ** (level + 1));
+}
 export function canEquip(id: string, xp: number): boolean {
   const spec = WEAPONS.find(weapon => weapon.id === id);
   return Boolean(spec && Number.isSafeInteger(xp) && xp >= spec.xp);
@@ -28,24 +47,26 @@ export function canEquip(id: string, xp: number): boolean {
 type ProgressStorage = Pick<Storage, 'getItem' | 'setItem'>;
 export class WeaponLoadout {
   selected: WeaponId = 'machine-gun';
-  constructor(xp: number, private readonly storage?: ProgressStorage) {
+  constructor(xp: number, private readonly storage?: ProgressStorage,
+    private readonly ownsWeapon: (id: string) => boolean = id => id === 'machine-gun') {
     try {
       const saved = storage?.getItem('roadster-weapon');
-      if (saved && canEquip(saved, xp)) this.selected = saved as WeaponId;
+      if (saved && this.canSelect(saved, xp)) this.selected = saved as WeaponId;
     } catch { /* Session-only equipment when storage is unavailable. */ }
   }
   select(id: string, xp: number): boolean {
-    if (!canEquip(id, xp)) return false;
+    if (!this.canSelect(id, xp)) return false;
     this.selected = id as WeaponId;
     try { this.storage?.setItem('roadster-weapon', id); } catch { /* Optional preference. */ }
     return true;
   }
+  private canSelect(id: string, xp: number): boolean { return canEquip(id, xp) && this.ownsWeapon(id); }
 }
 
 export interface CombatTarget { id: string; kind: 'hazard' | 'police'; x: number; y: number; radius: number; health: number }
 export interface WeaponPose { x: number; y: number; angle: number; vx: number; vy: number }
 export interface Projectile {
-  id: number; weapon: WeaponId; x: number; y: number; previousX: number; previousY: number;
+  id: number; weapon: WeaponId; upgradeLevel: number; x: number; y: number; previousX: number; previousY: number;
   vx: number; vy: number; age: number; lifetime: number; distance: number;
   targetId?: string; beamEndX?: number; beamEndY?: number;
 }
@@ -55,7 +76,7 @@ export interface WeaponImpact {
   surface: 'hazard' | 'police' | 'terrain'; destroyed: boolean;
 }
 export interface WeaponSnapshot {
-  id: WeaponId; ammo: number; capacity: number; yaw: number; pitch: number;
+  id: WeaponId; level: number; ammo: number; capacity: number; yaw: number; pitch: number;
   direction: AimDirection; turnRemaining: number; cooldown: number; recoil: number;
   shotSerial: number; hitSerial: number; destroySerial: number;
   projectiles: Projectile[]; effects: CombatEffect[];
@@ -82,6 +103,7 @@ function intersection(x: number, y: number, dx: number, dy: number, target: Comb
 export class VehicleWeapon {
   id: WeaponId;
   private readonly ammunition = new Map(WEAPONS.map(spec => [spec.id, spec.ammo]));
+  private readonly upgrades = new Map<WeaponId, number>();
   private yaw = 0;
   private previousYaw = 0;
   private pitch = 0;
@@ -95,7 +117,19 @@ export class VehicleWeapon {
   private projectiles: Projectile[] = [];
   private effects: CombatEffect[] = [];
 
-  constructor(id: WeaponId = 'machine-gun') { this.id = weaponSpec(id).id; }
+  constructor(id: WeaponId = 'machine-gun', upgrades: WeaponUpgrades = {}) {
+    this.id = weaponSpec(id).id;
+    for (const spec of WEAPONS) this.setUpgradeLevel(spec.id, upgrades[spec.id] ?? 0);
+  }
+  setUpgradeLevel(id: WeaponId, level: number): void {
+    if (!WEAPONS.some(spec => spec.id === id)) return;
+    const previous = this.upgrades.get(id) ?? 0;
+    const next = weaponUpgradeLevel(level);
+    if (next <= previous) return;
+    const addedCapacity = weaponSpec(id, next).ammo - weaponSpec(id, previous).ammo;
+    this.upgrades.set(id, next);
+    this.ammunition.set(id, this.ammoFor(id) + addedCapacity);
+  }
   equip(id: string, xp: number): boolean {
     if (!canEquip(id, xp)) return false;
     this.id = id as WeaponId;
@@ -110,7 +144,8 @@ export class VehicleWeapon {
     onImpact: (impact: WeaponImpact) => void = () => {}): void {
     this.previousYaw = this.yaw;
     if (controls.aim === 1 || controls.aim === -1) this.direction = controls.aim;
-    const spec = weaponSpec(this.id);
+    const level = this.upgrades.get(this.id) ?? 0;
+    const spec = weaponSpec(this.id, level);
     const destination = this.direction === 1 ? 0 : Math.PI;
     this.yaw += clamp(destination - this.yaw, -Math.PI * dt / spec.turnSeconds, Math.PI * dt / spec.turnSeconds);
     if (Math.abs(destination - this.yaw) < 1e-9) this.yaw = destination;
@@ -143,7 +178,7 @@ export class VehicleWeapon {
         const angle = pose.angle + (this.direction === 1 ? this.pitch : Math.PI - this.pitch) + (i - (count - 1) / 2) * .016;
         const ux = Math.cos(angle); const uy = Math.sin(angle);
         const x = mountX + ux * spec.muzzle; const y = mountY + uy * spec.muzzle;
-        const shot: Projectile = { id: ++this.serial, weapon: this.id, x, y, previousX: x, previousY: y,
+        const shot: Projectile = { id: ++this.serial, weapon: this.id, upgradeLevel: level, x, y, previousX: x, previousY: y,
           vx: ux * spec.speed + pose.vx, vy: uy * spec.speed + pose.vy,
           age: 0, lifetime: this.id === 'laser-gun' ? .075 : 2.4, distance: 0,
           targetId: this.id === 'missile-launcher' ? aimed?.id : undefined };
@@ -163,7 +198,7 @@ export class VehicleWeapon {
     }
 
     this.projectiles = this.projectiles.filter(shot => {
-      const shotSpec = weaponSpec(shot.weapon);
+      const shotSpec = weaponSpec(shot.weapon, shot.upgradeLevel);
       shot.age += dt;
       if (shot.age > shot.lifetime) return false;
       if (shot.weapon === 'laser-gun') return true;
@@ -224,7 +259,8 @@ export class VehicleWeapon {
     for (const victim of targets) {
       if (victim.health <= 0 || (victim !== target && (!spec.splash || Math.hypot(victim.x - x, victim.y - y) > spec.splash + victim.radius))) continue;
       const dealt = victim === target ? amount : Math.max(1, Math.round(amount * .6));
-      victim.health = Math.max(0, victim.health - dealt);
+      const remaining = victim.health - dealt;
+      victim.health = remaining <= 1e-9 ? 0 : remaining;
       onDamage(victim, dealt);
       this.hitSerial++;
       if (victim.health === 0) this.destroySerial++;
@@ -246,8 +282,9 @@ export class VehicleWeapon {
   }
 
   snapshot(alpha = 1): WeaponSnapshot {
-    const spec = weaponSpec(this.id);
-    return { id: this.id, ammo: this.ammoFor(this.id), capacity: spec.ammo,
+    const level = this.upgrades.get(this.id) ?? 0;
+    const spec = weaponSpec(this.id, level);
+    return { id: this.id, level, ammo: this.ammoFor(this.id), capacity: spec.ammo,
       yaw: this.previousYaw + (this.yaw - this.previousYaw) * alpha, pitch: this.pitch, direction: this.direction,
       turnRemaining: Math.abs((this.direction === 1 ? 0 : Math.PI) - this.yaw) / Math.PI * spec.turnSeconds,
       cooldown: this.cooldown, recoil: this.recoil, shotSerial: this.shotSerial,

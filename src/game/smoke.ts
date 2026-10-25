@@ -102,7 +102,7 @@ export class CarSmoke {
     }
   }
 
-  update(snapshot: SmokeSnapshot, delta: number, running = true): void {
+  update(snapshot: SmokeSnapshot, delta: number, running = true, damageIntensity = 1): void {
     if (snapshot.distance < this.previousDistance - 1 || snapshot.jumpSerial < this.jumpSerial ||
       snapshot.health > this.previousHealth || (this.wasWrecked && !snapshot.wrecked)) this.clear();
     this.previousDistance = snapshot.distance;
@@ -110,7 +110,7 @@ export class CarSmoke {
     this.wasWrecked = snapshot.wrecked;
     const dt = running ? Math.min(Math.max(delta, 0), 0.06) : 0;
     if (dt > 0 && (snapshot.health === 0 || snapshot.wrecked)) {
-      this.damageClock += dt;
+      this.damageClock += dt * damageIntensity;
       while (this.damageClock >= DAMAGE_INTERVAL) {
         this.emit(snapshot, 'damage', this.cursor % 2 ? 1 : -1);
         this.damageClock -= DAMAGE_INTERVAL;

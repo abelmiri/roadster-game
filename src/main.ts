@@ -4,13 +4,17 @@ import { GameVisuals } from './game/visuals';
 import { GameAudio } from './game/audio';
 import { HudFeedback } from './game/hudFeedback';
 import { ExperienceProgress, LEVEL_XP } from './game/experience';
+import { PlayerProgress } from './game/playerProgress';
 import { loopsBetween } from './game/track';
 import { ImpactPause, IMPACT_DAMAGE, IMPACT_PAUSE_SECONDS, ExplosionSlowMotion, RESTART_DELAY_SECONDS, WRECK_TIME_SCALE, MAX_HEALTH } from './game/damage';
-import { WeaponLoadout, WEAPONS, weaponSpec, type AimDirection } from './game/weapons';
+import { WeaponLoadout, WEAPONS, MAX_WEAPON_UPGRADE, weaponSpec, weaponUpgradeCost, type AimDirection } from './game/weapons';
 import { weaponIcon } from './game/weaponIcon';
-import { formatNumber, formatPercent, getLanguage, setLanguage, t, type MessageKey } from './i18n';
+import { formatNumber, formatDecimal, formatPercent, getLanguage, setLanguage, t, type MessageKey } from './i18n';
+import { TouchLayoutEditor } from './touchLayout';
 import './styles.css';
 import './hud.css';
+import './touchLayout.css';
+import './progress.css';
 
 type GameStatus = 'loading' | 'ready' | 'running' | 'paused' | 'crashed' | 'error';
 
@@ -28,10 +32,11 @@ app.innerHTML = `
         <div class="hud" aria-live="off">
           <div class="hud-stat"><span class="hud-label" data-i18n="distance"></span><strong id="distance"></strong></div>
           <div class="hud-divider"></div>
-          <div class="hud-stat"><span class="hud-label" data-i18n="best"></span><strong id="best"></strong></div>
+          <div class="hud-stat"><span class="hud-label" data-i18n="best"></span><strong id="best"></strong><small id="best-player" class="best-player"></small></div>
           <button id="pause-button" class="icon-button" type="button"><span class="pause-icon" aria-hidden="true"></span></button>
         </div>
         <div class="settings-controls">
+          <button id="touch-layout-button" class="icon-button touch-layout-button" type="button" aria-controls="touch-layout-editor" aria-expanded="false"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/></svg></button>
           <button id="armory-button" class="icon-button armory-button" type="button" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h9v7H4zM13 10h8v3h-8M7 15v4m-4 0h12M6 6h5"/></svg></button>
           <button id="sound-button" class="icon-button sound-button" type="button" aria-pressed="true">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4 6 8H3v8h3l5 4Z"/><path class="sound-waves" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/><path class="sound-slash" d="m15 9 6 6m0-6-6 6"/></svg>
@@ -45,6 +50,7 @@ app.innerHTML = `
     <div id="impact-flash" class="impact-flash" aria-hidden="true"></div>
     <div id="challenge-hint" class="challenge-hint" role="status"></div>
     <div id="xp-toast" class="xp-toast" role="status"></div>
+    <div id="coin-toast" class="coin-toast" role="status" hidden></div>
     <div class="resources-panel">
         <div id="health-panel" class="health-panel"><div class="boost-heading"><span data-i18n="health"></span><span id="health-value"></span></div><div id="health-meter" class="health-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div id="health-trail" class="health-trail" aria-hidden="true"></div><div id="health-fill" class="health-fill"></div></div></div>
         <div id="boost-panel" class="boost-panel"><div class="boost-heading"><span data-i18n="boostReserve"></span><span id="boost-value"></span></div><div id="boost-meter" class="boost-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div id="boost-fill" class="boost-fill"></div></div></div>
@@ -55,25 +61,45 @@ app.innerHTML = `
       <div class="weapon-status-row"><button id="weapon-aim" class="aim-button" type="button"><span id="weapon-direction"></span><kbd lang="en" dir="ltr">Q</kbd></button><span id="weapon-status" role="status"></span></div>
     </div>
     <div class="bottom-hud">
-      <div class="experience-panel"><div><span id="xp-level"></span><strong id="xp-total"></strong></div><div id="xp-meter" class="xp-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><span id="xp-fill"></span></div></div>
+      <div class="experience-panel"><div><span id="xp-level"></span><strong id="xp-total"></strong></div><div id="xp-meter" class="xp-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><span id="xp-fill"></span></div><div class="coin-wallet"><span class="coin-symbol" aria-hidden="true">●</span><span data-i18n="coins"></span><strong id="coin-total"></strong></div></div>
       <div class="speed-panel"><span data-i18n="speed"></span><strong id="speed"></strong><small data-i18n="speedUnit"></small></div>
     </div>
-    <div class="keyboard-guide" aria-hidden="true"><span><kbd lang="en" dir="ltr" data-i18n="spaceKey"></kbd><span data-i18n="jumpGuide"></span></span><span><kbd lang="en" dir="ltr">↓</kbd><span data-i18n="suction"></span></span><span><kbd lang="en" dir="ltr" data-i18n="shiftKey"></kbd><span data-i18n="airBoost"></span></span><span><kbd lang="en" dir="ltr">← / →</kbd><span data-i18n="turnWeapon"></span></span><span><kbd lang="en" dir="ltr">F</kbd><span data-i18n="fire"></span></span><span><kbd lang="en" dir="ltr">1–8</kbd><span data-i18n="selectWeapon"></span></span></div>
-    <div class="touch-controls">
-      <div class="touch-left"><button id="touch-fire" class="touch-button touch-fire" type="button"><span class="touch-glyph" aria-hidden="true">⌖</span><span data-i18n="fire"></span></button><div class="touch-left-bottom"><button id="touch-suction" class="touch-button touch-suction" type="button"><span class="touch-glyph" aria-hidden="true">↓</span><span data-i18n="suction"></span></button><button id="touch-aim" class="touch-button touch-aim" type="button"><span class="touch-glyph" aria-hidden="true">↔</span></button></div></div>
-      <div class="touch-right"><button id="touch-boost" class="touch-button touch-boost" type="button"><span class="touch-glyph" aria-hidden="true">↗</span><span data-i18n="boost"></span></button><button id="touch-jump" class="touch-button touch-jump" type="button"><span class="touch-glyph" aria-hidden="true">↑</span><span data-i18n="jump"></span></button></div>
+    <div class="keyboard-guide" aria-hidden="true"><span><kbd lang="en" dir="ltr" data-i18n="spaceKey"></kbd><span data-i18n="jumpGuide"></span></span><span><kbd lang="en" dir="ltr">↓</kbd><span data-i18n="suction"></span></span><span><kbd lang="en" dir="ltr" data-i18n="shiftKey"></kbd><span data-i18n="airBoost"></span></span><span><kbd lang="en" dir="ltr">← / →</kbd><span data-i18n="turnWeapon"></span></span><span><kbd lang="en" dir="ltr">F</kbd><span data-i18n="fire"></span></span><span><kbd lang="en" dir="ltr">1–8</kbd><span data-i18n="selectWeapon"></span></span><span><kbd lang="en" dir="ltr">G</kbd><span data-i18n="armory"></span></span></div>
+    <div id="touch-controls" class="touch-controls">
+      <button id="touch-fire" class="touch-button touch-fire" type="button"><span class="touch-glyph" aria-hidden="true">⌖</span><span data-i18n="fire"></span></button>
+      <button id="touch-suction" class="touch-button touch-suction" type="button"><span class="touch-glyph" aria-hidden="true">↓</span><span data-i18n="suction"></span></button>
+      <button id="touch-aim" class="touch-button touch-aim" type="button"><span class="touch-glyph" aria-hidden="true">↔</span></button>
+      <button id="touch-boost" class="touch-button touch-boost" type="button"><span class="touch-glyph" aria-hidden="true">↗</span><span data-i18n="boost"></span></button>
+      <button id="touch-jump" class="touch-button touch-jump" type="button"><span class="touch-glyph" aria-hidden="true">↑</span><span data-i18n="jump"></span></button>
+    </div>
+    <div id="touch-layout-editor" class="touch-layout-editor" role="region" aria-labelledby="touch-layout-title" hidden>
+      <div class="touch-layout-heading"><strong id="touch-layout-title" data-i18n="touchLayout"></strong><span data-i18n="touchLayoutHelp"></span></div>
+      <div class="touch-layout-options">
+        <label><span data-i18n="touchControl"></span><select id="touch-layout-control"><option value="jump" data-i18n="jump"></option><option value="fire" data-i18n="fire"></option><option value="boost" data-i18n="boost"></option><option value="aim" data-i18n="touchAim"></option><option value="suction" data-i18n="suction"></option></select></label>
+        <label class="touch-layout-sizing"><span data-i18n="touchSize"></span><input id="touch-layout-size" type="range" min="44" max="128" step="1" /><output id="touch-layout-size-value" for="touch-layout-size"></output></label>
+        <button id="touch-layout-reset" type="button" data-i18n="touchLayoutReset"></button>
+        <button id="touch-layout-cancel" type="button" data-i18n="touchLayoutCancel"></button>
+        <button id="touch-layout-save" class="touch-layout-save" type="button" data-i18n="touchLayoutSave"></button>
+      </div>
     </div>
     <div id="armory" class="armory" role="dialog" aria-modal="true" aria-labelledby="armory-title" hidden>
       <div class="armory-card">
         <div class="armory-heading"><div><span class="eyebrow" data-i18n="armory"></span><h2 id="armory-title" data-i18n="armoryTitle"></h2></div><button id="armory-close" class="armory-close" type="button" data-i18n="closeArmory"></button></div>
         <p class="armory-description" data-i18n="armoryDescription"></p>
         <p class="armory-help" data-i18n="armoryHelp"></p>
-        <div class="weapon-grid">${WEAPONS.map((spec, index) => `<button id="equip-${spec.id}" class="weapon-card" type="button" aria-pressed="false">
+        <div class="armory-wallet"><span data-i18n="coinBalance"></span><strong id="armory-coins"></strong></div>
+        <p class="armory-coin-help" data-i18n="coinHelp"></p>
+        <p class="armory-upgrade-help" data-i18n="weaponUpgradeHelp"></p>
+        <div class="weapon-grid">${WEAPONS.map((spec, index) => `<div class="weapon-slot"><button id="equip-${spec.id}" class="weapon-card" type="button" aria-pressed="false">
           <span class="weapon-card-index" dir="ltr">0${index + 1}</span>${weaponIcon(spec.id)}
           <strong data-i18n="weapon${index}"></strong><small class="weapon-english" lang="en" dir="ltr">${spec.name}</small>
           <span class="weapon-power" aria-hidden="true">${Array.from({ length: 6 }, (_, dot) => `<i${dot < spec.power ? ' class="is-filled"' : ''}></i>`).join('')}</span>
-          <span id="weapon-stats-${spec.id}" class="weapon-stats"></span><span id="weapon-unlock-${spec.id}" class="weapon-unlock"></span>
-        </button>`).join('')}</div>
+          <span id="weapon-stats-${spec.id}" class="weapon-stats"></span><span id="weapon-price-${spec.id}" class="weapon-price"></span><span id="weapon-unlock-${spec.id}" class="weapon-unlock"></span>
+        </button><div id="weapon-upgrades-${spec.id}" class="weapon-upgrades" hidden>
+          <div class="weapon-level-row"><span id="weapon-level-${spec.id}"></span><span class="upgrade-steps" aria-hidden="true">${Array.from({ length: MAX_WEAPON_UPGRADE }, (_, step) => `<i id="upgrade-step-${spec.id}-${step}"></i>`).join('')}</span></div>
+          <p id="weapon-upgrade-preview-${spec.id}" class="weapon-upgrade-preview"></p>
+          <button id="upgrade-${spec.id}" class="weapon-upgrade-button" type="button"></button>
+        </div></div>`).join('')}</div>
         <p class="armory-note" data-i18n="armoryAmmoNote"></p>
       </div>
     </div>
@@ -93,6 +119,19 @@ app.innerHTML = `
         </footer>
       </div>
       <div class="overlay-side" aria-hidden="true"><span data-i18n="sideIndex"></span><span data-i18n="sideMotto"></span></div>
+    </div>
+    <div id="record-dialog" class="record-dialog" role="dialog" aria-modal="true" aria-labelledby="record-title" aria-describedby="record-description" hidden>
+      <form id="record-form" class="record-card">
+        <svg class="record-medal" viewBox="0 0 80 96" fill="none" aria-hidden="true"><path d="M20 5h17l12 36-16 7z" fill="#68b9ce"/><path d="M43 5h17L47 48l-16-7z" fill="#b1f3e2"/><circle cx="40" cy="59" r="29" fill="#edbd5f" stroke="#ffe5a1" stroke-width="4"/><path d="m40 40 5.5 11.5 12.5 2-9 8.8 2 12.7-11-6-11 6 2-12.7-9-8.8 12.5-2z" fill="#fff1c9"/></svg>
+        <h2 id="record-title" data-i18n="newRecord"></h2>
+        <strong id="record-distance" class="record-distance"></strong>
+        <p id="record-bonus" class="record-bonus" hidden></p>
+        <p id="record-description" data-i18n="recordDescription"></p>
+        <label for="record-name" data-i18n="playerName"></label>
+        <input id="record-name" type="text" name="playerName" autocomplete="nickname" maxlength="32" required aria-describedby="record-name-error" />
+        <p id="record-name-error" class="record-name-error" role="alert" hidden data-i18n="recordNameRequired"></p>
+        <button id="record-save" class="primary-button" type="submit" data-i18n="saveRecord"></button>
+      </form>
     </div>
     <div id="rotate-overlay" class="rotate-overlay"><div class="rotate-symbol" aria-hidden="true">▯</div><strong data-i18n="rotateTitle"></strong><p data-i18n="rotateDescription"></p></div>
     <div id="loading" class="loading"><span><span data-i18n="loading"></span><span class="loading-dots" aria-hidden="true">...</span></span></div>
@@ -151,13 +190,22 @@ const audio = new GameAudio();
 let progressStorage: Storage | undefined;
 try { progressStorage = localStorage; } catch { /* Session-only XP if storage is unavailable. */ }
 const experience = new ExperienceProgress(progressStorage);
-const loadout = new WeaponLoadout(experience.total, progressStorage);
+const player = new PlayerProgress(progressStorage);
+const loadout = new WeaponLoadout(experience.total, progressStorage, id => player.ownsWeapon(id));
+const recordDialog = element('record-dialog');
+const recordName = element<HTMLInputElement>('record-name');
+const recordSave = element<HTMLButtonElement>('record-save');
+recordDialog.hidden = true;
 const armory = element('armory');
 const armoryButton = element<HTMLButtonElement>('armory-button');
 const armoryClose = element<HTMLButtonElement>('armory-close');
+const touchLayoutButton = element<HTMLButtonElement>('touch-layout-button');
+const touchLayout = new TouchLayoutEditor(element('touch-controls'), progressStorage);
+let resumeAfterTouchLayout = false;
 armory.hidden = true;
 let resumeAfterArmory = false;
 let displayedArmoryXp = -1;
+let displayedArmoryCoins = -1;
 const xpLevel = element('xp-level');
 const xpTotal = element('xp-total');
 const xpFill = element('xp-fill');
@@ -183,6 +231,9 @@ let lastExplosionSerial = 0;
 let rewardTime = 0;
 let lastReward = 0;
 let lastRewardMessage: MessageKey = 'loopReward';
+let coinRewardTime = 0;
+let lastCoinReward = 0;
+let recordBonus = 0;
 
 let status: GameStatus = 'loading';
 let physics: GamePhysics;
@@ -197,8 +248,7 @@ const warnedChallenges = new Set<string>();
 let failureKey: 'bootError' | 'runtimeError' | null = null;
 const held = { jump: new Set<string>(), suction: new Set<string>(), boost: new Set<string>(), fire: new Set<string>() };
 let aimDirection: AimDirection = 1;
-let best = 0;
-try { best = Number(localStorage.getItem('roadster-best') || 0) || 0; } catch { /* Storage may be disabled. */ }
+let best = player.record.distance;
 
 const formatDistance = (meters: number): string => `${formatNumber(meters, 4)} <small>${t('meter')}</small>`;
 const districtKeys: MessageKey[] = ['districtMorning', 'districtDowntown', 'districtNight'];
@@ -206,17 +256,41 @@ const weaponName = (id: string): string => t(`weapon${WEAPONS.findIndex(spec => 
 
 function refreshArmory(): void {
   displayedArmoryXp = experience.total;
+  displayedArmoryCoins = player.coins;
+  element('armory-coins').textContent = formatNumber(player.coins);
   for (const spec of WEAPONS) {
+    const level = player.weaponLevel(spec.id);
+    const current = weaponSpec(spec.id, level);
     const button = element<HTMLButtonElement>(`equip-${spec.id}`);
     const unlocked = experience.total >= spec.xp;
+    const owned = player.ownsWeapon(spec.id);
     const selected = loadout.selected === spec.id;
-    button.disabled = !unlocked;
-    button.classList.toggle('is-locked', !unlocked);
+    button.disabled = !unlocked || (!owned && player.coins < spec.price);
+    button.classList.toggle('is-locked', !unlocked || !owned);
     button.classList.toggle('is-equipped', selected);
     button.setAttribute('aria-pressed', String(selected));
-    element(`weapon-stats-${spec.id}`).textContent = `${t('ammo')}: ${formatNumber(physics?.weaponAmmo(spec.id) ?? spec.ammo)} · ${t('turnTime', { ms: formatNumber(spec.turnSeconds * 1000) })}`;
-    element(`weapon-unlock-${spec.id}`).textContent = unlocked ? t(selected ? 'equipped' : 'equip') : t('unlockAt', { xp: formatNumber(spec.xp) });
-    button.setAttribute('aria-label', `${weaponName(spec.id)} · ${t('power')} ${formatNumber(spec.power)} / ${formatNumber(6)} · ${element(`weapon-unlock-${spec.id}`).textContent}`);
+    const combatStats = t('weaponCombatStats', { damage: formatDecimal(current.damage), rate: formatDecimal(1 / current.interval),
+      ammo: formatNumber(physics?.weaponAmmo(spec.id) ?? current.ammo), capacity: formatNumber(current.ammo) });
+    element(`weapon-stats-${spec.id}`).textContent = `${combatStats} · ${t('turnTime', { ms: formatNumber(spec.turnSeconds * 1000) })}`;
+    element(`weapon-price-${spec.id}`).textContent = owned ? t('weaponOwned') : t('weaponPrice', { coins: formatNumber(spec.price) });
+    element(`weapon-unlock-${spec.id}`).textContent = !unlocked ? t('unlockAt', { xp: formatNumber(spec.xp) })
+      : owned ? t(selected ? 'equipped' : 'equip')
+      : player.coins >= spec.price ? t('buyWeapon', { coins: formatNumber(spec.price) })
+      : t('needCoins', { coins: formatNumber(spec.price - player.coins) });
+    button.setAttribute('aria-label', `${weaponName(spec.id)} · ${combatStats} · ${element(`weapon-unlock-${spec.id}`).textContent}`);
+    element(`weapon-upgrades-${spec.id}`).hidden = !owned;
+    element(`weapon-level-${spec.id}`).textContent = t('weaponUpgradeLevel', { level: formatNumber(level), max: formatNumber(MAX_WEAPON_UPGRADE) });
+    for (let step = 0; step < MAX_WEAPON_UPGRADE; step++) element(`upgrade-step-${spec.id}-${step}`).classList.toggle('is-filled', step < level);
+    const cost = weaponUpgradeCost(spec.id, level);
+    const upgrade = element<HTMLButtonElement>(`upgrade-${spec.id}`);
+    upgrade.disabled = !owned || cost === null || player.coins < cost;
+    upgrade.textContent = cost === null ? t('weaponUpgradeMax') : t('weaponUpgradeBuy', { level: formatNumber(level + 1), coins: formatNumber(cost) });
+    upgrade.title = cost !== null && player.coins < cost ? t('needCoins', { coins: formatNumber(cost - player.coins) }) : upgrade.textContent;
+    upgrade.setAttribute('aria-label', `${weaponName(spec.id)} · ${upgrade.textContent} · ${upgrade.title}`);
+    const preview = element(`weapon-upgrade-preview-${spec.id}`);
+    preview.hidden = cost === null;
+    const next = weaponSpec(spec.id, level + 1);
+    preview.textContent = t('weaponUpgradeNext', { damage: formatDecimal(next.damage), rate: formatDecimal(1 / next.interval), ammo: formatNumber(next.ammo) });
   }
 }
 
@@ -249,7 +323,8 @@ function updateHud(snapshot?: GameSnapshot): void {
   const charge = snapshot?.boost ?? 1;
   const health = snapshot?.health ?? MAX_HEALTH;
   const weapon = snapshot?.weapon;
-  const spec = weaponSpec(weapon?.id ?? loadout.selected);
+  const id = weapon?.id ?? loadout.selected;
+  const spec = weaponSpec(id, weapon?.level ?? player.weaponLevel(id));
   const ammo = weapon?.ammo ?? spec.ammo;
   const speed = hudFeedback.update({ health, boost: Math.round(charge * 100),
     speed: Math.max(0, snapshot?.speed ?? 0) * 3.6, xp: experience.total, level: experience.level,
@@ -257,6 +332,12 @@ function updateHud(snapshot?: GameSnapshot): void {
     ammo, capacity: spec.ammo, weapon: spec.id }, performance.now(), status === 'running' || status === 'crashed');
   htmlIfChanged(distanceLabel, formatDistance(snapshot?.distance ?? 0));
   htmlIfChanged(bestLabel, formatDistance(best));
+  textIfChanged(element('best-player'), player.record.name);
+  element('best-player').hidden = !player.record.name;
+  attributeIfChanged(element('best-player'), 'title', player.record.name);
+  textIfChanged(element('coin-total'), formatNumber(player.coins));
+  textIfChanged(element('coin-toast'), t('coinReward', { coins: formatNumber(lastCoinReward) }));
+  element('coin-toast').hidden = coinRewardTime <= 0;
   const percentage = Math.round(charge * 100);
   fillIfChanged(boostFill, charge);
   textIfChanged(boostValue, formatPercent(charge));
@@ -311,7 +392,7 @@ function updateHud(snapshot?: GameSnapshot): void {
   if (element('weapon-status').textContent !== weaponStatus) textIfChanged(element('weapon-status'), weaponStatus);
   element('weapon-status').classList.toggle('is-empty', ammo === 0);
   element('touch-fire').classList.toggle('is-empty', ammo === 0);
-  if (!armory.hidden && displayedArmoryXp !== experience.total) refreshArmory();
+  if (!armory.hidden && (displayedArmoryXp !== experience.total || displayedArmoryCoins !== player.coins)) refreshArmory();
 }
 
 function setOverlay(mode: 'ready' | 'paused' | 'crashed'): void {
@@ -323,7 +404,7 @@ function setOverlay(mode: 'ready' | 'paused' | 'crashed'): void {
   eyebrow.innerHTML = `<span class="eyebrow-line"></span>${t(mode === 'crashed' && physics.snapshot(1).health === 0 ? 'carDestroyed' : `${prefix}Eyebrow`)}`;
   title.innerHTML = t(`${prefix}Title`);
   description.textContent = mode === 'crashed'
-    ? `${physics.snapshot(1).crashReason === 'police' ? t('policeCaught') + ' ' : ''}${t('crashedDescription', { distance: formatNumber(physics.distance), best: formatNumber(best) })} · ${t('runXp', { xp: formatNumber(physics.snapshot(1).runXp) })}`
+    ? `${physics.snapshot(1).crashReason === 'police' ? t('policeCaught') + ' ' : ''}${t('crashedDescription', { distance: formatNumber(physics.distance), best: formatNumber(best) })} · ${t('runXp', { xp: formatNumber(physics.snapshot(1).runXp) })} · ${t('runCoins', { coins: formatNumber(player.runCoins) })}`
     : t(mode === 'ready' ? 'readyDescription' : 'pausedDescription');
   primaryLabel.textContent = t(mode === 'ready' ? 'start' : mode === 'paused' ? 'resumeRun' : 'runAgain');
   overlayFoot.innerHTML = t(`${prefix}Foot`);
@@ -356,7 +437,12 @@ function updateLanguage(): void {
   element('weapon-aim').setAttribute('aria-label', t('turnWeapon'));
   element('weapon-aim').title = t('turnWeapon');
   armoryButton.setAttribute('aria-label', t('armory'));
-  armoryButton.title = t('armory');
+  armoryButton.title = `${t('armory')} (G)`;
+  armoryButton.setAttribute('aria-keyshortcuts', 'G');
+  touchLayoutButton.setAttribute('aria-label', t('touchLayout'));
+  touchLayoutButton.title = t('touchLayout');
+  touchLayout.updateLanguage();
+  updateRecordDialog();
   languageButton.setAttribute('aria-label', t('switchLanguage'));
   languageButton.title = t('switchLanguage');
   element('language-en').classList.toggle('is-active', getLanguage() === 'en');
@@ -376,6 +462,7 @@ function clearHeld(): void {
 }
 
 function start(): void {
+  if (touchLayout.editing || !armory.hidden || !recordDialog.hidden) return;
   if (status === 'loading' || status === 'error' || status === 'running') return;
   if (status === 'crashed' && performance.now() < restartAvailableAt) return;
   const resuming = status === 'paused';
@@ -383,7 +470,7 @@ function start(): void {
     restartAvailableAt = 0;
     primaryButton.disabled = false;
     physics.dispose();
-    physics = new GamePhysics(7, { id: loadout.selected, xp: experience.total });
+    physics = new GamePhysics(7, { id: loadout.selected, xp: experience.total, upgrades: player.weaponUpgrades });
     audio.reset();
     accumulator = 0;
     holdInterpolation = false;
@@ -391,7 +478,10 @@ function start(): void {
     currentDistrict = 0;
     warnedChallenges.clear();
     experience.resetRun();
+    player.resetRun();
     rewardTime = 0;
+    coinRewardTime = 0;
+    recordBonus = 0;
     impactPause.reset();
     explosionSlowMotion.reset();
     lastImpactSerial = 0;
@@ -428,15 +518,52 @@ function crash(): void {
   clearHeld();
   // The final obstacle hit already played its impact sound before hit stop.
   if (physics.snapshot(1).health > 0) audio.play('crash');
-  const distance = Math.floor(physics.distance);
-  if (distance > best) {
-    best = distance;
-    try { localStorage.setItem('roadster-best', String(best)); } catch { /* Storage may be disabled. */ }
+  const snapshot = physics.snapshot(1);
+  awardCoins(player.collect(snapshot.distance, snapshot.loopCompletions, snapshot.policeDestroyed));
+  const result = player.finishRun(physics.distance);
+  if (result.newRecord) {
+    best = player.record.distance;
+    recordBonus = result.bonus;
     bestLabel.innerHTML = formatDistance(best);
     audio.play('record');
   }
   setOverlay('crashed');
+  if (result.newRecord) openRecordDialog();
 }
+
+function awardCoins(gained: number): void {
+  if (!gained) return;
+  lastCoinReward = gained;
+  coinRewardTime = 3;
+}
+
+function updateRecordDialog(): void {
+  textIfChanged(element('record-distance'), `${formatNumber(player.record.distance)} ${t('meter')}`);
+  textIfChanged(element('record-bonus'), t('recordCoinBonus', { coins: formatNumber(recordBonus) }));
+  element('record-bonus').hidden = recordBonus <= 0;
+}
+
+function openRecordDialog(): void {
+  clearHeld(); jumpQueued = false;
+  recordDialog.hidden = false;
+  recordName.value = player.playerName;
+  element('record-name-error').hidden = true;
+  document.querySelector('.game-shell')?.classList.add('is-naming-record');
+  updateRecordDialog();
+  recordName.focus();
+}
+element('record-form').addEventListener('submit', event => {
+  event.preventDefault();
+  if (!player.nameRecord(recordName.value)) {
+    element('record-name-error').hidden = false;
+    recordName.focus();
+    return;
+  }
+  recordDialog.hidden = true;
+  document.querySelector('.game-shell')?.classList.remove('is-naming-record');
+  updateHud(physics?.snapshot(1));
+  primaryButton.focus();
+});
 
 function jumpDown(source: string): void {
   if (held.jump.has(source)) return;
@@ -451,6 +578,7 @@ function jumpDown(source: string): void {
 function bindTouch(id: string, action: keyof typeof held): void {
   const button = element<HTMLButtonElement>(id);
   button.addEventListener('pointerdown', (event) => {
+    if (touchLayout.editing || !armory.hidden || !recordDialog.hidden) return;
     event.preventDefault();
     void audio.unlock();
     button.setPointerCapture(event.pointerId);
@@ -477,11 +605,11 @@ function turnWeapon(direction: AimDirection = aimDirection === 1 ? -1 : 1): void
   aimDirection = direction;
   updateHud(physics?.snapshot(Math.min(1, accumulator / FIXED_STEP)));
 }
-element('touch-aim').addEventListener('click', () => turnWeapon());
+element('touch-aim').addEventListener('click', () => { if (!touchLayout.editing && armory.hidden && recordDialog.hidden) turnWeapon(); });
 element('weapon-aim').addEventListener('click', () => { turnWeapon(); element('weapon-aim').blur(); });
 
 function openArmory(): void {
-  if (status === 'loading' || status === 'error') return;
+  if (status === 'loading' || status === 'error' || !armory.hidden || touchLayout.editing || !recordDialog.hidden) return;
   resumeAfterArmory = status === 'running';
   if (resumeAfterArmory) pause();
   clearHeld(); jumpQueued = false;
@@ -499,16 +627,50 @@ function closeArmory(): void {
 }
 armoryButton.addEventListener('click', openArmory);
 armoryClose.addEventListener('click', closeArmory);
-function selectWeapon(index: number): void {
+function openTouchLayout(): void {
+  if (status === 'loading' || status === 'error' || !armory.hidden || touchLayout.editing || !recordDialog.hidden) return;
+  resumeAfterTouchLayout = status === 'running';
+  if (resumeAfterTouchLayout) pause();
+  clearHeld(); jumpQueued = false;
+  document.querySelector('.game-shell')?.classList.add('is-editing-touch');
+  touchLayoutButton.setAttribute('aria-expanded', 'true');
+  touchLayout.begin();
+}
+function closeTouchLayout(save: boolean): void {
+  touchLayout.finish(save);
+  document.querySelector('.game-shell')?.classList.remove('is-editing-touch');
+  touchLayoutButton.setAttribute('aria-expanded', 'false');
+  clearHeld(); jumpQueued = false;
+  if (resumeAfterTouchLayout && status === 'paused') start();
+  touchLayoutButton.focus();
+  resumeAfterTouchLayout = false;
+}
+touchLayoutButton.addEventListener('click', openTouchLayout);
+element('touch-layout-save').addEventListener('click', () => closeTouchLayout(true));
+element('touch-layout-cancel').addEventListener('click', () => closeTouchLayout(false));
+element('touch-layout-reset').addEventListener('click', () => touchLayout.reset());
+function selectWeapon(index: number, purchase = false): void {
   const spec = WEAPONS[index];
-  if (!physics || !spec || !loadout.select(spec.id, experience.total)) return;
+  if (!physics || !spec || !recordDialog.hidden) return;
+  if (!player.ownsWeapon(spec.id)) {
+    if (!purchase || player.purchaseWeapon(spec.id, experience.total) !== 'purchased') return;
+  }
+  if (!loadout.select(spec.id, experience.total)) return;
   physics.equipWeapon(spec.id, experience.total);
   refreshArmory(); updateHud(physics.snapshot(1));
   void audio.unlock().then(() => audio.play('click'));
 }
 for (const [index, spec] of WEAPONS.entries()) {
   element(`equip-${spec.id}`).setAttribute('aria-keyshortcuts', String(index + 1));
-  element(`equip-${spec.id}`).addEventListener('click', () => selectWeapon(index));
+  element(`equip-${spec.id}`).addEventListener('click', () => selectWeapon(index, true));
+  element(`upgrade-${spec.id}`).addEventListener('click', () => {
+    if (!physics || armory.hidden || !recordDialog.hidden || touchLayout.editing) return;
+    if (player.upgradeWeapon(spec.id) !== 'upgraded') return;
+    physics.upgradeWeapon(spec.id, player.weaponLevel(spec.id));
+    refreshArmory(); updateHud(physics.snapshot(1));
+    if (element<HTMLButtonElement>(`upgrade-${spec.id}`).disabled) element(`equip-${spec.id}`).focus();
+    void audio.unlock().then(() => audio.play('click'));
+  });
 }
 
 const actionForKey = (code: string): keyof typeof held | null => {
@@ -529,9 +691,32 @@ function toggleSound(): void {
 
 window.addEventListener('keydown', (event) => {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (!recordDialog.hidden) {
+    if (event.code === 'Tab') {
+      if (event.shiftKey && document.activeElement === recordName) { event.preventDefault(); recordSave.focus(); }
+      else if (!event.shiftKey && document.activeElement === recordSave) { event.preventDefault(); recordName.focus(); }
+    }
+    return;
+  }
+  if (touchLayout.editing) {
+    if (event.code === 'Escape') { event.preventDefault(); if (!event.repeat) closeTouchLayout(false); }
+    if (event.code === 'Tab') {
+      const controls = [...element('touch-controls').querySelectorAll<HTMLElement>('button'),
+        ...element('touch-layout-editor').querySelectorAll<HTMLElement>('select, input, button')];
+      const first = controls[0]; const last = controls.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    }
+    return;
+  }
   const target = event.target;
   if (target instanceof HTMLElement &&
       (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)) return;
+  if (event.code === 'KeyG') {
+    event.preventDefault();
+    if (!event.repeat) { if (armory.hidden) openArmory(); else closeArmory(); }
+    return;
+  }
   const slot = /^(?:Digit|Numpad)([1-8])$/.exec(event.code);
   const keySlot = event.key?.length === 1 ? Math.max('12345678'.indexOf(event.key),
     '۱۲۳۴۵۶۷۸'.indexOf(event.key), '١٢٣٤٥٦٧٨'.indexOf(event.key)) : -1;
@@ -676,6 +861,8 @@ function renderFrame(now: number): void {
   const frozen = impactPause.active;
   const snapshot = physics.snapshot(frozen || holdInterpolation ? 1 : Math.min(1, accumulator / FIXED_STEP));
   const simulating = status === 'running' && !frozen;
+  awardCoins(player.collect(snapshot.distance, snapshot.loopCompletions, snapshot.policeDestroyed));
+  if (simulating) coinRewardTime = Math.max(0, coinRewardTime - playDelta);
   const gained = experience.collect(snapshot.loopCompletions, snapshot.obstaclesDestroyed, snapshot.policeDestroyed);
   if (gained) {
     lastReward = gained;
@@ -717,7 +904,7 @@ function renderFrame(now: number): void {
 async function boot(): Promise<void> {
   try {
     await RAPIER.init();
-    physics = new GamePhysics(7, { id: loadout.selected, xp: experience.total });
+    physics = new GamePhysics(7, { id: loadout.selected, xp: experience.total, upgrades: player.weaponUpgrades });
     visuals = new GameVisuals(sceneElement);
     const snapshot = physics.snapshot(0);
     visuals.render(snapshot, physics, 0, false);
@@ -725,6 +912,7 @@ async function boot(): Promise<void> {
     status = 'ready';
     loading.remove();
     setOverlay('ready');
+    if (player.record.needsName) openRecordDialog();
     requestAnimationFrame(frame);
   } catch (error) {
     console.error('Roadster could not start', error);

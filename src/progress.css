@@ -1,0 +1,64 @@
+.best-player { display: block; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 1.4; color: #ffe2a1; }
+.best-player[hidden] { display: none; }
+.experience-panel { position: relative; }
+.coin-wallet { position: absolute; bottom: calc(100% + 10px); left: 0; display: flex; align-items: center; gap: 7px; padding: 5px 9px; border: 1px solid #edbd5f70; border-radius: 20px; background: #183044cc; color: #ffe5a1; font-size: 10px; white-space: nowrap; }
+.coin-symbol { color: #edbd5f; text-shadow: 0 0 5px #ffe5a1; }
+.coin-wallet strong { font-size: 13px; }
+.coin-toast { position: absolute; z-index: 4; top: 192px; left: 50%; transform: translateX(-50%); padding: 8px 15px; border: 1px solid #ffe5a180; border-radius: 20px; background: #3a3021ed; color: #ffe5a1; font-size: 12px; font-weight: 800; pointer-events: none; }
+.coin-toast[hidden] { display: none; }
+.armory-wallet { display: flex; align-items: center; gap: 10px; margin: -8px 0 15px; color: #ffe5a1; font-size: 12px; }
+.armory-wallet strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+.armory-coin-help { margin: -6px 0 16px; color: #aebfcc; font-size: 11px; line-height: 1.7; }
+.weapon-price { margin-top: 6px; color: #e7c887; font-size: 10px; line-height: 1.6; }
+.armory-upgrade-help { margin: -6px 0 16px; color: #b2dbd0; font-size: 11px; line-height: 1.7; }
+.weapon-slot { display: flex; flex-direction: column; min-width: 0; }
+.weapon-slot > .weapon-card { width: 100%; flex: 1; }
+.weapon-upgrades[hidden], .weapon-upgrade-preview[hidden] { display: none; }
+.weapon-upgrades { margin-top: 8px; padding: 12px 10px; border: 1px solid #a6f4df35; border-radius: 10px; background: #a6f4df08; }
+.weapon-level-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 10px; font-weight: 750; color: #b8e9d9; }
+.upgrade-steps { display: flex; gap: 3px; direction: ltr; }
+.upgrade-steps i { width: 9px; height: 5px; border-radius: 2px; background: #617f8e66; }
+.upgrade-steps .is-filled { background: #a6f4df; }
+.weapon-upgrade-preview { min-height: 34px; margin: 8px 0; font-size: 10px; line-height: 1.7; color: #a8bec8; }
+.weapon-upgrade-button { width: 100%; min-height: 40px; padding: 8px 6px; border: 1px solid #a6f4df88; border-radius: 7px; background: #a6f4df; color: #142c3b; font: inherit; font-size: 10px; font-weight: 800; cursor: pointer; }
+.weapon-upgrade-button:disabled { background: #284450; color: #a3bdc5; border-color: #87a8b14d; cursor: default; }
+.weapon-upgrade-button:not(:disabled):hover { background: #d4ffee; }
+html[lang=fa] .weapon-level-row, html[lang=fa] .weapon-upgrade-preview, html[lang=fa] .weapon-upgrade-button { font-size: 11px; }
+.record-dialog[hidden] { display: none; }
+.record-dialog { position: absolute; inset: 0; z-index: 18; display: grid; place-items: center; padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); background: #0b1727cc; backdrop-filter: blur(12px); }
+.record-card { width: min(400px, 100%); max-height: 100%; overflow: auto; padding: 24px 28px; border: 1px solid #edbd5f88; border-radius: 22px; background: linear-gradient(145deg, #263c4f, #111f30); box-shadow: 0 25px 90px #0008; text-align: center; }
+.record-medal { display: block; width: 64px; height: 76px; margin: 0 auto 12px; }
+.record-card h2 { margin: 0 0 7px; color: #ffe5a1; font-size: 28px; }
+.record-distance { font-size: 23px; color: #fff4d1; font-variant-numeric: tabular-nums; }
+.record-card p { color: #b6c9d4; font-size: 13px; line-height: 1.7; margin: 12px 0; }
+.record-card .record-bonus { color: #ffe5a1; font-weight: 750; }
+.record-card label { display: block; text-align: start; margin: 16px 0 7px; color: #dceeea; font-size: 13px; }
+.record-card input { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid #7e9eae; border-radius: 9px; background: #102438; color: #fff; font: inherit; user-select: text; -webkit-user-select: text; }
+.record-card input:focus { outline: 2px solid #a6f4df; outline-offset: 2px; }
+.record-card .primary-button { width: 100%; height: 46px; justify-content: center; margin-top: 16px; border-radius: 9px; font-size: 13px; letter-spacing: .04em; }
+.record-card .record-name-error { margin: 7px 0 0; color: #ffb5a8; }
+.is-naming-record .topbar, .is-naming-record .touch-controls, .is-naming-record .overlay { visibility: hidden; }
+html[lang=fa] .record-card, html[lang=fa] .coin-wallet, html[lang=fa] .coin-toast { direction: rtl; }
+html[lang=fa] .coin-wallet, html[lang=fa] .weapon-price { font-size: 11px; }
+html[lang=fa] .record-card .primary-button { height: 46px; font-size: 14px; }
+@media(max-height:580px) {
+  .record-card { width: min(460px, 100%); padding: 14px 22px; }
+  .record-medal { width: 38px; height: 46px; margin-bottom: 5px; }
+  .record-card h2 { font-size: 22px; margin-bottom: 3px; }
+  .record-distance { font-size: 19px; }
+  .record-card p { margin: 5px 0; font-size: 12px; }
+  .record-card label { margin-top: 8px; }
+  .record-card .primary-button { margin-top: 10px; }
+  .coin-wallet { bottom: calc(100% + 7px); padding: 3px 8px; }
+  .coin-toast { top: 146px; font-size: 11px; padding: 5px 12px; }
+  .armory-wallet { margin: 0 0 8px; font-size: 11px; }
+  .armory-wallet strong { font-size: 15px; }
+  .armory-coin-help { margin: 0 0 9px; font-size: 10px; }
+  .weapon-price, html[lang=fa] .weapon-price { margin-top: 3px; font-size: 9px; }
+  .armory-upgrade-help { margin: 0 0 10px; font-size: 10px; }
+  .weapon-upgrades { padding: 8px; margin-top: 6px; }
+  .weapon-level-row, .weapon-upgrade-preview, .weapon-upgrade-button, html[lang=fa] .weapon-level-row, html[lang=fa] .weapon-upgrade-preview, html[lang=fa] .weapon-upgrade-button { font-size: 9px; }
+}
+@media(max-width:650px) and (orientation:portrait) {
+  .record-dialog, .coin-toast { visibility: hidden; }
+}

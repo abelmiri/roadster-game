@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
-let WEAPONS, VehicleWeapon, WeaponLoadout, canEquip, WeaponVisual, CombatVisual;
+let WEAPONS, VehicleWeapon, WeaponLoadout, canEquip, weaponSpec, weaponUpgradeCost, WeaponVisual, CombatVisual;
 before(async () => {
   const outdir = path.resolve('node_modules/.cache/roadster-weapon-tests');
   await build({entryPoints:['src/game/weapons.ts','src/game/weaponVisual.ts'],bundle:true,
     platform:'node',format:'esm',outdir,outExtension:{'.js':'.mjs'}});
-  ({WEAPONS,VehicleWeapon,WeaponLoadout,canEquip} = await import(pathToFileURL(path.join(outdir,'weapons.mjs')).href));
+  ({WEAPONS,VehicleWeapon,WeaponLoadout,canEquip,weaponSpec,weaponUpgradeCost} = await import(pathToFileURL(path.join(outdir,'weapons.mjs')).href));
   ({WeaponVisual,CombatVisual} = await import(pathToFileURL(path.join(outdir,'weaponVisual.mjs')).href));
 });
 const pose = {x:0,y:0,angle:0,vx:0,vy:0};
@@ -17,14 +17,19 @@ function advance(weapon, seconds, controls={}, targets=[], onDamage=()=>{}) {
 }
 test('all eight reference weapons unlock at exact XP boundaries; equipment persists and invalid saves recover',()=>{
   assert.equal(WEAPONS.length,8);
+  assert.deepEqual(WEAPONS.map(spec=>spec.xp),[0,100,250,450,700,1000,1400,1900]);
+  assert.deepEqual(WEAPONS.map(spec=>spec.price),[0,1000,2000,3000,4000,5000,6000,7000]);
   const store=new Map(); const storage={getItem:key=>store.get(key),setItem:(key,value)=>store.set(key,value)};
+  const owned=new Set(['machine-gun']); const owns=id=>owned.has(id);
   for(const spec of WEAPONS){
     assert.equal(canEquip(spec.id,spec.xp),true);
     assert.equal(canEquip(spec.id,spec.xp-1),false);
-    const loadout=new WeaponLoadout(0,storage);
+    const loadout=new WeaponLoadout(0,storage,owns);
+    if(spec.price>0)assert.equal(loadout.select(spec.id,spec.xp),false,'XP cannot bypass ownership');
+    owned.add(spec.id);
     assert.equal(loadout.select(spec.id,spec.xp),true);
-    assert.equal(new WeaponLoadout(spec.xp,storage).selected,spec.id);
-    if(spec.xp>0)assert.equal(new WeaponLoadout(0,storage).selected,'machine-gun');
+    assert.equal(new WeaponLoadout(spec.xp,storage,owns).selected,spec.id);
+    if(spec.xp>0)assert.equal(new WeaponLoadout(0,storage,owns).selected,'machine-gun');
   }
   for(const bad of ['unknown','<script>',null]){
     store.set('roadster-weapon',bad);
@@ -58,7 +63,7 @@ test('ammo is finite, cadence is fixed-step, and switching never refills a weapo
     assert.equal(weapon.snapshot().ammo,spec.ammo-3*spec.barrels,spec.id);
     assert.equal(weapon.equip('cannon',0),false);
     const remaining=weapon.snapshot().ammo;
-    weapon.equip('plasma-cannon',950);weapon.equip(spec.id,950);
+    weapon.equip('plasma-cannon',1900);weapon.equip(spec.id,1900);
     assert.equal(weapon.snapshot().ammo,remaining);
     advance(weapon,30,{fire:true});
     assert.equal(weapon.snapshot().ammo,0);
@@ -153,4 +158,82 @@ test('all eight 3D models animate from snapshots, reuse projectile/effect pools,
   }
   visual.dispose();combat.dispose();
   assert.equal(visual.group.children.length,0);
+});
+
+test('five upgrades scale power, rate, and whole-round capacity, with increasing coin prices', () => {
+  assert.deepEqual([0,1,2,3,4].map(level => weaponUpgradeCost('twin-gun', level)), [1500,2250,3375,5063,7594]);
+  assert.equal(weaponUpgradeCost('machine-gun', 0), 1500);
+  assert.equal(weaponUpgradeCost('plasma-cannon', 0), 10500);
+  for (const invalid of [-1, 5, 1.5, NaN]) assert.equal(weaponUpgradeCost('twin-gun', invalid), null);
+  assert.equal(weaponUpgradeCost('unknown', 0), null);
+  for (const base of WEAPONS) {
+    for (let level = 1; level <= 5; level++) {
+      const spec = weaponSpec(base.id, level);
+      const factor = 1 + .2 * level;
+      assert.ok(Math.abs(spec.damage - base.damage * factor) < 1e-9);
+      assert.ok(Math.abs(spec.interval - base.interval / factor) < 1e-9);
+      assert.equal(spec.ammo, Math.ceil(base.ammo * factor / base.barrels) * base.barrels);
+      assert.ok(spec.ammo > weaponSpec(base.id, level - 1).ammo);
+      assert.equal(spec.price, base.price);
+    }
+    assert.equal(weaponSpec(base.id, 5).damage, base.damage * 2);
+    assert.equal(weaponSpec(base.id, 5).ammo, base.ammo * 2);
+    assert.equal(weaponSpec(base.id, 99), weaponSpec(base.id, 5));
+    assert.equal(weaponSpec(base.id, NaN), base);
+  }
+});
+
+test('upgrades actually increase every gun’s firing cadence and hit damage', () => {
+  for (const base of WEAPONS) {
+    const normal = new VehicleWeapon(base.id);
+    const upgraded = new VehicleWeapon(base.id, { [base.id]: 1 });
+    advance(normal, 3, { fire: true }); advance(upgraded, 3, { fire: true });
+    assert.ok(upgraded.snapshot().shotSerial > normal.snapshot().shotSerial, base.id);
+    for (const level of [1,5]) {
+      const gun = new VehicleWeapon(base.id, { [base.id]: level });
+      const target = { id:'target', kind:'police', x:9, y:1.08, radius:.7, health:1000 };
+      gun.step(1/120, { fire: true }, pose, [target], () => {});
+      advance(gun, .6, {}, [target]);
+      const damage = weaponSpec(base.id, level).damage * base.barrels;
+      assert.ok(Math.abs((1000 - target.health) - damage) < 1e-8, `${base.id}, level ${level}`);
+    }
+  }
+});
+
+test('capacity upgrades add only new slots and cannot refill spent rounds by reapplying or switching', () => {
+  for (const base of WEAPONS) {
+    const gun = new VehicleWeapon(base.id);
+    gun.step(1/120, { fire:true }, pose, [], () => {});
+    gun.setUpgradeLevel(base.id, 1);
+    const capacity = weaponSpec(base.id, 1).ammo;
+    assert.equal(gun.snapshot().capacity, capacity);
+    assert.equal(gun.snapshot().ammo, capacity - base.barrels);
+    gun.setUpgradeLevel(base.id, 1); gun.setUpgradeLevel(base.id, 0);
+    gun.equip('machine-gun', 1900); gun.equip(base.id, 1900);
+    assert.equal(gun.snapshot().ammo, capacity - base.barrels);
+    assert.equal(gun.snapshot().level, 1);
+    assert.equal(new VehicleWeapon(base.id, { [base.id]:1 }).snapshot().ammo, capacity);
+  }
+});
+
+test('projectiles retain their launch damage when a gun is upgraded or switched mid-flight', () => {
+  const gun = new VehicleWeapon();
+  const target = { id:'target', kind:'police', x:20, y:1.08, radius:.7, health:12 };
+  gun.step(1/120, { fire:true }, pose, [target], () => {});
+  assert.equal(gun.snapshot().projectiles[0].upgradeLevel, 0);
+  gun.setUpgradeLevel('machine-gun', 5); gun.equip('twin-gun',100);
+  advance(gun, .5, {}, [target]);
+  assert.equal(target.health, 11, 'an existing bullet must keep its original damage');
+});
+
+test('fractional upgraded damage destroys a patrol at exactly zero without a floating-point extra hit', () => {
+  const gun = new VehicleWeapon('machine-gun', { 'machine-gun': 1 });
+  const target = { id:'police', kind:'police', x:8, y:1.08, radius:.7, health:12 };
+  for (let i=0; i<300; i++) {
+    const firing = gun.snapshot().shotSerial < 10;
+    gun.step(1/120, { fire:firing }, pose, [target], () => {});
+  }
+  assert.equal(gun.snapshot().shotSerial, 10);
+  assert.equal(target.health, 0);
+  assert.equal(gun.snapshot().destroySerial, 1);
 });

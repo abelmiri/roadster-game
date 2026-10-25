@@ -439,7 +439,7 @@ export class GameVisuals {
       wheel.visible = carVisible;
     });
     this.fanGlow.visible = snapshot.suctionActive;
-    this.smoke.update(snapshot, delta, running);
+    this.smoke.update(snapshot, delta, running, snapshot.crashed ? 2 : 1);
     this.debris.update(snapshot.breakEvents, snapshot.breakSerial, delta, running, physics.generator);
     this.sparks.update(snapshot.sparkEvents, snapshot.sparkSerial, delta, running, physics.generator);
     this.police.update(snapshot.police, this.policeTime);
@@ -455,10 +455,11 @@ export class GameVisuals {
 
     const upcoming = loopsBetween(snapshot.car.x - 12, snapshot.car.x + 25)[0];
     const center = snapshot.loop ? { x: snapshot.loop.centerX, y: snapshot.loop.centerY } : upcoming ? loopGeometry(upcoming) : null;
-    const loopView = snapshot.loop ? 1 : upcoming ? Math.max(0, 1 - Math.abs(upcoming.entryX - snapshot.car.x) / 25) : 0;
+    const loopView = snapshot.crashed ? 0 : snapshot.loop ? 1 : upcoming ? Math.max(0, 1 - Math.abs(upcoming.entryX - snapshot.car.x) / 25) : 0;
     const smoothing = 1 - Math.exp(-sceneDelta * 4.2);
-    this.impactCamera.update(snapshot.sparkEvents, snapshot.sparkSerial, snapshot.crashed, wallDelta, running || impactFrozen);
-    this.baseViewHeight += (VIEW_HALF_HEIGHT + loopView * 1.7 - this.baseViewHeight) * smoothing;
+    this.impactCamera.update(snapshot.sparkEvents, snapshot.sparkSerial, snapshot.crashed, wallDelta,
+      running || impactFrozen, snapshot.crashPosition ?? snapshot.car);
+    if (!snapshot.crashed) this.baseViewHeight += (VIEW_HALF_HEIGHT + loopView * 1.7 - this.baseViewHeight) * smoothing;
     const nextHeight = this.baseViewHeight / this.impactCamera.zoom;
     if (Math.abs(nextHeight - this.viewHeight) > 0.00001) {
       this.viewHeight = nextHeight;

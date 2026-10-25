@@ -6,7 +6,7 @@ export const EXPLOSION_RECOVERY_SECONDS = 1;
 export const EXPLOSION_MIN_TIME_SCALE = 0.25;
 export const HIT_RECOVERY_SECONDS = 0.8;
 export const RESTART_DELAY_SECONDS = 3;
-export const WRECK_TIME_SCALE = 0.25;
+export const WRECK_TIME_SCALE = 0.125;
 export const INVINCIBLE_SECONDS = 1.5;
 
 export function vehicleDamageStage(health: number): 0 | 1 | 2 | 3 | 4 {

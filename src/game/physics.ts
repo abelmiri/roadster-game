@@ -10,7 +10,7 @@ import { LOOP_XP, OBSTACLE_XP, POLICE_XP } from './experience';
 import { VehicleDamage } from './damage';
 import type { BreakEvent } from './obstacleDebris';
 import type { SparkEvent } from './impactSparks';
-import { VehicleWeapon, type AimDirection, type CombatTarget, type WeaponId, type WeaponSnapshot, type WeaponImpact } from './weapons';
+import { VehicleWeapon, type AimDirection, type CombatTarget, type WeaponId, type WeaponSnapshot, type WeaponImpact, type WeaponUpgrades } from './weapons';
 
 export const FIXED_STEP = 1 / 120;
 export const START_SPEED = 60 / 3.6;
@@ -48,6 +48,7 @@ export interface GameSnapshot {
   landingImpact: number;
   crashed: boolean;
   wrecked: boolean;
+  crashPosition: { x: number; y: number } | null;
   crashReason: 'road' | 'police';
   police: BodyPose & { visibility: number; pressure: number; gap: number; mode: PoliceMode; health: number; disabled: boolean };
   policeWreck: PoliceWreckSnapshot | null;
@@ -143,11 +144,12 @@ export class GamePhysics {
   private crashReason: 'road' | 'police' = 'road';
   crashed = false;
   private wrecked = false;
+  private crashPosition: { x: number; y: number } | null = null;
 
-  constructor(private readonly startX = 7, loadout?: { id: WeaponId; xp: number }) {
+  constructor(private readonly startX = 7, loadout?: { id: WeaponId; xp: number; upgrades?: WeaponUpgrades }) {
     this.furthestX = startX;
     this.pursuit = new PolicePursuit(startX);
-    this.weapon = new VehicleWeapon();
+    this.weapon = new VehicleWeapon('machine-gun', loadout?.upgrades);
     if (loadout) this.weapon.equip(loadout.id, loadout.xp);
     this.previousPoliceX = this.currentPoliceX = this.pursuit.x;
     this.world = new RAPIER.World({ x: 0, y: -GRAVITY });
@@ -454,6 +456,7 @@ export class GamePhysics {
   }
 
   equipWeapon(id: string, xp: number): boolean { return this.weapon.equip(id, xp); }
+  upgradeWeapon(id: WeaponId, level: number): void { this.weapon.setUpgradeLevel(id, level); }
   weaponAmmo(id: WeaponId): number { return this.weapon.ammoFor(id); }
 
   private updateWeapon(controls: Controls): void {
@@ -660,6 +663,7 @@ export class GamePhysics {
     const velocity = this.car.linvel();
     const omega = this.car.angvel();
     const carPosition = this.car.translation();
+    this.crashPosition = { x: carPosition.x, y: carPosition.y };
     this.setGravity(1);
     this.car.setLinearDamping(0.16);
     this.car.setAngularDamping(0.45);
@@ -688,8 +692,8 @@ export class GamePhysics {
     }
   }
 
-  /** Fixed simulation time; the caller supplies a quarter as many steps in the
-   * game-over scene. Momentum is preserved rather than halving velocities. */
+  /** Fixed simulation time; the caller scales the number of steps in the
+   * game-over scene. Momentum is preserved rather than scaling velocities. */
   stepWreck(): void {
     if (!this.crashed) return;
     this.beginWreck();
@@ -755,6 +759,7 @@ export class GamePhysics {
       wheelImpactSerials: this.roadContact.wheels.map((wheel) => wheel.impactSerial) as [number, number],
       speed: this.activeLoop?.speed ?? this.car.linvel().x, boost: this.charge, grounded: this.isGrounded,
       suctionActive: this.fansOn, boostActive: this.boostOn, crashed: this.crashed, wrecked: this.wrecked,
+      crashPosition: this.crashPosition ? { ...this.crashPosition } : null,
       suspensionOffset: this.activeLoop ? lerp(this.previousSuspensionOffset, this.suspension.offset, alpha) : 0,
       suspensionPitch: this.activeLoop ? lerp(this.previousSuspensionPitch, this.suspension.pitch, alpha) : 0,
       jumpSerial: this.jumpSerial, jumpsUsed: this.jumpCount,

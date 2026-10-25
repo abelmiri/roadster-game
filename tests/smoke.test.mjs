@@ -42,6 +42,30 @@ test('the final damage stage emits rising black smoke during the game-over simul
   } finally { smoke.dispose(); }
 });
 
+test('game-over smoke doubles its black-puff density while police smoke keeps its ordinary intensity', () => {
+  const normal = new CarSmoke();
+  const final = new CarSmoke();
+  const police = new CarSmoke();
+  const wreck = snapshot({ health:0, wrecked:true, crashed:true, speed:0 });
+  try {
+    for (let i=0; i<10; i++) {
+      normal.update(wreck, .04);
+      final.update(wreck, .04, true, 2);
+      police.updateWreck(wreck.car, 0, i * .04, .04);
+    }
+    assert.equal(normal.activeCount, 10);
+    assert.equal(final.activeCount, normal.activeCount * 2);
+    assert.equal(police.activeCount, normal.activeCount);
+    const darkness = final.mesh.geometry.getAttribute('smokeDarkness');
+    assert.ok(Array.from({ length:final.activeCount }, (_, i) => darkness.getX(i)).every(value => value>.9));
+    const frozen = positions(final);
+    final.update(wreck, .04, false, 2);
+    assert.deepEqual(positions(final), frozen);
+    final.update(snapshot(), 0);
+    assert.equal(final.activeCount, 0);
+  } finally { normal.dispose(); final.dispose(); police.dispose(); }
+});
+
 function positions(smoke) {
   const matrix = new Matrix4();
   const point = new Vector3();

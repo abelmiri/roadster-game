@@ -935,7 +935,7 @@ test('every unlocked weapon can destroy a real road barrier and disable its Rapi
   const barrier = new TrackGenerator().chunk(2).hazards[0];
   for (const id of ['machine-gun','twin-gun','gatling-gun','cannon','rocket-launcher','missile-launcher','laser-gun','plasma-cannon']) {
     // Allow the heavy weapons their firing interval before contact at 60 km/h.
-    const game = new GamePhysics(barrier.x - 20, { id, xp: 950 });
+    const game = new GamePhysics(barrier.x - 20, { id, xp: 1900 });
     try {
       for (let i=0;i<240&&!game.crashed&&game.car.translation().x<barrier.x+3;i++) {
         game.step({...idle,suction:true,fire:true,aim:1});
@@ -964,19 +964,24 @@ test('a wreck releases each wheel into solid terrain physics, preserves momentum
   try {
     game.stepWreck();
     assert.equal(game.snapshot(1).wrecked, false, 'living cars must keep independent suspension control');
+    assert.equal(game.snapshot(1).crashPosition, null);
     game.car.setTranslation({ x: 60, y: roadHeight(60) + 3 }, true);
     game.car.setLinvel({ x: 14, y: -2 }, true);
     game.car.setAngvel(1, true);
     game.crashed = true;
     const distance = game.distance;
+    const crashPosition = { ...game.car.translation() };
     game.stepWreck();
     assert.equal(game.snapshot(1).wrecked, true);
+    assert.deepEqual(game.snapshot(1).crashPosition, crashPosition);
     assert.ok(game.car.linvel().x > 12, 'slow motion must preserve momentum, rather than halve velocity');
     assert.equal(game.car.collider(0).isSensor(), false);
     assert.ok(game.wheels.every(wheel => !wheel.collider(0).isSensor()));
     const startingWheels = game.snapshot(1).wheels;
     for (let i = 0; i < 360; i++) game.stepWreck();
     const state = game.snapshot(1);
+    assert.deepEqual(state.crashPosition, crashPosition, 'camera focus must stay at the fatal position while the wreck moves');
+    assert.ok(Math.abs(state.car.x - crashPosition.x) > 1, 'the wreck should move independently of its camera anchor');
     assert.ok(state.car.y > roadHeight(state.car.x) - .5, 'chassis fell through the road');
     assert.ok(state.wheels.every((wheel, i) => wheel.x > startingWheels[i].x + 4));
     assert.ok(state.wheels.every(wheel => wheel.y > roadHeight(wheel.x) + CAR_WHEEL_RADIUS - .15));
@@ -1090,7 +1095,7 @@ test('destroyed obstacles stay destroyed when a chunk reloads and cannot pay XP 
 
 test('weapons follow a complete loop without changing driving, XP, or suspension stability', () => {
   const spec=loopsBetween(0,500)[0];
-  const game=new GamePhysics(spec.entryX-.2,{id:'plasma-cannon',xp:950});
+  const game=new GamePhysics(spec.entryX-.2,{id:'plasma-cannon',xp:1900});
   try {
     for(let i=0;i<600&&!game.crashed&&!game.snapshot(1).loopCompletions;i++) {
       game.step({...idle,suction:true,fire:true,aim:-1});
@@ -1102,7 +1107,29 @@ test('weapons follow a complete loop without changing driving, XP, or suspension
     assert.equal(state.health,100);
     assert.equal(state.grounded,true);
     assert.ok(state.weapon.ammo<18);
-    assert.equal(game.equipWeapon('laser-gun',699),false);
+    assert.equal(game.equipWeapon('laser-gun',1399),false);
     assert.equal(game.snapshot(1).weapon.id,'plasma-cannon');
+  } finally { game.dispose(); }
+});
+
+test('real physics loads saved upgrades and applies extra capacity without refilling spent ammunition', () => {
+  const game = new GamePhysics(7, { id:'machine-gun', xp:100,
+    upgrades:{ 'machine-gun':2, 'twin-gun':3 } });
+  try {
+    assert.equal(game.snapshot(1).weapon.level, 2);
+    assert.equal(game.snapshot(1).weapon.capacity, 112);
+    game.step({ ...idle, fire:true });
+    assert.equal(game.snapshot(1).weapon.ammo, 111);
+    game.upgradeWeapon('machine-gun', 3);
+    assert.equal(game.snapshot(1).weapon.capacity, 128);
+    assert.equal(game.snapshot(1).weapon.ammo, 127);
+    game.upgradeWeapon('machine-gun', 3);
+    assert.equal(game.snapshot(1).weapon.ammo, 127);
+    assert.equal(game.equipWeapon('twin-gun', 100), true);
+    assert.equal(game.snapshot(1).weapon.level, 3);
+    assert.equal(game.snapshot(1).weapon.capacity, 160);
+    assert.equal(game.snapshot(1).weapon.ammo, 160);
+    game.equipWeapon('machine-gun', 100);
+    assert.equal(game.snapshot(1).weapon.ammo, 127);
   } finally { game.dispose(); }
 });

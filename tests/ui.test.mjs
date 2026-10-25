@@ -10,14 +10,15 @@ const stubs = {
   physics: `import {VehicleWeapon} from ${JSON.stringify(path.resolve('src/game/weapons.ts'))};
   export const FIXED_STEP=1/120; export class GamePhysics {
     weapon=new VehicleWeapon();
-    constructor(x,loadout){if(loadout)this.weapon.equip(loadout.id,loadout.xp);Object.assign(globalThis.snapshot,{health:100,impactSerial:0,invincibilityRemaining:0,crashed:false,wrecked:false,loopCompletions:0,obstaclesDestroyed:0,policeDestroyed:0,runXp:0,weapon:this.weapon.snapshot()});globalThis.dead=false}
+    constructor(x,loadout){this.weapon=new VehicleWeapon('machine-gun',loadout?.upgrades);if(loadout)this.weapon.equip(loadout.id,loadout.xp);Object.assign(globalThis.snapshot,{distance:0,health:100,impactSerial:0,invincibilityRemaining:0,crashed:false,wrecked:false,loopCompletions:0,obstaclesDestroyed:0,policeDestroyed:0,runXp:0,weapon:this.weapon.snapshot()});globalThis.dead=false}
     get impactSerial(){return globalThis.snapshot.impactSerial}
     get explosionSerial(){return this.weapon.destructionSerial}
     stepWreck(){globalThis.wreckSteps++}
     get hazardStates(){return []} get chunks(){return new Map()} get distance(){return globalThis.snapshot.distance}
     get crashed(){return globalThis.dead} snapshot(alpha){globalThis.lastAlpha=alpha;globalThis.snapshot.weapon=this.weapon.snapshot();return globalThis.snapshot} dispose(){}
     equipWeapon(id,xp){return this.weapon.equip(id,xp)} weaponAmmo(id){return this.weapon.ammoFor(id)}
-    step(controls){globalThis.steps++;const s=globalThis.snapshot;
+    upgradeWeapon(id,level){this.weapon.setUpgradeLevel(id,level)}
+    step(controls){globalThis.steps++;globalThis.lastControls=controls;const s=globalThis.snapshot;
       this.weapon.step(1/120,controls,{...s.car,vx:14,vy:0},[],()=>{});
       if(globalThis.explosionNext){globalThis.explosionNext=false;this.weapon.destroySerial++}
       if(globalThis.impactNext){globalThis.impactNext=false;s.health-=25;s.impactSerial++;s.invincibilityRemaining=1.5;if(s.health===0)globalThis.dead=s.crashed=s.wrecked=true}
@@ -41,6 +42,10 @@ before(async () => {
     } }] })));
   [application, developmentApplication] = results.map(result => result.outputFiles[0].text);
 });
+
+const weaponIds = ['machine-gun','twin-gun','gatling-gun','cannon','rocket-launcher','missile-launcher','laser-gun','plasma-cannon'];
+const progressSave = (coins = 0, ownedWeapons = ['machine-gun'], record = { distance: 0, name: '', needsName: false }, weaponUpgrades = {}) =>
+  JSON.stringify({ version: 1, coins, ownedWeapons, weaponUpgrades, record, playerName: record.name });
 
 async function page(language = 'en-US', saved = {}, development = false, reducedMotion = false) {
   const nodes = [];
@@ -84,6 +89,25 @@ async function page(language = 'en-US', saved = {}, development = false, reduced
     focus() { document.activeElement = this; }
     blur() { document.activeElement = null; } remove() {} appendChild() {} setPointerCapture() {}
     querySelector(selector) { return document.querySelector(selector); }
+    querySelectorAll(selector) {
+      if (this.attrs.id === 'touch-controls' && selector === 'button') return ['fire', 'suction', 'aim', 'boost', 'jump'].map(id => ids.get(`touch-${id}`));
+      if (this.attrs.id === 'touch-layout-editor' && selector === 'select, input, button') return ['control', 'size', 'reset', 'cancel', 'save'].map(id => ids.get(`touch-layout-${id}`));
+      return document.querySelectorAll(selector);
+    }
+    getBoundingClientRect() {
+      const width = context.window.innerWidth - 56;
+      const height = context.window.innerHeight - 152;
+      if (this.attrs.id === 'touch-controls') return { left: 28, top: 134, width, height };
+      const id = this.attrs.id?.replace(/^touch-/, '');
+      const sizes = { jump: 76, fire: 54, boost: 60, aim: 44, suction: 60 };
+      if (!(id in sizes)) return { left: 0, top: 0, width: 0, height: 0 };
+      const size = Number.parseFloat(this.style.width) || sizes[id];
+      const left = this.classes.has('is-positioned') ? Number.parseFloat(this.style.left)
+        : id === 'jump' ? width - size : id === 'boost' ? width - 90 - size : id === 'aim' ? 69 : 0;
+      const top = this.classes.has('is-positioned') ? Number.parseFloat(this.style.top)
+        : height - size - (id === 'fire' ? 69 : id === 'aim' ? 8 : 0);
+      return { left: 28 + left, top: 134 + top, width: size, height: size };
+    }
   }
   new Element('div', { id: 'app' });
   const matches = (node, selector) => selector[0] === '#' ? node.attrs.id === selector.slice(1)
@@ -95,7 +119,7 @@ async function page(language = 'en-US', saved = {}, development = false, reduced
     querySelectorAll: selector => nodes.filter(node => matches(node, selector)), addEventListener() {},
   };
   const context = {
-    document, HTMLElement: Element, window: { matchMedia: () => ({ matches: reducedMotion }), addEventListener(event, handler) {
+    document, HTMLElement: Element, window: { innerWidth: 844, innerHeight: 390, matchMedia: () => ({ matches: reducedMotion }), addEventListener(event, handler) {
       if (!windowEvents.has(event)) windowEvents.set(event, []); windowEvents.get(event).push(handler);
     } }, navigator: { language },
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
@@ -114,7 +138,11 @@ async function page(language = 'en-US', saved = {}, development = false, reduced
     context, ids, storage,
     async click(id) { ids.get(id).dispatch('click'); await settle(); },
     key(code, event = 'keydown', fields = {}) { for (const handler of windowEvents.get(event) ?? []) handler({ code, repeat:false, preventDefault(){}, ...fields }); },
-    pointer(id, event) { ids.get(id).dispatch(event); },
+    pointer(id, event, fields = {}) { ids.get(id).dispatch(event, fields); },
+    resize(width, height) {
+      context.window.innerWidth = width; context.window.innerHeight = height;
+      for (const handler of windowEvents.get('resize') ?? []) handler({});
+    },
     advance(now) { context.now = now; context.frame(now); },
   };
 }
@@ -200,7 +228,7 @@ test('XP rewards celebrate level changes and fill through the boundary instead o
 });
 
 test('air use and refill have different feedback; speed eases and ammunition reacts to firing', async () => {
-  const p = await page('en-US', { 'roadster-xp': '50' });
+  const p = await page('en-US', { 'roadster-xp': '100', 'roadster-progress': progressSave(0, ['machine-gun', 'twin-gun']) });
   await p.click('primary-button');
   p.context.snapshot.boost = .82; p.context.snapshot.speed = 25;
   p.key('KeyF'); p.advance(17); p.key('KeyF', 'keyup');
@@ -246,7 +274,7 @@ test('manual pause preserves the remaining impact freeze without catch-up on res
   assert.ok(p.context.steps > stoppedAt && p.context.steps - stoppedAt <= 3);
 });
 
-test('fatal damage opens a blurred menu immediately while the wreck keeps moving at quarter speed', async () => {
+test('fatal damage opens a blurred menu immediately while the wreck keeps moving at one-eighth speed', async () => {
   const p = await page();
   await p.click('primary-button');
   p.context.snapshot.health = 25; p.context.snapshot.impactSerial = 3;
@@ -261,8 +289,8 @@ test('fatal damage opens a blurred menu immediately while the wreck keeps moving
   assert.equal(p.context.lastRender.running, true);
   const wreckAt = p.context.wreckSteps;
   for (let i = 1; i <= 30; i++) p.advance(17 + i * 1000 / 60);
-  assert.ok(Math.abs(p.context.wreckSteps - wreckAt - 15) <= 1, '0.5 seconds should advance 0.125 seconds of wreck physics');
-  assert.ok(Math.abs(p.context.lastRender.dt - 1 / 240) < 1e-9, 'wreck effects must use the same quarter-speed time scale');
+  assert.ok(Math.abs(p.context.wreckSteps - wreckAt - 7.5) <= 1, '0.5 seconds should advance 0.0625 seconds of wreck physics');
+  assert.ok(Math.abs(p.context.lastRender.dt - 1 / 480) < 1e-9, 'wreck effects must use the same one-eighth-speed time scale');
   assert.equal(p.context.steps, stoppedAt, 'driving and combat must stop after defeat');
   assert.match(p.ids.get('eyebrow').innerHTML, /CAR DESTROYED/);
   assert.equal(p.context.sounds.filter(event => event === 'impact').length, 1);
@@ -299,7 +327,7 @@ test('restart inputs are locked for three real seconds, and held Space cannot re
   assert.equal(p.context.snapshot.health, 0);
   assert.equal(p.ids.get('primary-button').disabled, true);
   p.advance(3017);
-  assert.equal(p.ids.get('primary-button').disabled, false, 'the lock uses wall time, not quarter-speed wreck time');
+  assert.equal(p.ids.get('primary-button').disabled, false, 'the lock uses wall time, not slowed wreck time');
   assert.equal(p.ids.get('primary-label').textContent, 'دوباره بران');
   assert.match(p.ids.get('overlay-foot').innerHTML, />Space<\/bdi>/);
   p.key('Space', 'keydown', { repeat: true });
@@ -419,7 +447,7 @@ test('Farsi keeps physical key names in English across ready, pause, and restart
 });
 
 test('armory respects XP locks, remembers equipment, pauses combat, and switching cannot refill ammo', async () => {
-  const p = await page('fa-IR', { 'roadster-xp':'125' });
+  const p = await page('fa-IR', { 'roadster-xp':'250', 'roadster-progress': progressSave(2000) });
   assert.equal(p.ids.get('equip-gatling-gun').disabled, false);
   assert.equal(p.ids.get('equip-cannon').disabled, true);
   await p.click('armory-button');
@@ -446,6 +474,133 @@ test('armory respects XP locks, remembers equipment, pauses combat, and switchin
   assert.equal(p.context.snapshot.weapon.ammo, remaining, 'opening the armory must clear held fire');
 });
 
+test('G toggles the armory, clears held controls, and preserves ready, running, and paused states', async () => {
+  const p = await page();
+  p.key('KeyG');
+  assert.equal(p.ids.get('armory').hidden, false);
+  p.key('KeyG', 'keydown', { repeat: true });
+  assert.equal(p.ids.get('armory').hidden, false);
+  p.key('KeyG');
+  assert.equal(p.ids.get('armory').hidden, true);
+  assert.equal(p.ids.get('overlay').classList.contains('is-visible'), true);
+  await p.click('primary-button');
+  p.key('KeyF'); p.advance(17);
+  const ammo = p.context.snapshot.weapon.ammo;
+  p.key('KeyG'); p.advance(100);
+  assert.equal(p.context.audioRunning, false);
+  assert.equal(p.context.snapshot.weapon.ammo, ammo);
+  await p.click('armory-button'); // Opening an already-open armory must preserve auto-resume.
+  p.key('KeyG'); p.advance(117);
+  assert.equal(p.context.audioRunning, true);
+  assert.equal(p.context.lastControls.fire, false);
+  p.key('KeyP'); p.key('KeyG'); p.key('Escape'); p.advance(134);
+  assert.equal(p.context.audioRunning, false);
+  p.key('KeyG', 'keydown', { target: p.ids.get('touch-layout-control') });
+  assert.equal(p.ids.get('armory').hidden, true, 'typing in a form must not open the armory');
+});
+
+test('touch layout edits every control independently, pauses input, persists, and resumes cleanly', async () => {
+  const p = await page('fa-IR');
+  await p.click('primary-button');
+  p.pointer('touch-fire', 'pointerdown'); p.advance(17);
+  await p.click('touch-layout-button');
+  p.advance(100);
+  const stoppedAt = p.context.steps;
+  assert.equal(p.context.audioRunning, false);
+  assert.equal(p.ids.get('touch-layout-editor').hidden, false);
+  assert.equal(p.ids.get('touch-layout-title').textContent, 'چیدمان دکمه‌ها');
+  assert.equal(p.ids.get('touch-layout-size-value').textContent, '۷۶ پیکسل');
+  p.ids.get('touch-layout-save').focus(); p.key('Tab');
+  assert.equal(p.context.document.activeElement, p.ids.get('touch-fire'));
+  p.key('Tab', 'keydown', { shiftKey: true });
+  assert.equal(p.context.document.activeElement, p.ids.get('touch-layout-save'));
+  const sizes = { jump: 98, fire: 87, boost: 103, aim: 63, suction: 72 };
+  for (const [id, size] of Object.entries(sizes)) {
+    const button = p.ids.get(`touch-${id}`);
+    const before = button.getBoundingClientRect();
+    p.pointer(`touch-${id}`, 'pointerdown', { clientX: before.left + 10, clientY: before.top + 10 });
+    assert.equal(p.ids.get('touch-layout-control').value, id);
+    p.pointer(`touch-${id}`, 'pointermove', { clientX: 300, clientY: 210 });
+    p.pointer(`touch-${id}`, 'pointerup');
+    p.ids.get('touch-layout-size').value = String(size);
+    p.ids.get('touch-layout-size').dispatch('input');
+    assert.equal(button.style.width, `${size}px`);
+    assert.equal(button.classList.contains('is-pressed'), false);
+  }
+  await p.click('touch-aim');
+  p.key('KeyG'); p.key('Space'); p.key('Digit8'); p.advance(200);
+  assert.equal(p.context.steps, stoppedAt);
+  assert.equal(p.ids.get('armory').hidden, true);
+  assert.equal(p.storage.has('roadster-touch-layout'), false, 'draft edits must not save early');
+  await p.click('touch-layout-save'); p.advance(217);
+  assert.equal(p.context.audioRunning, true);
+  assert.equal(p.context.lastControls.jumpHeld, false);
+  assert.equal(p.context.lastControls.jumpPressed, false);
+  assert.equal(p.context.lastControls.fire, false);
+  assert.equal(p.context.lastControls.boost, false);
+  assert.equal(p.context.lastControls.aim, 1, 'editing the aim button must not turn the gun');
+  const saved = p.storage.get('roadster-touch-layout');
+  const restored = await page('en-US', { 'roadster-touch-layout': saved });
+  for (const [id, size] of Object.entries(sizes)) {
+    assert.equal(restored.ids.get(`touch-${id}`).style.width, `${size}px`);
+    assert.equal(restored.ids.get(`touch-${id}`).style.left, p.ids.get(`touch-${id}`).style.left);
+    assert.equal(restored.ids.get(`touch-${id}`).style.top, p.ids.get(`touch-${id}`).style.top);
+  }
+});
+
+test('touch layout cancel and Escape discard edits; reset restores defaults and keeps a paused run paused', async () => {
+  const saved = JSON.stringify({ version: 1, buttons: { jump: { x: .4, y: .6, size: 100 } } });
+  const p = await page('en-US', { 'roadster-touch-layout': saved });
+  const jump = p.ids.get('touch-jump');
+  for (const cancel of ['touch-layout-cancel', 'Escape']) {
+    await p.click('touch-layout-button');
+    p.ids.get('touch-layout-size').value = '120'; p.ids.get('touch-layout-size').dispatch('input');
+    if (cancel === 'Escape') p.key('Escape'); else await p.click(cancel);
+    assert.equal(jump.style.width, '100px');
+    assert.equal(p.storage.get('roadster-touch-layout'), saved);
+    assert.equal(p.ids.get('overlay').classList.contains('is-visible'), true);
+  }
+  await p.click('primary-button'); p.key('KeyP');
+  await p.click('touch-layout-button');
+  await p.click('touch-layout-reset');
+  assert.equal(jump.style.width, '76px');
+  await p.click('touch-layout-save'); p.advance(17);
+  assert.equal(p.context.audioRunning, false);
+  assert.equal(JSON.parse(p.storage.get('roadster-touch-layout')).buttons.jump.size, 76);
+});
+
+test('touch placement stays within resized bounds, clamps saved values, and tolerates unavailable storage', async () => {
+  const saved = JSON.stringify({ version: 1, buttons: {
+    jump: { x: 10, y: -2, size: 999 }, fire: { x: 0, y: 1, size: 1 },
+    aim: { x: 'bad', y: 1, size: 70 },
+  } });
+  const p = await page('en-US', { 'roadster-touch-layout': saved });
+  const jump = p.ids.get('touch-jump');
+  assert.equal(jump.style.width, '128px');
+  assert.equal(jump.style.left, '660px');
+  assert.equal(jump.style.top, '0px');
+  assert.equal(p.ids.get('touch-fire').style.width, '44px');
+  assert.equal(p.ids.get('touch-aim').style.width, '');
+  p.resize(600, 280);
+  assert.equal(jump.style.width, '128px');
+  assert.equal(jump.style.left, '416px');
+  await p.click('touch-layout-button');
+  p.pointer('touch-jump', 'pointerdown', { clientX: 454, clientY: 144 });
+  p.pointer('touch-jump', 'pointermove', { clientX: -1000, clientY: 2000 });
+  assert.equal(jump.style.left, '0px');
+  assert.equal(jump.style.top, '0px', 'a button as tall as the area cannot move outside it');
+  p.pointer('touch-jump', 'pointercancel');
+  p.resize(844, 390);
+  assert.equal(jump.style.top, '110px');
+  p.context.localStorage.setItem = () => { throw new Error('Storage disabled'); };
+  await p.click('touch-layout-save');
+  assert.equal(p.ids.get('touch-layout-editor').hidden, true);
+  for (const corrupt of ['{', 'null', '{"version":2,"buttons":{}}']) {
+    const restored = await page('en-US', { 'roadster-touch-layout': corrupt });
+    assert.equal(restored.ids.get('touch-jump').style.width, '');
+  }
+});
+
 test('touch fire and aim share keyboard rotation limits; impact freeze preserves shots and ammunition', async () => {
   const p = await page();
   await p.click('primary-button');
@@ -463,8 +618,8 @@ test('touch fire and aim share keyboard rotation limits; impact freeze preserves
   p.pointer('touch-fire','pointerup');
 });
 
-test('earned loop XP unlocks an upgrade immediately, and the selected weapon survives a reload', async () => {
-  const p=await page('fa-IR');
+test('earned loop XP allows a coin purchase, and the purchased weapon survives a reload', async () => {
+  const p=await page('fa-IR', { 'roadster-progress': progressSave(1000) });
   assert.equal(p.ids.get('equip-twin-gun').disabled,true);
   await p.click('primary-button');
   p.context.snapshot.loopCompletions=1;p.advance(17);
@@ -473,9 +628,14 @@ test('earned loop XP unlocks an upgrade immediately, and the selected weapon sur
   await p.click('armory-close');
   p.context.snapshot.loopCompletions=2;p.advance(77);
   await p.click('armory-button');
+  assert.equal(p.ids.get('equip-twin-gun').disabled,true,'the doubled requirement is 100 XP');
+  await p.click('armory-close');
+  p.context.snapshot.loopCompletions=4;p.advance(137);
+  await p.click('armory-button');
   assert.equal(p.ids.get('equip-twin-gun').disabled,false);
   await p.click('equip-twin-gun');
-  assert.equal(p.storage.get('roadster-xp'),'50','equipping must not spend XP');
+  assert.equal(p.storage.get('roadster-xp'),'100','buying must not spend XP');
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins,20,'four loops earned 20 coins before the 1000-coin purchase');
   assert.equal(p.context.snapshot.weapon.id,'twin-gun');
   const reloaded=await page('fa-IR',Object.fromEntries(p.storage));
   assert.equal(reloaded.context.snapshot.weapon.id,'twin-gun');
@@ -483,7 +643,7 @@ test('earned loop XP unlocks an upgrade immediately, and the selected weapon sur
   assert.equal(reloaded.ids.get('equip-twin-gun').getAttribute('aria-pressed'),'true');
 });
 
-test('combat XP shows its source, unlocks equipment, persists, and never pays twice on restart', async () => {
+test('combat XP shows its source, persists, and never pays twice on restart', async () => {
   const p=await page('fa-IR');
   await p.click('primary-button');
   p.context.snapshot.obstaclesDestroyed=1;p.context.snapshot.runXp=10;p.advance(17);
@@ -497,8 +657,8 @@ test('combat XP shows its source, unlocks equipment, persists, and never pays tw
   p.context.snapshot.obstaclesDestroyed=3;p.context.snapshot.runXp=50;p.advance(197);
   assert.equal(p.storage.get('roadster-xp'),'50');
   await p.click('armory-button');
-  assert.equal(p.ids.get('equip-twin-gun').disabled,false);
-  await p.click('equip-twin-gun');await p.click('armory-close');
+  assert.equal(p.ids.get('equip-twin-gun').disabled,true,'50 XP is below the new requirement');
+  await p.click('armory-close');
   p.context.snapshot.health=25;p.context.impactNext=true;p.advance(257);p.advance(758);
   assert.match(p.ids.get('overlay-description').textContent,/۵۰ XP/);
   p.advance(3257);
@@ -512,7 +672,7 @@ test('combat XP shows its source, unlocks equipment, persists, and never pays tw
 
 
 test('number row and numpad select all eight weapons without opening armory or refilling ammunition', async () => {
-  const p = await page('fa-IR', { 'roadster-xp': '950' });
+  const p = await page('fa-IR', { 'roadster-xp': '1900', 'roadster-progress': progressSave(0, weaponIds) });
   await p.click('primary-button');
   p.key('KeyF'); p.advance(100); p.key('KeyF', 'keyup');
   const spent = p.context.snapshot.weapon.ammo;
@@ -535,17 +695,17 @@ test('number row and numpad select all eight weapons without opening armory or r
 });
 
 test('weapon hotkeys respect XP locks, editable fields, repeats and browser modifier shortcuts', async () => {
-  const locked = await page('en-US', { 'roadster-xp': '50' });
+  const locked = await page('en-US', { 'roadster-xp': '100', 'roadster-progress': progressSave(0, ['machine-gun','twin-gun']) });
   locked.key('Digit8');
   assert.equal(locked.context.snapshot.weapon.id, 'machine-gun');
   locked.key('Numpad2');
   assert.equal(locked.context.snapshot.weapon.id, 'twin-gun');
-  const translated = await page('fa-IR', { 'roadster-xp': '950' });
+  const translated = await page('fa-IR', { 'roadster-xp': '1900', 'roadster-progress': progressSave(0, weaponIds) });
   translated.key('Unidentified', 'keydown', { key: '۸' });
   assert.equal(translated.context.snapshot.weapon.id, 'plasma-cannon');
   translated.key('Unidentified', 'keydown', { key: '٢' });
   assert.equal(translated.context.snapshot.weapon.id, 'twin-gun');
-  const p = await page('en-US', { 'roadster-xp': '950' });
+  const p = await page('en-US', { 'roadster-xp': '1900', 'roadster-progress': progressSave(0, weaponIds) });
   for (const fields of [{ctrlKey:true},{metaKey:true},{altKey:true},{repeat:true},
     {target:new p.context.HTMLElement('input')},{target:new p.context.HTMLElement('textarea')},
     {target:Object.assign(new p.context.HTMLElement('div'),{isContentEditable:true})}]) {
@@ -554,4 +714,166 @@ test('weapon hotkeys respect XP locks, editable fields, repeats and browser modi
   }
   p.key('Digit9'); p.key('Digit0');
   assert.equal(p.context.snapshot.weapon.id, 'machine-gun');
+});
+
+test('coin HUD awards distance, loops and destroyed police once and ignores obstacle-only XP', async () => {
+  const p = await page('fa-IR');
+  await p.click('primary-button');
+  p.context.snapshot.distance = 199.9; p.advance(17);
+  assert.equal(p.ids.get('coin-total').textContent, '۰');
+  p.context.snapshot.distance = 200; p.context.snapshot.loopCompletions = 2; p.context.snapshot.policeDestroyed = 1;
+  p.advance(77);
+  assert.equal(p.ids.get('coin-total').textContent, '۳۰');
+  assert.equal(p.ids.get('coin-toast').textContent, '+۳۰ سکه');
+  p.context.snapshot.obstaclesDestroyed = 1; p.advance(137);
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins, 30);
+  p.context.snapshot.distance = 600; p.advance(197);
+  assert.equal(p.ids.get('coin-total').textContent, '۵۰');
+  p.advance(257);
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins, 50);
+  const reloaded = await page('fa-IR', Object.fromEntries(p.storage));
+  assert.equal(reloaded.ids.get('coin-total').textContent, '۵۰');
+});
+
+test('armory purchases require XP and coins; number shortcuts only equip already purchased weapons', async () => {
+  const p = await page('en-US', { 'roadster-xp': '99', 'roadster-progress': progressSave(1000) });
+  assert.equal(p.ids.get('equip-twin-gun').disabled, true);
+  assert.equal(p.ids.get('weapon-price-twin-gun').textContent, 'PRICE: 1,000 COINS');
+  assert.equal(p.ids.get('weapon-unlock-twin-gun').textContent, 'REQUIRES 100 XP');
+  p.key('Digit2');
+  assert.equal(p.context.snapshot.weapon.id, 'machine-gun');
+  await p.click('primary-button');
+  p.context.snapshot.loopCompletions = 1; p.advance(17);
+  await p.click('armory-button');
+  assert.equal(p.ids.get('equip-twin-gun').disabled, false);
+  assert.equal(p.ids.get('armory-coins').textContent, '1,005');
+  p.key('Digit2');
+  assert.equal(p.context.snapshot.weapon.id, 'machine-gun');
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins, 1005);
+  await p.click('equip-twin-gun');
+  assert.equal(p.context.snapshot.weapon.id, 'twin-gun');
+  assert.equal(p.ids.get('coin-total').textContent, '5');
+  assert.equal(p.ids.get('armory-coins').textContent, '5');
+  assert.equal(p.storage.get('roadster-xp'), '124');
+  p.key('Digit1'); p.key('Digit2'); await p.click('equip-twin-gun');
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins, 5);
+  const restored = await page('en-US', Object.fromEntries(p.storage));
+  assert.equal(restored.context.snapshot.weapon.id, 'twin-gun');
+  assert.equal(restored.ids.get('weapon-price-twin-gun').textContent, 'OWNED');
+  const poor = await page('en-US', { 'roadster-xp': '1900', 'roadster-progress': progressSave(999) });
+  assert.equal(poor.ids.get('equip-twin-gun').disabled, true);
+  assert.equal(poor.ids.get('weapon-unlock-twin-gun').textContent, 'NEED 1 MORE COINS');
+  await poor.click('equip-twin-gun');
+  assert.equal(poor.context.snapshot.weapon.id, 'machine-gun');
+  assert.equal(JSON.parse(poor.storage.get('roadster-progress')).coins, 999);
+});
+
+test('new records open a medal form, persist before naming, block gameplay, and retain the name on reload', async () => {
+  const p = await page('fa-IR', { 'roadster-best': '900', 'roadster-progress': progressSave(20) });
+  assert.match(p.ids.get('best').innerHTML, /۰۹۰۰/);
+  await p.click('primary-button');
+  p.context.snapshot.distance = 2101; p.context.snapshot.loopCompletions = 1; p.context.snapshot.policeDestroyed = 1;
+  p.context.snapshot.health = 25; p.context.impactNext = true; p.advance(17);
+  assert.equal(p.ids.get('record-dialog').hidden, false);
+  assert.equal(p.context.document.activeElement, p.ids.get('record-name'));
+  assert.equal(p.ids.get('record-title').textContent, 'رکورد جدید!');
+  assert.equal(p.ids.get('record-distance').textContent, '۲٬۱۰۱ متر');
+  assert.equal(p.ids.get('record-bonus').textContent, 'پاداش رکورد: +۲۵ سکه');
+  assert.equal(p.ids.get('coin-total').textContent, '۱۶۰');
+  assert.equal(p.storage.get('roadster-best'), '2101');
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).record.needsName, true);
+  p.key('Tab', 'keydown', { shiftKey: true });
+  assert.equal(p.context.document.activeElement, p.ids.get('record-save'));
+  p.key('Tab');
+  assert.equal(p.context.document.activeElement, p.ids.get('record-name'));
+  p.key('KeyG'); p.key('Digit8'); p.key('Space'); p.advance(3017); await p.click('primary-button');
+  assert.equal(p.ids.get('armory').hidden, true);
+  assert.equal(p.context.snapshot.health, 0, 'the run must wait until its record is named');
+  p.ids.get('record-name').value = '   '; p.ids.get('record-form').dispatch('submit');
+  assert.equal(p.ids.get('record-name-error').hidden, false);
+  const pending = await page('fa-IR', Object.fromEntries(p.storage));
+  assert.equal(pending.ids.get('record-dialog').hidden, false);
+  assert.equal(pending.ids.get('coin-total').textContent, '۱۶۰', 'recovering the pending form must not duplicate its bonus');
+  pending.ids.get('record-name').value = '  آبل  '; pending.ids.get('record-form').dispatch('submit');
+  assert.equal(pending.ids.get('record-dialog').hidden, true);
+  assert.equal(pending.ids.get('best-player').textContent, 'آبل');
+  const restored = await page('fa-IR', Object.fromEntries(pending.storage));
+  assert.equal(restored.ids.get('record-dialog').hidden, true);
+  assert.equal(restored.ids.get('best-player').textContent, 'آبل');
+  assert.match(restored.ids.get('best').innerHTML, /۲٬۱۰۱/);
+  assert.equal(restored.ids.get('coin-total').textContent, '۱۶۰');
+  await restored.click('primary-button');
+  restored.context.snapshot.distance = 1800; restored.context.snapshot.health = 25;
+  restored.context.impactNext = true; restored.advance(17);
+  assert.equal(restored.ids.get('record-dialog').hidden, true, 'a shorter run must not ask for a record name');
+  assert.equal(JSON.parse(restored.storage.get('roadster-progress')).coins, 250, 'only nine distance milestones are paid for the shorter run');
+});
+
+test('five armory upgrades debit once, affect active ammo immediately, persist, and survive restarting', async () => {
+  const p = await page('fa-IR', { 'roadster-xp':'100', 'roadster-weapon':'twin-gun',
+    'roadster-progress':progressSave(50000, ['machine-gun','twin-gun']) });
+  assert.equal(p.ids.get('weapon-upgrades-twin-gun').hidden, false);
+  assert.equal(p.ids.get('weapon-upgrades-laser-gun').hidden, true);
+  await p.click('primary-button');
+  p.key('KeyF'); p.advance(17); p.key('KeyF','keyup');
+  assert.equal(p.context.snapshot.weapon.ammo, 98);
+  await p.click('armory-button');
+  assert.match(p.ids.get('upgrade-twin-gun').textContent, /۱٬۵۰۰/);
+  await p.click('upgrade-twin-gun');
+  assert.equal(p.context.snapshot.weapon.level, 1);
+  assert.equal(p.context.snapshot.weapon.capacity, 120);
+  assert.equal(p.context.snapshot.weapon.ammo, 118);
+  assert.equal(p.ids.get('weapon-ammo').textContent, '۱۱۸ / ۱۲۰');
+  assert.equal(p.ids.get('ammo-meter').getAttribute('aria-valuemax'), '120');
+  assert.match(p.ids.get('weapon-stats-twin-gun').textContent, /قدرت ۱٫۲/);
+  assert.match(p.ids.get('weapon-upgrade-preview-twin-gun').textContent, /۱۴۰ گلوله/);
+  assert.equal(p.ids.get('upgrade-step-twin-gun-0').classList.contains('is-filled'), true);
+  assert.equal(p.ids.get('upgrade-step-twin-gun-1').classList.contains('is-filled'), false);
+  for (let level=2; level<=5; level++) await p.click('upgrade-twin-gun');
+  assert.equal(p.ids.get('weapon-level-twin-gun').textContent, 'ارتقا ۵ از ۵');
+  assert.equal(p.ids.get('upgrade-twin-gun').disabled, true);
+  assert.equal(p.ids.get('upgrade-twin-gun').textContent, 'ارتقای کامل');
+  assert.equal(p.ids.get('weapon-upgrade-preview-twin-gun').hidden, true);
+  assert.equal(p.context.snapshot.weapon.capacity, 200);
+  assert.equal(p.context.snapshot.weapon.ammo, 198);
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins, 30218);
+  await p.click('upgrade-twin-gun');
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins, 30218);
+  p.key('Digit1'); p.key('Digit2');
+  assert.equal(p.context.snapshot.weapon.ammo, 198);
+  const restored = await page('fa-IR', Object.fromEntries(p.storage));
+  assert.equal(restored.context.snapshot.weapon.level, 5);
+  assert.equal(restored.context.snapshot.weapon.capacity, 200);
+  assert.equal(restored.context.snapshot.weapon.ammo, 200);
+  assert.equal(restored.ids.get('coin-total').textContent, '۳۰٬۲۱۸');
+  await restored.click('primary-button');
+  restored.context.snapshot.health=25; restored.context.impactNext=true; restored.advance(17);
+  restored.advance(3017); await restored.click('primary-button');
+  assert.equal(restored.context.snapshot.weapon.level, 5);
+  assert.equal(restored.context.snapshot.weapon.ammo, 200);
+});
+
+test('upgrading an unequipped gun preserves the active loadout and requires enough coins and ownership', async () => {
+  const p = await page('en-US', { 'roadster-xp':'100', 'roadster-progress':progressSave(1500, ['machine-gun','twin-gun']) });
+  await p.click('primary-button');
+  p.key('KeyF'); p.advance(17); p.key('KeyF','keyup');
+  await p.click('armory-button');
+  await p.click('upgrade-twin-gun');
+  assert.equal(p.context.snapshot.weapon.id, 'machine-gun');
+  assert.equal(p.context.snapshot.weapon.ammo, 79);
+  assert.equal(p.ids.get('upgrade-twin-gun').disabled, true);
+  assert.equal(p.ids.get('upgrade-machine-gun').disabled, true);
+  assert.equal(p.ids.get('upgrade-cannon').disabled, true);
+  assert.equal(p.ids.get('weapon-upgrades-cannon').hidden, true);
+  await p.click('upgrade-twin-gun'); await p.click('upgrade-cannon');
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins, 0);
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).weaponUpgrades['twin-gun'], 1);
+  p.key('Digit2');
+  assert.equal(p.context.snapshot.weapon.level, 1);
+  assert.equal(p.context.snapshot.weapon.ammo, 120);
+  const starter = await page('en-US', { 'roadster-progress':progressSave(1500) });
+  await starter.click('armory-button'); await starter.click('upgrade-machine-gun');
+  assert.equal(starter.context.snapshot.weapon.level, 1);
+  assert.equal(starter.ids.get('coin-total').textContent, '0');
+  assert.equal(starter.context.snapshot.weapon.ammo, 96);
 });
