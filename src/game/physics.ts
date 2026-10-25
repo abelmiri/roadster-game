@@ -11,6 +11,7 @@ import { VehicleDamage } from './damage';
 import type { BreakEvent } from './obstacleDebris';
 import type { SparkEvent } from './impactSparks';
 import { VehicleWeapon, type AimDirection, type CombatTarget, type WeaponId, type WeaponSnapshot, type WeaponImpact, type WeaponUpgrades } from './weapons';
+import { CAR_UPGRADE_IDS, carUpgradeLevel, carUpgradeStats, type CarUpgrades } from './carUpgrades';
 
 export const FIXED_STEP = 1 / 120;
 export const START_SPEED = 60 / 3.6;
@@ -35,6 +36,10 @@ export interface GameSnapshot {
   distance: number;
   speed: number;
   boost: number;
+  carUpgrades: CarUpgrades;
+  maxHealth: number;
+  hullHealth: number;
+  armorMask: number;
   grounded: boolean;
   suctionActive: boolean;
   boostActive: boolean;
@@ -145,12 +150,15 @@ export class GamePhysics {
   crashed = false;
   private wrecked = false;
   private crashPosition: { x: number; y: number } | null = null;
+  private readonly carUpgrades: CarUpgrades = {};
+  private carStats = carUpgradeStats();
 
-  constructor(private readonly startX = 7, loadout?: { id: WeaponId; xp: number; upgrades?: WeaponUpgrades }) {
+  constructor(private readonly startX = 7, loadout?: { id: WeaponId; xp: number; upgrades?: WeaponUpgrades; carUpgrades?: CarUpgrades }) {
     this.furthestX = startX;
     this.pursuit = new PolicePursuit(startX);
     this.weapon = new VehicleWeapon('machine-gun', loadout?.upgrades);
     if (loadout) this.weapon.equip(loadout.id, loadout.xp);
+    this.upgradeCar(loadout?.carUpgrades ?? {});
     this.previousPoliceX = this.currentPoliceX = this.pursuit.x;
     this.world = new RAPIER.World({ x: 0, y: -GRAVITY });
     this.world.timestep = FIXED_STEP;
@@ -358,11 +366,12 @@ export class GamePhysics {
   private driveSpeed(speed: number, controls: Controls): number {
     if (!controls.boost) this.boostExhausted = false;
     this.boostOn = controls.boost && !this.boostExhausted && this.charge > 0.01;
-    const target = START_SPEED + Math.min(18 - START_SPEED, Math.max(0, this.distance) / 160) + (this.boostOn ? 9 : 0);
-    const acceleration = this.boostOn ? 18 : this.isGrounded ? 7 : 3;
-    this.charge = clamp(this.charge + FIXED_STEP * (this.boostOn ? -0.48 : 0.19), 0, 1);
+    const stats = this.carStats;
+    const target = START_SPEED + Math.min(18 - START_SPEED, Math.max(0, this.distance) / 160) + (this.boostOn ? 9 * stats.boostPower : 0);
+    const acceleration = this.boostOn ? 18 * stats.boostPower : this.isGrounded ? 7 : 3;
+    this.charge = clamp(this.charge + FIXED_STEP * (this.boostOn ? -0.48 : 0.19) / stats.boostCapacity, 0, 1);
     if (this.boostOn && this.charge <= 0.01) this.boostExhausted = true;
-    return clamp(speed + clamp(target - speed, -5 * FIXED_STEP, acceleration * FIXED_STEP), 6, 27);
+    return clamp(speed + clamp(target - speed, -5 * FIXED_STEP, acceleration * FIXED_STEP), 6, 18 + 9 * stats.boostPower);
   }
 
   /** The magnetic branch is an exact circular contact constraint. The ordinary
@@ -458,6 +467,14 @@ export class GamePhysics {
   equipWeapon(id: string, xp: number): boolean { return this.weapon.equip(id, xp); }
   upgradeWeapon(id: WeaponId, level: number): void { this.weapon.setUpgradeLevel(id, level); }
   weaponAmmo(id: WeaponId): number { return this.weapon.ammoFor(id); }
+  upgradeCar(upgrades: CarUpgrades): void {
+    const previousCapacity = this.carStats.boostCapacity;
+    for (const id of CAR_UPGRADE_IDS) this.carUpgrades[id] = Math.max(this.carUpgrades[id] ?? 0, carUpgradeLevel(upgrades[id]));
+    const stats = carUpgradeStats(this.carUpgrades);
+    this.carStats=stats;
+    if(stats.boostCapacity>previousCapacity) this.charge = Math.min(1, (this.charge * previousCapacity + stats.boostCapacity - previousCapacity) / stats.boostCapacity);
+    if (!this.crashed) this.damage.upgradeArmor(stats.armor);
+  }
 
   private updateWeapon(controls: Controls): void {
     if (!this.pursuit.disabled && this.policeHealth <= 0) this.policeHealth = 12;
@@ -544,7 +561,8 @@ export class GamePhysics {
   }
 
   private registerImpact(source: 'road' | 'police'): boolean {
-    if (!this.damage.hit()) return false;
+    const rearImpact = source === 'police' && this.pursuit.x < this.car.translation().x;
+    if (!this.damage.hit(rearImpact ? 3 : 0)) return false;
     if (this.activeLoop) this.suspension.land(4.5, 0, 0);
     if (this.damage.health === 0) {
       this.crashed = true;
@@ -754,6 +772,8 @@ export class GamePhysics {
     const loopCenter = this.activeLoop ? loopGeometry(this.activeLoop.spec) : null;
     return {
       car: pose(0), wheels: [pose(1), pose(2)], distance: this.distance,
+      carUpgrades: { ...this.carUpgrades }, maxHealth: this.damage.maxHealth,
+      hullHealth: this.damage.hullHealth, armorMask: this.damage.armorMask,
       wheelContacts: this.roadContact.wheels.map((wheel) => this.activeLoop !== null || wheel.grounded) as [boolean, boolean],
       wheelTravel: this.roadContact.wheels.map((wheel) => this.activeLoop ? 0 : wheel.travel) as [number, number],
       wheelImpactSerials: this.roadContact.wheels.map((wheel) => wheel.impactSerial) as [number, number],

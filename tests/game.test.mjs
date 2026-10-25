@@ -1133,3 +1133,42 @@ test('real physics loads saved upgrades and applies extra capacity without refil
     assert.equal(game.snapshot(1).weapon.ammo, 127);
   } finally { game.dispose(); }
 });
+
+test('four purchased armor plates absorb real obstacle contacts before four hull hits end the run',()=>{
+  const track=new TrackGenerator();
+  const barriers=Array.from({length:20},(_,index)=>track.chunk(index).hazards).flat().filter(hazard=>hazard.kind!=='drone').slice(0,8);
+  const game=new GamePhysics(barriers[0].x-4,{id:'machine-gun',xp:0,carUpgrades:{armor:4}});
+  try {
+    assert.equal(game.snapshot(1).maxHealth,200);
+    for(let hit=1;hit<=8;hit++) {
+      placeOnRoad(game,barriers[hit-1].x-4,12.8);
+      for(let step=0;step<120&&!game.crashed&&game.snapshot(1).impactSerial<hit;step++) game.step(idle);
+      const state=game.snapshot(1);
+      assert.equal(state.impactSerial,hit);
+      assert.equal(state.health,200-hit*25);
+      assert.equal(state.hullHealth,hit<=4?100:200-hit*25);
+      assert.equal(state.armorMask,hit<4?15&~((1<<hit)-1):0);
+      assert.equal(game.crashed,hit===8);
+      if(hit<8) { placeOnRoad(game,-48,12.8); stepFor(game,1.5); }
+    }
+  } finally {game.dispose();}
+});
+
+test('reserve doubles boost duration and power increases both acceleration and boosted top speed',()=>{
+  const plain=new GamePhysics(-48);
+  const reserve=new GamePhysics(-48,{id:'machine-gun',xp:0,carUpgrades:{'boost-reserve':4}});
+  const power=new GamePhysics(-48,{id:'machine-gun',xp:0,carUpgrades:{'boost-power':4}});
+  try {
+    for(const game of [plain,reserve,power]) stepFor(game,.65,{...idle,boost:true});
+    const base=plain.snapshot(1); const larger=reserve.snapshot(1); const stronger=power.snapshot(1);
+    assert.ok(Math.abs((1-base.boost)-2*(1-larger.boost))<1e-9,'twice the tank should consume half the percentage');
+    assert.ok(stronger.speed>base.speed+4);
+    assert.ok(stronger.speed>27,'power upgrades must raise the former boost speed ceiling');
+    const oldFuel=base.boost;
+    plain.upgradeCar({'boost-reserve':1});
+    assert.ok(Math.abs(plain.snapshot(1).boost-(oldFuel+.25)/1.25)<1e-9,'only newly unlocked fuel capacity is added');
+    const remaining=plain.snapshot(1).boost;
+    plain.upgradeCar({'boost-reserve':1,'boost-power':1});
+    assert.equal(plain.snapshot(1).boost,remaining,'reapplying upgrades cannot refill fuel');
+  } finally {plain.dispose();reserve.dispose();power.dispose();}
+});

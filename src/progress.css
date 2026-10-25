@@ -11,6 +11,24 @@
 .armory-coin-help { margin: -6px 0 16px; color: #aebfcc; font-size: 11px; line-height: 1.7; }
 .weapon-price { margin-top: 6px; color: #e7c887; font-size: 10px; line-height: 1.6; }
 .armory-upgrade-help { margin: -6px 0 16px; color: #b2dbd0; font-size: 11px; line-height: 1.7; }
+#car-pane[hidden], #weapons-pane[hidden] { display: none; }
+.armory-tabs { display: flex; gap: 8px; margin: 18px 0 12px; border-bottom: 1px solid #8faec13d; padding-bottom: 10px; }
+.armory-tabs button { min-width: 110px; min-height: 42px; padding: 8px 20px; border: 1px solid #6e8e9f70; border-radius: 9px; background: #ffffff06; color: #b1c9d3; font: inherit; font-size: 12px; font-weight: 750; cursor: pointer; }
+.armory-tabs [aria-selected=true] { color: #142c3b; background: #a6f4df; border-color: #a6f4df; }
+.armory-card > .armory-wallet { margin: 0 0 12px; }
+.garage-vehicle { text-align: center; margin-bottom: 22px; border: 1px solid #7eafba35; border-radius: 16px; background: radial-gradient(ellipse at 50% 80%,#56a9ae22,transparent 65%),#102337; }
+.garage-car-preview { width: min(600px,100%); margin: 0 auto; }
+.garage-car-preview svg { display: block; width: 100%; max-height: 220px; }
+.garage-vehicle h3 { margin: 0; font-size: 18px; color: #effff8; }
+.garage-vehicle p { margin: 8px 0 16px; font-size: 12px; color: #a7c7cf; }
+.car-upgrade-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; }
+.car-upgrade-card { min-width: 0; padding: 16px; border: 1px solid #a6f4df40; border-radius: 12px; background: #ffffff04; }
+.car-upgrade-card h3 { margin: 0 0 15px; font-size: 14px; color: #d6f8ec; }
+.car-current-stats { font-size: 12px; color: #e4f5ef; line-height: 1.8; margin: 12px 0 5px; }
+.car-next-stats { font-size: 11px; color: #9fbdc8; line-height: 1.8; min-height: 40px; margin: 0 0 12px; }
+.car-next-stats[hidden] { display: none; }
+.garage-help { font-size: 12px; line-height: 1.9; color: #a3b9c6; margin: 20px 0 0; }
+.health-track:after { background: repeating-linear-gradient(90deg,transparent 0,transparent calc(var(--health-segment,25%) - 2px),#183343aa calc(var(--health-segment,25%) - 2px),#183343aa var(--health-segment,25%)); }
 .weapon-slot { display: flex; flex-direction: column; min-width: 0; }
 .weapon-slot > .weapon-card { width: 100%; flex: 1; }
 .weapon-upgrades[hidden], .weapon-upgrade-preview[hidden] { display: none; }
@@ -57,6 +75,15 @@ html[lang=fa] .record-card .primary-button { height: 46px; font-size: 14px; }
   .weapon-price, html[lang=fa] .weapon-price { margin-top: 3px; font-size: 9px; }
   .armory-upgrade-help { margin: 0 0 10px; font-size: 10px; }
   .weapon-upgrades { padding: 8px; margin-top: 6px; }
+  .armory-tabs { margin: 12px 0 10px; }
+  .armory-tabs button { min-height: 36px; min-width: 96px; font-size: 11px; }
+  .garage-car-preview svg { max-height: 145px; }
+  .garage-vehicle { margin-bottom: 14px; }
+  .car-upgrade-grid { gap: 9px; }
+  .car-upgrade-card { padding: 12px 10px; }
+  .car-upgrade-card h3 { font-size: 12px; }
+  .car-current-stats { font-size: 11px; }
+  .garage-help { font-size: 11px; }
   .weapon-level-row, .weapon-upgrade-preview, .weapon-upgrade-button, html[lang=fa] .weapon-level-row, html[lang=fa] .weapon-upgrade-preview, html[lang=fa] .weapon-upgrade-button { font-size: 9px; }
 }
 @media(max-width:650px) and (orientation:portrait) {

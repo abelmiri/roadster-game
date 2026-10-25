@@ -35,6 +35,42 @@ test('four separate impacts remove 25% each; protection blocks repeated collider
   assert.equal(damage.hit(), false, 'a destroyed car cannot trigger another impact');
   assert.equal(new VehicleDamage().health, 100, 'a restart begins with full health');
 });
+
+test('four armor plates absorb one accepted hit each before the hull takes damage', () => {
+  const damage=new VehicleDamage(4);
+  assert.equal(damage.health,200); assert.equal(damage.maxHealth,200);
+  for(const mask of [14,12,8,0]) {
+    assert.equal(damage.hit(),true);
+    assert.equal(damage.armorMask,mask);
+    assert.equal(damage.hullHealth,100);
+    const health=damage.health;
+    assert.equal(damage.hit(),false,'protection must prevent a second plate falling');
+    assert.equal(damage.health,health);
+    damage.step(1.5);
+  }
+  assert.equal(damage.health,100);
+  for(let index=0;index<4;index++) { damage.hit(); damage.step(1.5); }
+  assert.equal(damage.health,0); assert.equal(damage.impactSerial,8);
+  assert.equal(new VehicleDamage(4).armorMask,15,'a new run restores all purchased plates');
+});
+
+test('new armor preserves damaged hull health, cannot restore lost plates, and protects the impacted rear', () => {
+  const damage=new VehicleDamage(); damage.hullHealth=50;
+  damage.upgradeArmor(1);
+  assert.equal(damage.health,75); assert.equal(damage.hullHealth,50);
+  damage.hit(); damage.step(1.5);
+  assert.equal(damage.health,50);
+  damage.upgradeArmor(1);
+  assert.equal(damage.armorMask,0);
+  damage.upgradeArmor(4);
+  assert.equal(damage.armorMask,14,'only the three new plates should be installed');
+  damage.hit(3);
+  assert.equal(damage.armorMask,6,'a rear contact drops the rear plate when installed');
+  assert.equal(damage.hullHealth,50);
+  damage.hullHealth=0; damage.armorMask=0;
+  damage.upgradeArmor(4);
+  assert.equal(damage.health,0,'an upgrade cannot revive a destroyed hull');
+});
 test('500 ms hit stop and eased recovery keep physics and protection consistent at different refresh rates', () => {
   for (const hz of [30, 60, 144]) {
     const damage = new VehicleDamage();

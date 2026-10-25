@@ -5,8 +5,10 @@ import { GameAudio } from './game/audio';
 import { HudFeedback } from './game/hudFeedback';
 import { ExperienceProgress, LEVEL_XP } from './game/experience';
 import { PlayerProgress } from './game/playerProgress';
+import { CAR_UPGRADE_IDS, MAX_CAR_UPGRADE, carUpgradeCost, carUpgradeStats, type CarUpgradeId } from './game/carUpgrades';
+import { carGarageIcon } from './game/carGarageIcon';
 import { loopsBetween } from './game/track';
-import { ImpactPause, IMPACT_DAMAGE, IMPACT_PAUSE_SECONDS, ExplosionSlowMotion, RESTART_DELAY_SECONDS, WRECK_TIME_SCALE, MAX_HEALTH } from './game/damage';
+import { ImpactPause, IMPACT_DAMAGE, IMPACT_PAUSE_SECONDS, ExplosionSlowMotion, RESTART_DELAY_SECONDS, WRECK_TIME_SCALE } from './game/damage';
 import { WeaponLoadout, WEAPONS, MAX_WEAPON_UPGRADE, weaponSpec, weaponUpgradeCost, type AimDirection } from './game/weapons';
 import { weaponIcon } from './game/weaponIcon';
 import { formatNumber, formatDecimal, formatPercent, getLanguage, setLanguage, t, type MessageKey } from './i18n';
@@ -17,6 +19,7 @@ import './touchLayout.css';
 import './progress.css';
 
 type GameStatus = 'loading' | 'ready' | 'running' | 'paused' | 'crashed' | 'error';
+const carUpgradeNames: Record<CarUpgradeId, MessageKey> = { armor:'carArmor', 'boost-reserve':'carBoostReserve', 'boost-power':'carBoostPower' };
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) throw new Error('Missing app element');
@@ -85,9 +88,14 @@ app.innerHTML = `
     <div id="armory" class="armory" role="dialog" aria-modal="true" aria-labelledby="armory-title" hidden>
       <div class="armory-card">
         <div class="armory-heading"><div><span class="eyebrow" data-i18n="armory"></span><h2 id="armory-title" data-i18n="armoryTitle"></h2></div><button id="armory-close" class="armory-close" type="button" data-i18n="closeArmory"></button></div>
+        <div id="armory-tabs" class="armory-tabs" role="tablist">
+          <button id="armory-tab-weapons" type="button" role="tab" aria-controls="weapons-pane" aria-selected="true" data-i18n="weaponsTab"></button>
+          <button id="armory-tab-car" type="button" role="tab" aria-controls="car-pane" aria-selected="false" tabindex="-1" data-i18n="carTab"></button>
+        </div>
+        <div class="armory-wallet"><span data-i18n="coinBalance"></span><strong id="armory-coins"></strong></div>
+        <section id="weapons-pane" role="tabpanel" aria-labelledby="armory-tab-weapons">
         <p class="armory-description" data-i18n="armoryDescription"></p>
         <p class="armory-help" data-i18n="armoryHelp"></p>
-        <div class="armory-wallet"><span data-i18n="coinBalance"></span><strong id="armory-coins"></strong></div>
         <p class="armory-coin-help" data-i18n="coinHelp"></p>
         <p class="armory-upgrade-help" data-i18n="weaponUpgradeHelp"></p>
         <div class="weapon-grid">${WEAPONS.map((spec, index) => `<div class="weapon-slot"><button id="equip-${spec.id}" class="weapon-card" type="button" aria-pressed="false">
@@ -101,6 +109,15 @@ app.innerHTML = `
           <button id="upgrade-${spec.id}" class="weapon-upgrade-button" type="button"></button>
         </div></div>`).join('')}</div>
         <p class="armory-note" data-i18n="armoryAmmoNote"></p>
+        </section>
+        <section id="car-pane" role="tabpanel" aria-labelledby="armory-tab-car" hidden>
+          <div class="garage-vehicle"><div id="garage-car-preview" class="garage-car-preview" role="img">${carGarageIcon(0)}</div><h3 data-i18n="carName"></h3><p id="garage-car-summary"></p></div>
+          <div class="car-upgrade-grid">${CAR_UPGRADE_IDS.map(id=>`<article class="car-upgrade-card">
+            <h3 data-i18n="${carUpgradeNames[id]}"></h3><div class="weapon-level-row"><span id="car-level-${id}"></span><span class="upgrade-steps" aria-hidden="true">${Array.from({length:MAX_CAR_UPGRADE},(_,step)=>`<i id="car-upgrade-step-${id}-${step}"></i>`).join('')}</span></div>
+            <p id="car-current-${id}" class="car-current-stats"></p><p id="car-next-${id}" class="car-next-stats"></p><button id="upgrade-car-${id}" class="weapon-upgrade-button" type="button"></button>
+          </article>`).join('')}</div>
+          <p class="garage-help" data-i18n="carUpgradeHelp"></p>
+        </section>
       </div>
     </div>
     <div id="overlay" class="overlay is-visible">
@@ -206,6 +223,8 @@ armory.hidden = true;
 let resumeAfterArmory = false;
 let displayedArmoryXp = -1;
 let displayedArmoryCoins = -1;
+let displayedMaxHealth = -1;
+let armoryTab: 'weapons' | 'car' = 'weapons';
 const xpLevel = element('xp-level');
 const xpTotal = element('xp-total');
 const xpFill = element('xp-fill');
@@ -292,6 +311,45 @@ function refreshArmory(): void {
     const next = weaponSpec(spec.id, level + 1);
     preview.textContent = t('weaponUpgradeNext', { damage: formatDecimal(next.damage), rate: formatDecimal(1 / next.interval), ammo: formatNumber(next.ammo) });
   }
+  refreshGarage();
+}
+
+function refreshGarage(): void {
+  const stats=carUpgradeStats(player.carUpgrades);
+  htmlIfChanged(element('garage-car-preview'),carGarageIcon(stats.armor));
+  element('garage-car-preview').setAttribute('aria-label',`${t('carName')} · ${t('carArmorStats',{health:formatNumber(stats.maxHealth),pieces:formatNumber(stats.armor)})}`);
+  textIfChanged(element('garage-car-summary'),t('carArmorStats',{health:formatNumber(stats.maxHealth),pieces:formatNumber(stats.armor)}));
+  for (const id of CAR_UPGRADE_IDS) {
+    const level=player.carLevel(id);
+    const next=carUpgradeStats({...player.carUpgrades,[id]:level+1});
+    const describe=(value:typeof stats):string=>id==='armor' ? t('carArmorStats',{health:formatNumber(value.maxHealth),pieces:formatNumber(value.armor)})
+      : id==='boost-reserve' ? t('carReserveStats',{seconds:formatDecimal(value.boostCapacity/.48)})
+      : t('carPowerStats',{speed:formatDecimal(9*value.boostPower*3.6)});
+    textIfChanged(element(`car-level-${id}`),t('weaponUpgradeLevel',{level:formatNumber(level),max:formatNumber(MAX_CAR_UPGRADE)}));
+    for(let step=0;step<MAX_CAR_UPGRADE;step++) element(`car-upgrade-step-${id}-${step}`).classList.toggle('is-filled',step<level);
+    textIfChanged(element(`car-current-${id}`),describe(stats));
+    textIfChanged(element(`car-next-${id}`),t('carNextStats',{stats:describe(next)}));
+    const cost=carUpgradeCost(id,level);
+    element(`car-next-${id}`).hidden=cost===null;
+    const button=element<HTMLButtonElement>(`upgrade-car-${id}`);
+    button.disabled=cost===null||player.coins<cost;
+    button.textContent=cost===null?t('weaponUpgradeMax'):t('weaponUpgradeBuy',{level:formatNumber(level+1),coins:formatNumber(cost)});
+    button.title=cost!==null&&player.coins<cost?t('needCoins',{coins:formatNumber(cost-player.coins)}):button.textContent;
+    button.setAttribute('aria-label',`${t(carUpgradeNames[id])} · ${button.textContent} · ${button.title}`);
+  }
+  textIfChanged(element('armory-title'),t(armoryTab==='car'?'garageTitle':'armoryTitle'));
+}
+
+function setArmoryTab(tab:'weapons'|'car',focus=false):void {
+  armoryTab=tab;
+  for(const name of ['weapons','car'] as const) {
+    const active=name===tab;
+    const button=element<HTMLButtonElement>(`armory-tab-${name}`);
+    button.setAttribute('aria-selected',String(active)); button.tabIndex=active?0:-1;
+    element(name==='weapons'?'weapons-pane':'car-pane').hidden=!active;
+  }
+  refreshArmory();
+  if(focus) element(`armory-tab-${tab}`).focus();
 }
 
 function updateAudioButton(): void {
@@ -321,7 +379,8 @@ function attributeIfChanged(node: HTMLElement, name: string, value: string): voi
 
 function updateHud(snapshot?: GameSnapshot): void {
   const charge = snapshot?.boost ?? 1;
-  const health = snapshot?.health ?? MAX_HEALTH;
+  const maxHealth = snapshot?.maxHealth ?? carUpgradeStats(player.carUpgrades).maxHealth;
+  const health = snapshot?.health ?? maxHealth;
   const weapon = snapshot?.weapon;
   const id = weapon?.id ?? loadout.selected;
   const spec = weaponSpec(id, weapon?.level ?? player.weaponLevel(id));
@@ -344,12 +403,17 @@ function updateHud(snapshot?: GameSnapshot): void {
   attributeIfChanged(boostMeter, 'aria-valuenow', String(percentage));
   attributeIfChanged(boostMeter, 'aria-label', t('boostReserve'));
   attributeIfChanged(boostMeter, 'aria-valuetext', t('boostMeter', { charge: formatPercent(charge) }));
-  fillIfChanged(healthFill, health / MAX_HEALTH);
-  fillIfChanged(healthTrail, health / MAX_HEALTH);
-  textIfChanged(healthValue, formatPercent(health / MAX_HEALTH));
+  fillIfChanged(healthFill, health / maxHealth);
+  fillIfChanged(healthTrail, health / maxHealth);
+  textIfChanged(healthValue, formatPercent(health / maxHealth));
+  attributeIfChanged(healthMeter, 'aria-valuemax', String(maxHealth));
+  if(displayedMaxHealth!==maxHealth) {
+    healthMeter.style.setProperty('--health-segment',`${IMPACT_DAMAGE/maxHealth*100}%`);
+    displayedMaxHealth=maxHealth;
+  }
   attributeIfChanged(healthMeter, 'aria-valuenow', String(health));
   attributeIfChanged(healthMeter, 'aria-label', t('health'));
-  attributeIfChanged(healthMeter, 'aria-valuetext', t('healthMeter', { health: formatPercent(health / MAX_HEALTH) }));
+  attributeIfChanged(healthMeter, 'aria-valuetext', t('healthMeter', { health: formatPercent(health / maxHealth) }));
   healthPanel.classList.toggle('is-low', health <= IMPACT_DAMAGE);
   impactFlash.style.opacity = String(status === 'running' && impactPause.active
     ? 0.55 * Math.sqrt(impactPause.remaining / IMPACT_PAUSE_SECONDS) : 0);
@@ -368,7 +432,7 @@ function updateHud(snapshot?: GameSnapshot): void {
   const nextLoop = snapshot ? loopsBetween(snapshot.car.x, snapshot.car.x + 35)[0] : undefined;
   let hint = '';
   if (status === 'running') {
-    if (impactPause.active) hint = t('impactNotice', { damage: formatPercent(IMPACT_DAMAGE / MAX_HEALTH) });
+    if (impactPause.active) hint = t('impactNotice', { damage: formatPercent(IMPACT_DAMAGE / maxHealth) });
     else if (snapshot && snapshot.invincibilityRemaining > 0) hint = t('invincibleNotice');
     else if (snapshot?.loop) hint = t('loopHold');
     else if (police && police.visibility > 0.3 && Math.abs(police.gap) < 23) hint = t(police.gap < 0 ? 'policeAhead' : 'policeWarning');
@@ -437,6 +501,7 @@ function updateLanguage(): void {
   element('weapon-aim').setAttribute('aria-label', t('turnWeapon'));
   element('weapon-aim').title = t('turnWeapon');
   armoryButton.setAttribute('aria-label', t('armory'));
+  element('armory-tabs').setAttribute('aria-label',t('garageTitle'));
   armoryButton.title = `${t('armory')} (G)`;
   armoryButton.setAttribute('aria-keyshortcuts', 'G');
   touchLayoutButton.setAttribute('aria-label', t('touchLayout'));
@@ -470,7 +535,7 @@ function start(): void {
     restartAvailableAt = 0;
     primaryButton.disabled = false;
     physics.dispose();
-    physics = new GamePhysics(7, { id: loadout.selected, xp: experience.total, upgrades: player.weaponUpgrades });
+    physics = new GamePhysics(7, { id: loadout.selected, xp: experience.total, upgrades: player.weaponUpgrades, carUpgrades: player.carUpgrades });
     audio.reset();
     accumulator = 0;
     holdInterpolation = false;
@@ -627,6 +692,22 @@ function closeArmory(): void {
 }
 armoryButton.addEventListener('click', openArmory);
 armoryClose.addEventListener('click', closeArmory);
+for (const tab of ['weapons','car'] as const) {
+  element(`armory-tab-${tab}`).addEventListener('click',()=>setArmoryTab(tab,true));
+  element(`armory-tab-${tab}`).addEventListener('keydown',event=>{
+    if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.code))return;
+    event.preventDefault();
+    setArmoryTab(event.code==='Home'?'weapons':event.code==='End'?'car':tab==='car'?'weapons':'car',true);
+  });
+}
+for (const id of CAR_UPGRADE_IDS) element(`upgrade-car-${id}`).addEventListener('click',()=>{
+  if(!physics||armory.hidden||armoryTab!=='car'||!recordDialog.hidden||touchLayout.editing) return;
+  if(player.upgradeCar(id)!=='upgraded') return;
+  physics.upgradeCar(player.carUpgrades);
+  refreshArmory(); updateHud(physics.snapshot(1));
+  if(element<HTMLButtonElement>(`upgrade-car-${id}`).disabled) element('armory-tab-car').focus();
+  void audio.unlock().then(()=>audio.play('click'));
+});
 function openTouchLayout(): void {
   if (status === 'loading' || status === 'error' || !armory.hidden || touchLayout.editing || !recordDialog.hidden) return;
   resumeAfterTouchLayout = status === 'running';
@@ -723,13 +804,14 @@ window.addEventListener('keydown', (event) => {
   const weaponSlot = slot ? Number(slot[1]) - 1 : keySlot;
   if (weaponSlot >= 0) {
     event.preventDefault();
-    if (!event.repeat) selectWeapon(weaponSlot);
+    if (!event.repeat && (armory.hidden || armoryTab==='weapons')) selectWeapon(weaponSlot);
     return;
   }
   if (!armory.hidden) {
     if (event.code === 'Escape') { event.preventDefault(); closeArmory(); }
     if (event.code === 'Tab') {
-      const buttons = [...armory.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+      const buttons = [armoryClose,element<HTMLButtonElement>(`armory-tab-${armoryTab}`),
+        ...element(armoryTab==='car'?'car-pane':'weapons-pane').querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
       const first = buttons[0]; const last = buttons.at(-1);
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
@@ -904,7 +986,7 @@ function renderFrame(now: number): void {
 async function boot(): Promise<void> {
   try {
     await RAPIER.init();
-    physics = new GamePhysics(7, { id: loadout.selected, xp: experience.total, upgrades: player.weaponUpgrades });
+    physics = new GamePhysics(7, { id: loadout.selected, xp: experience.total, upgrades: player.weaponUpgrades, carUpgrades: player.carUpgrades });
     visuals = new GameVisuals(sceneElement);
     const snapshot = physics.snapshot(0);
     visuals.render(snapshot, physics, 0, false);
@@ -920,5 +1002,6 @@ async function boot(): Promise<void> {
   }
 }
 
+setArmoryTab('weapons');
 updateLanguage();
 void boot();

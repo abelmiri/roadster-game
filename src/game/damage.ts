@@ -1,3 +1,5 @@
+import { carUpgradeLevel } from './carUpgrades';
+
 export const MAX_HEALTH = 100;
 export const IMPACT_DAMAGE = 25;
 export const IMPACT_PAUSE_SECONDS = 0.5;
@@ -15,20 +17,41 @@ export function vehicleDamageStage(health: number): 0 | 1 | 2 | 3 | 4 {
 
 /** Damage and protection use simulation time, so pausing cannot spend immunity. */
 export class VehicleDamage {
-  health = MAX_HEALTH;
+  hullHealth = MAX_HEALTH;
+  armorMask = 0;
+  private armorLevel = 0;
   impactSerial = 0;
   invincibilityRemaining = 0;
 
   get invincible(): boolean { return this.invincibilityRemaining > 0; }
+  get health(): number {
+    let pieces = 0;
+    for (let mask = this.armorMask; mask; mask >>= 1) pieces += mask & 1;
+    return this.hullHealth + pieces * IMPACT_DAMAGE;
+  }
+  get maxHealth(): number { return MAX_HEALTH + this.armorLevel * IMPACT_DAMAGE; }
+
+  constructor(armorLevel = 0) { this.upgradeArmor(armorLevel); }
+
+  upgradeArmor(level: number): void {
+    const next = carUpgradeLevel(level);
+    if (next <= this.armorLevel) return;
+    if (this.hullHealth > 0) for (let index = this.armorLevel; index < next; index++) this.armorMask |= 1 << index;
+    this.armorLevel = next;
+  }
 
   step(dt: number): void {
     this.invincibilityRemaining = Math.max(0, this.invincibilityRemaining - dt);
     if (this.invincibilityRemaining < 1e-9) this.invincibilityRemaining = 0;
   }
 
-  hit(): boolean {
+  hit(preferredArmor?: number): boolean {
     if (this.health === 0 || this.invincible) return false;
-    this.health = Math.max(0, this.health - IMPACT_DAMAGE);
+    if (this.armorMask) {
+      const preferred = preferredArmor === undefined ? 0 : 1 << preferredArmor;
+      const lost = this.armorMask & preferred ? preferred : this.armorMask & -this.armorMask;
+      this.armorMask &= ~lost;
+    } else this.hullHealth = Math.max(0, this.hullHealth - IMPACT_DAMAGE);
     this.impactSerial++;
     this.invincibilityRemaining = INVINCIBLE_SECONDS;
     return true;

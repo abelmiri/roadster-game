@@ -8,9 +8,11 @@ let application;
 let developmentApplication;
 const stubs = {
   physics: `import {VehicleWeapon} from ${JSON.stringify(path.resolve('src/game/weapons.ts'))};
+  import {VehicleDamage} from ${JSON.stringify(path.resolve('src/game/damage.ts'))};
   export const FIXED_STEP=1/120; export class GamePhysics {
     weapon=new VehicleWeapon();
-    constructor(x,loadout){this.weapon=new VehicleWeapon('machine-gun',loadout?.upgrades);if(loadout)this.weapon.equip(loadout.id,loadout.xp);Object.assign(globalThis.snapshot,{distance:0,health:100,impactSerial:0,invincibilityRemaining:0,crashed:false,wrecked:false,loopCompletions:0,obstaclesDestroyed:0,policeDestroyed:0,runXp:0,weapon:this.weapon.snapshot()});globalThis.dead=false}
+    damage=new VehicleDamage();
+    constructor(x,loadout){this.weapon=new VehicleWeapon('machine-gun',loadout?.upgrades);this.damage=new VehicleDamage(loadout?.carUpgrades?.armor??0);if(loadout)this.weapon.equip(loadout.id,loadout.xp);Object.assign(globalThis.snapshot,{distance:0,health:this.damage.health,hullHealth:100,maxHealth:this.damage.maxHealth,armorMask:this.damage.armorMask,carUpgrades:loadout?.carUpgrades??{},impactSerial:0,invincibilityRemaining:0,crashed:false,wrecked:false,loopCompletions:0,obstaclesDestroyed:0,policeDestroyed:0,runXp:0,weapon:this.weapon.snapshot()});globalThis.dead=false}
     get impactSerial(){return globalThis.snapshot.impactSerial}
     get explosionSerial(){return this.weapon.destructionSerial}
     stepWreck(){globalThis.wreckSteps++}
@@ -18,10 +20,11 @@ const stubs = {
     get crashed(){return globalThis.dead} snapshot(alpha){globalThis.lastAlpha=alpha;globalThis.snapshot.weapon=this.weapon.snapshot();return globalThis.snapshot} dispose(){}
     equipWeapon(id,xp){return this.weapon.equip(id,xp)} weaponAmmo(id){return this.weapon.ammoFor(id)}
     upgradeWeapon(id,level){this.weapon.setUpgradeLevel(id,level)}
+    upgradeCar(upgrades){const s=globalThis.snapshot;this.damage.upgradeArmor(upgrades.armor??0);Object.assign(s,{carUpgrades:upgrades,health:this.damage.health,hullHealth:this.damage.hullHealth,maxHealth:this.damage.maxHealth,armorMask:this.damage.armorMask})}
     step(controls){globalThis.steps++;globalThis.lastControls=controls;const s=globalThis.snapshot;
       this.weapon.step(1/120,controls,{...s.car,vx:14,vy:0},[],()=>{});
       if(globalThis.explosionNext){globalThis.explosionNext=false;this.weapon.destroySerial++}
-      if(globalThis.impactNext){globalThis.impactNext=false;s.health-=25;s.impactSerial++;s.invincibilityRemaining=1.5;if(s.health===0)globalThis.dead=s.crashed=s.wrecked=true}
+      if(globalThis.impactNext){globalThis.impactNext=false;this.damage.armorMask=s.armorMask??0;this.damage.hullHealth=s.health-(this.damage.health-this.damage.hullHealth);this.damage.invincibilityRemaining=0;this.damage.hit();Object.assign(s,{health:this.damage.health,hullHealth:this.damage.hullHealth,armorMask:this.damage.armorMask});s.impactSerial++;s.invincibilityRemaining=1.5;if(s.health===0)globalThis.dead=s.crashed=s.wrecked=true}
       else s.invincibilityRemaining=Math.max(0,s.invincibilityRemaining-1/120);
     }
   }`,
@@ -44,8 +47,8 @@ before(async () => {
 });
 
 const weaponIds = ['machine-gun','twin-gun','gatling-gun','cannon','rocket-launcher','missile-launcher','laser-gun','plasma-cannon'];
-const progressSave = (coins = 0, ownedWeapons = ['machine-gun'], record = { distance: 0, name: '', needsName: false }, weaponUpgrades = {}) =>
-  JSON.stringify({ version: 1, coins, ownedWeapons, weaponUpgrades, record, playerName: record.name });
+const progressSave = (coins = 0, ownedWeapons = ['machine-gun'], record = { distance: 0, name: '', needsName: false }, weaponUpgrades = {}, carUpgrades = {}) =>
+  JSON.stringify({ version: 1, coins, ownedWeapons, weaponUpgrades, carUpgrades, record, playerName: record.name });
 
 async function page(language = 'en-US', saved = {}, development = false, reducedMotion = false) {
   const nodes = [];
@@ -54,7 +57,7 @@ async function page(language = 'en-US', saved = {}, development = false, reduced
   const windowEvents = new Map();
   class Element {
     constructor(tag, attrs = {}) {
-      this.tag = tag; this.attrs = attrs; this.dataset = {}; this.style = {}; this.events = new Map();
+      this.tag = tag; this.attrs = attrs; this.dataset = {}; this.style = { setProperty(key,value){this[key]=value} }; this.events = new Map();
       this.classes = new Set((attrs.class ?? '').split(/\s+/)); this.textContent = ''; this.hidden = false; this.animations = [];
       this.classList = {
         add: value => this.classes.add(value), remove: value => this.classes.delete(value),
@@ -90,6 +93,8 @@ async function page(language = 'en-US', saved = {}, development = false, reduced
     blur() { document.activeElement = null; } remove() {} appendChild() {} setPointerCapture() {}
     querySelector(selector) { return document.querySelector(selector); }
     querySelectorAll(selector) {
+      if(this.attrs.id==='car-pane'&&selector==='button:not(:disabled)') return ['armor','boost-reserve','boost-power'].map(id=>ids.get(`upgrade-car-${id}`)).filter(button=>!button.disabled);
+      if(this.attrs.id==='weapons-pane'&&selector==='button:not(:disabled)') return weaponIds.flatMap(id=>[ids.get(`equip-${id}`),ids.get(`upgrade-${id}`)]).filter(button=>!button.disabled);
       if (this.attrs.id === 'touch-controls' && selector === 'button') return ['fire', 'suction', 'aim', 'boost', 'jump'].map(id => ids.get(`touch-${id}`));
       if (this.attrs.id === 'touch-layout-editor' && selector === 'select, input, button') return ['control', 'size', 'reset', 'cancel', 'save'].map(id => ids.get(`touch-layout-${id}`));
       return document.querySelectorAll(selector);
@@ -876,4 +881,62 @@ test('upgrading an unequipped gun preserves the active loadout and requires enou
   assert.equal(starter.context.snapshot.weapon.level, 1);
   assert.equal(starter.ids.get('coin-total').textContent, '0');
   assert.equal(starter.context.snapshot.weapon.ammo, 96);
+});
+
+test('garage tabs show one car, charge for all four levels, update the HUD, and persist every upgrade',async()=>{
+  const p=await page('fa-IR',{'roadster-progress':progressSave(100000)});
+  assert.equal(p.ids.get('car-pane').hidden,true);
+  await p.click('primary-button'); await p.click('armory-button');
+  await p.click('armory-tab-car'); p.advance(17);
+  assert.equal(p.context.audioRunning,false);
+  assert.equal(p.ids.get('weapons-pane').hidden,true);
+  assert.equal(p.ids.get('car-pane').hidden,false);
+  assert.equal(p.ids.get('armory-tab-car').getAttribute('aria-selected'),'true');
+  assert.equal(p.ids.get('armory-title').textContent,'گاراژ رودستر');
+  assert.equal((p.ids.get('garage-car-preview').innerHTML.match(/<svg/g)??[]).length,1);
+  assert.match(p.ids.get('upgrade-car-armor').textContent,/۴٬۰۰۰/);
+  assert.match(p.ids.get('upgrade-car-boost-reserve').textContent,/۳٬۰۰۰/);
+  for(const id of ['armor','boost-reserve','boost-power']) for(let level=1;level<=4;level++) await p.click(`upgrade-car-${id}`);
+  const saved=JSON.parse(p.storage.get('roadster-progress'));
+  assert.deepEqual(saved.carUpgrades,{armor:4,'boost-reserve':4,'boost-power':4});
+  assert.equal(saved.coins,18750);
+  assert.equal(p.context.snapshot.maxHealth,200);
+  assert.equal(p.context.snapshot.health,200);
+  assert.equal(p.context.snapshot.armorMask,15);
+  assert.equal(p.ids.get('health-meter').getAttribute('aria-valuemax'),'200');
+  assert.equal(p.ids.get('health-meter').style['--health-segment'],'12.5%');
+  assert.equal((p.ids.get('garage-car-preview').innerHTML.match(/data-armor-part=/g)??[]).length,4);
+  for(const id of ['armor','boost-reserve','boost-power']) {
+    assert.equal(p.ids.get(`upgrade-car-${id}`).disabled,true);
+    assert.equal(p.ids.get(`car-next-${id}`).hidden,true);
+    await p.click(`upgrade-car-${id}`);
+  }
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins,18750);
+  const restored=await page('fa-IR',Object.fromEntries(p.storage));
+  assert.equal(restored.context.snapshot.health,200);
+  assert.equal(restored.context.snapshot.armorMask,15);
+  assert.deepEqual(JSON.parse(restored.storage.get('roadster-progress')).carUpgrades,saved.carUpgrades);
+  p.key('Escape'); p.advance(34);
+  assert.equal(p.context.audioRunning,true);
+});
+
+test('garage navigation traps focus in its visible tab and insufficient funds cannot buy upgrades',async()=>{
+  const p=await page('en-US',{'roadster-xp':'100','roadster-progress':progressSave(3999,['machine-gun','twin-gun'])});
+  await p.click('armory-button');
+  p.ids.get('armory-tab-weapons').dispatch('keydown',{code:'ArrowRight'});
+  assert.equal(p.ids.get('car-pane').hidden,false);
+  assert.equal(p.context.document.activeElement,p.ids.get('armory-tab-car'));
+  assert.equal(p.ids.get('upgrade-car-armor').disabled,true);
+  await p.click('upgrade-car-armor');
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins,3999);
+  p.key('Digit2'); assert.equal(p.context.snapshot.weapon.id,'machine-gun','car tab must not activate hidden weapon shortcuts');
+  await p.click('upgrade-car-boost-reserve');
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins,999);
+  p.ids.get('armory-tab-car').focus(); p.key('Tab');
+  assert.equal(p.context.document.activeElement,p.ids.get('armory-close'),'all upgrades are disabled, so Tab wraps to close');
+  p.key('Tab','keydown',{shiftKey:true});
+  assert.equal(p.context.document.activeElement,p.ids.get('armory-tab-car'));
+  p.ids.get('armory-tab-car').dispatch('keydown',{code:'Home'});
+  assert.equal(p.ids.get('weapons-pane').hidden,false);
+  p.key('Digit2'); assert.equal(p.context.snapshot.weapon.id,'twin-gun');
 });

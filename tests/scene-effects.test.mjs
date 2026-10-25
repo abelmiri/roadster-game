@@ -6,14 +6,17 @@ import { build } from 'esbuild';
 import { Matrix4, Vector3, MeshLambertMaterial } from 'three';
 
 let CityBuildings, ObstacleDebris, CarBodyDamage, createRoadsterBody;
+let CarArmorVisual, carGarageIcon;
 before(async () => {
   const outdir = path.resolve('node_modules/.cache/roadster-scene-tests');
-  await build({ entryPoints: ['src/game/cityBuildings.ts', 'src/game/obstacleDebris.ts', 'src/game/carBodyDamage.ts', 'src/game/roadsterModel.ts'], bundle: true,
+  await build({ entryPoints: ['src/game/cityBuildings.ts', 'src/game/obstacleDebris.ts', 'src/game/carBodyDamage.ts', 'src/game/roadsterModel.ts', 'src/game/carArmor.ts', 'src/game/carGarageIcon.ts'], bundle: true,
     platform: 'node', format: 'esm', outdir, outExtension: { '.js': '.mjs' }, external: ['three'] });
   ({ CityBuildings } = await import(pathToFileURL(path.join(outdir, 'cityBuildings.mjs')).href));
   ({ ObstacleDebris } = await import(pathToFileURL(path.join(outdir, 'obstacleDebris.mjs')).href));
   ({ CarBodyDamage } = await import(pathToFileURL(path.join(outdir, 'carBodyDamage.mjs')).href));
   ({ createRoadsterBody } = await import(pathToFileURL(path.join(outdir, 'roadsterModel.mjs')).href));
+  ({ CarArmorVisual } = await import(pathToFileURL(path.join(outdir, 'carArmor.mjs')).href));
+  ({ carGarageIcon } = await import(pathToFileURL(path.join(outdir, 'carGarageIcon.mjs')).href));
 });
 
 function positions(mesh) {
@@ -61,6 +64,40 @@ test('fragment storage stays bounded under repeated destruction and fully expire
     for (let i = 0; i < 180; i++) debris.update([], 500, 1 / 60);
     assert.equal(debris.activeCount, 0);
   } finally { debris.dispose(); }
+});
+
+test('the four reference armor pieces detach once, fall independently, pause, and restore on restart',()=>{
+  const armor=new CarArmorVisual();
+  const state={car:{x:10,y:4,angle:.1},armorMask:15,wrecked:false,distance:10,impactSerial:0,speed:14,suspensionOffset:0,suspensionPitch:0};
+  try {
+    armor.update(state,0);
+    assert.equal(armor.attached.children.filter(part=>part.visible).length,4);
+    assert.deepEqual(armor.attached.children.map(part=>part.name),['armor-front','armor-door','armor-roof','armor-rear']);
+    for(let index=0;index<4;index++) {
+      state.armorMask&=~(1<<index); state.impactSerial++;
+      armor.update(state,0,false);
+      assert.equal(armor.attached.children[index].visible,false);
+      assert.equal(armor.debris.children[index].visible,true);
+      assert.equal(armor.debris.children[index].children[0].geometry,armor.attached.children[index].children[0].geometry,'the dropped plate must retain the reference silhouette');
+    }
+    const before=armor.debris.children.map(part=>part.position.clone());
+    armor.update(state,1,false);
+    assert.ok(armor.debris.children.every((part,index)=>part.position.equals(before[index])));
+    armor.update(state,.06,true,{hasRoad:()=>true});
+    assert.ok(armor.debris.children.every((part,index)=>!part.position.equals(before[index])));
+    assert.equal(armor.debris.children.length,4,'detached plates must use a bounded pool');
+    for(let frame=0;frame<110;frame++)armor.update(state,.06,true,{hasRoad:()=>true});
+    assert.equal(armor.debris.children.filter(part=>part.visible).length,0);
+    armor.update({...state,armorMask:15,impactSerial:0,distance:0},0);
+    assert.equal(armor.attached.children.filter(part=>part.visible).length,4);
+    assert.equal(armor.debris.children.filter(part=>part.visible).length,0);
+    for(let level=0;level<=4;level++) {
+      const preview=carGarageIcon(level);
+      assert.equal((preview.match(/<svg/g)??[]).length,1);
+      assert.equal((preview.match(/data-armor-part=/g)??[]).length,level);
+      assert.equal(/NaN|Infinity/.test(preview),false);
+    }
+  } finally {armor.dispose();}
 });
 
 test('weapon explosions scatter unique fragments in both directions for obstacles and police', () => {

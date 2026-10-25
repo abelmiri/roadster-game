@@ -1,4 +1,5 @@
 import { canEquip, WEAPONS, MAX_WEAPON_UPGRADE, weaponUpgradeCost, type WeaponId, type WeaponUpgrades } from './weapons';
+import { CAR_UPGRADE_IDS, MAX_CAR_UPGRADE, carUpgradeCost, type CarUpgradeId, type CarUpgrades } from './carUpgrades';
 
 type ProgressStorage = Pick<Storage, 'getItem' | 'setItem'>;
 type RecordEntry = { distance: number; name: string; needsName: boolean };
@@ -16,6 +17,7 @@ export class PlayerProgress {
   record: RecordEntry = { distance: 0, name: '', needsName: false };
   private readonly owned = new Set<WeaponId>(['machine-gun']);
   private readonly upgrades: WeaponUpgrades = {};
+  private readonly vehicleUpgrades: CarUpgrades = {};
   private collected = [0, 0, 0];
   private finished = false;
 
@@ -37,6 +39,10 @@ export class PlayerProgress {
           const level = saved.weaponUpgrades?.[spec.id];
           if (this.ownsWeapon(spec.id) && validCount(level) && level <= MAX_WEAPON_UPGRADE) this.upgrades[spec.id] = level;
         }
+        for (const id of CAR_UPGRADE_IDS) {
+          const level = saved.carUpgrades?.[id];
+          if (validCount(level) && level <= MAX_CAR_UPGRADE) this.vehicleUpgrades[id] = level;
+        }
       }
     } catch { /* Recover any older best score independently of a damaged save. */ }
     try {
@@ -50,6 +56,21 @@ export class PlayerProgress {
   ownsWeapon(id: string): boolean { return this.owned.has(id as WeaponId); }
   weaponLevel(id: string): number { return this.ownsWeapon(id) ? this.upgrades[id as WeaponId] ?? 0 : 0; }
   get weaponUpgrades(): WeaponUpgrades { return { ...this.upgrades }; }
+  get carUpgrades(): CarUpgrades { return { ...this.vehicleUpgrades }; }
+  carLevel(id: CarUpgradeId): number { return this.vehicleUpgrades[id] ?? 0; }
+
+  upgradeCar(id: string): UpgradeResult {
+    if (!CAR_UPGRADE_IDS.includes(id as CarUpgradeId)) return 'unknown';
+    const key = id as CarUpgradeId;
+    const level = this.carLevel(key);
+    const cost = carUpgradeCost(key, level);
+    if (cost === null) return 'max-level';
+    if (this.coins < cost) return 'insufficient-coins';
+    this.coins -= cost;
+    this.vehicleUpgrades[key] = level + 1;
+    this.persist();
+    return 'upgraded';
+  }
 
   upgradeWeapon(id: string): UpgradeResult {
     const spec = WEAPONS.find(weapon => weapon.id === id);
@@ -133,7 +154,8 @@ export class PlayerProgress {
   private persist(): void {
     try {
       this.storage?.setItem(STORAGE_KEY, JSON.stringify({ version: 1, coins: this.coins,
-        ownedWeapons: [...this.owned], weaponUpgrades: this.upgrades, record: this.record, playerName: this.playerName }));
+        ownedWeapons: [...this.owned], weaponUpgrades: this.upgrades, carUpgrades: this.vehicleUpgrades,
+        record: this.record, playerName: this.playerName }));
     } catch { /* Keep progress for this session when persistence is unavailable. */ }
   }
 }

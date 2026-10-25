@@ -5,6 +5,7 @@ import { sprungBodyPose } from './vehicle';
 import { createRoadsterBody, createRoadsterWheel } from './roadsterModel';
 import { CarSmoke } from './smoke';
 import { CarBodyDamage } from './carBodyDamage';
+import { CarArmorVisual } from './carArmor';
 import { CityBuildings } from './cityBuildings';
 import { ObstacleDebris } from './obstacleDebris';
 import { ImpactSparks } from './impactSparks';
@@ -79,6 +80,7 @@ export class GameVisuals {
   private themeDistance = -1;
   private readonly carGroup = createRoadsterBody();
   private readonly bodyDamage = new CarBodyDamage(this.carGroup);
+  private readonly armor = new CarArmorVisual();
   private readonly wheelGroups: [THREE.Group, THREE.Group];
   private readonly fanGlow: THREE.Mesh;
   private readonly smoke = new CarSmoke();
@@ -122,7 +124,8 @@ export class GameVisuals {
     this.createSky();
     this.backdrop.add(this.city.group);
     this.createCityMotion();
-    this.carGroup.add(this.weapon.group);
+    this.carGroup.add(this.weapon.group, this.armor.attached);
+    this.worldGroup.add(this.armor.debris);
     this.wheelGroups = [createRoadsterWheel(), createRoadsterWheel()];
     this.worldGroup.add(this.carGroup, ...this.wheelGroups, this.smoke.mesh, this.debris.mesh, this.sparks.mesh,
       this.police.group, this.policeWreck.group, this.policeSmoke.mesh, this.combat.group, this.depot.group);
@@ -429,7 +432,8 @@ export class GameVisuals {
     const body = sprungBodyPose(snapshot.car, snapshot.suspensionOffset, snapshot.suspensionPitch);
     this.carGroup.position.set(body.x, body.y, 1.15);
     this.carGroup.rotation.z = body.angle;
-    this.bodyDamage.update(snapshot.wrecked ? 0 : snapshot.health);
+    this.bodyDamage.update(snapshot.wrecked ? 0 : snapshot.hullHealth);
+    this.armor.update(snapshot, delta, running, physics.generator);
     const carVisible = carVisibleDuringProtection(snapshot.invincibilityRemaining, impactFrozen || !running || snapshot.crashed);
     this.carGroup.visible = carVisible;
     snapshot.wheels.forEach((pose, index) => {
@@ -514,6 +518,7 @@ export class GameVisuals {
     window.removeEventListener('resize', this.resize);
     for (const view of this.chunks.values()) disposeGroup(view.group);
     this.bodyDamage.dispose();
+    this.armor.dispose();
     this.smoke.dispose();
     this.debris.dispose();
     this.sparks.dispose();

@@ -5,12 +5,14 @@ import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 
 let PlayerProgress, WEAPONS, WeaponLoadout, weaponUpgradeCost;
+let CAR_UPGRADE_IDS, carUpgradeCost, carUpgradeStats;
 before(async () => {
   const outdir = path.resolve('node_modules/.cache/roadster-economy-tests');
-  await build({ entryPoints: ['src/game/playerProgress.ts', 'src/game/weapons.ts'], bundle: true,
+  await build({ entryPoints: ['src/game/playerProgress.ts', 'src/game/weapons.ts', 'src/game/carUpgrades.ts'], bundle: true,
     platform: 'node', format: 'esm', outdir, outExtension: { '.js': '.mjs' } });
   ({ PlayerProgress } = await import(pathToFileURL(path.join(outdir, 'playerProgress.mjs')).href));
   ({ WEAPONS, WeaponLoadout, weaponUpgradeCost } = await import(pathToFileURL(path.join(outdir, 'weapons.mjs')).href));
+  ({ CAR_UPGRADE_IDS, carUpgradeCost, carUpgradeStats } = await import(pathToFileURL(path.join(outdir, 'carUpgrades.mjs')).href));
 });
 function store(coins = 0, extra = {}) {
   const values = new Map(Object.entries({ 'roadster-progress': JSON.stringify({ version: 1, coins, ownedWeapons: ['machine-gun'] }), ...extra }));
@@ -213,4 +215,46 @@ test('old saves retain their wallet and record; corrupt and unowned upgrade leve
   blocked.collect(30000, 0, 0);
   assert.equal(blocked.upgradeWeapon('machine-gun'), 'upgraded');
   assert.equal(blocked.coins, 0);
+});
+
+test('car upgrades have four exact price steps, debit atomically and persist independently', () => {
+  assert.deepEqual([0,1,2,3].map(level=>carUpgradeCost('armor',level)),[4000,6000,9000,13500]);
+  assert.deepEqual([0,1,2,3].map(level=>carUpgradeCost('boost-reserve',level)),[3000,4500,6750,10125]);
+  const s=store(100000); const p=new PlayerProgress(s.storage);
+  for(const id of CAR_UPGRADE_IDS) {
+    for(let level=0;level<4;level++) {
+      const coins=p.coins; const writes=s.writes.length;
+      assert.equal(p.upgradeCar(id),'upgraded');
+      assert.equal(s.writes.length,writes+1);
+      const saved=JSON.parse(s.values.get('roadster-progress'));
+      assert.equal(saved.coins,coins-carUpgradeCost(id,level));
+      assert.equal(saved.carUpgrades[id],level+1);
+      assert.equal(new PlayerProgress(s.storage).carLevel(id),level+1);
+    }
+    const coins=p.coins;
+    assert.equal(p.upgradeCar(id),'max-level');
+    assert.equal(p.coins,coins);
+  }
+  assert.deepEqual(carUpgradeStats(p.carUpgrades),{armor:4,maxHealth:200,boostCapacity:2,boostPower:1.8});
+  assert.equal(p.upgradeCar('unknown'),'unknown');
+  const copy=p.carUpgrades; copy.armor=0;
+  assert.equal(p.carLevel('armor'),4);
+  p.resetRun(); assert.equal(p.carLevel('armor'),4);
+});
+
+test('insufficient funds and corrupt vehicle levels cannot consume coins or reset older progress', () => {
+  const s=store(3999); const p=new PlayerProgress(s.storage);
+  assert.equal(p.upgradeCar('armor'),'insufficient-coins');
+  assert.equal(p.coins,3999); assert.equal(p.carLevel('armor'),0);
+  assert.equal(s.writes.length,0);
+  for(const invalid of [-1,5,2.5,'4',null,{}]) {
+    s.values.set('roadster-progress',JSON.stringify({version:1,coins:9000,ownedWeapons:['machine-gun','twin-gun'],
+      weaponUpgrades:{'twin-gun':3},carUpgrades:{armor:invalid,'boost-power':2},record:{distance:2000,name:'Driver',needsName:false}}));
+    const restored=new PlayerProgress(s.storage);
+    assert.equal(restored.carLevel('armor'),0);
+    assert.equal(restored.carLevel('boost-power'),2);
+    assert.equal(restored.weaponLevel('twin-gun'),3);
+    assert.equal(restored.record.name,'Driver');
+    assert.equal(restored.coins,9000);
+  }
 });
