@@ -784,7 +784,7 @@ test('new records open a medal form, persist before naming, block gameplay, and 
   assert.equal(p.ids.get('record-title').textContent, 'رکورد جدید!');
   assert.equal(p.ids.get('record-distance').textContent, '۲٬۱۰۱ متر');
   assert.equal(p.ids.get('record-bonus').textContent, 'پاداش رکورد: +۲۵ سکه');
-  assert.equal(p.ids.get('coin-total').textContent, '۱۶۰');
+  assert.equal(p.ids.get('coin-total').textContent, '۲۱۰');
   assert.equal(p.storage.get('roadster-best'), '2101');
   assert.equal(JSON.parse(p.storage.get('roadster-progress')).record.needsName, true);
   p.key('Tab', 'keydown', { shiftKey: true });
@@ -798,7 +798,7 @@ test('new records open a medal form, persist before naming, block gameplay, and 
   assert.equal(p.ids.get('record-name-error').hidden, false);
   const pending = await page('fa-IR', Object.fromEntries(p.storage));
   assert.equal(pending.ids.get('record-dialog').hidden, false);
-  assert.equal(pending.ids.get('coin-total').textContent, '۱۶۰', 'recovering the pending form must not duplicate its bonus');
+  assert.equal(pending.ids.get('coin-total').textContent, '۲۱۰', 'recovering the pending form must not duplicate its bonus');
   pending.ids.get('record-name').value = '  آبل  '; pending.ids.get('record-form').dispatch('submit');
   assert.equal(pending.ids.get('record-dialog').hidden, true);
   assert.equal(pending.ids.get('best-player').textContent, 'آبل');
@@ -806,12 +806,12 @@ test('new records open a medal form, persist before naming, block gameplay, and 
   assert.equal(restored.ids.get('record-dialog').hidden, true);
   assert.equal(restored.ids.get('best-player').textContent, 'آبل');
   assert.match(restored.ids.get('best').innerHTML, /۲٬۱۰۱/);
-  assert.equal(restored.ids.get('coin-total').textContent, '۱۶۰');
+  assert.equal(restored.ids.get('coin-total').textContent, '۲۱۰');
   await restored.click('primary-button');
   restored.context.snapshot.distance = 1800; restored.context.snapshot.health = 25;
   restored.context.impactNext = true; restored.advance(17);
   assert.equal(restored.ids.get('record-dialog').hidden, true, 'a shorter run must not ask for a record name');
-  assert.equal(JSON.parse(restored.storage.get('roadster-progress')).coins, 250, 'only nine distance milestones are paid for the shorter run');
+  assert.equal(JSON.parse(restored.storage.get('roadster-progress')).coins, 350, 'the shorter run earns 90 regular distance coins and its 50-coin milestone');
 });
 
 test('five armory upgrades debit once, affect active ammo immediately, persist, and survive restarting', async () => {
@@ -884,7 +884,7 @@ test('upgrading an unequipped gun preserves the active loadout and requires enou
 });
 
 test('garage tabs show one car, charge for all four levels, update the HUD, and persist every upgrade',async()=>{
-  const p=await page('fa-IR',{'roadster-progress':progressSave(100000)});
+  const p=await page('fa-IR',{'roadster-xp':'19900','roadster-progress':progressSave(100000)});
   assert.equal(p.ids.get('car-pane').hidden,true);
   await p.click('primary-button'); await p.click('armory-button');
   await p.click('armory-tab-car'); p.advance(17);
@@ -921,7 +921,7 @@ test('garage tabs show one car, charge for all four levels, update the HUD, and 
 });
 
 test('garage navigation traps focus in its visible tab and insufficient funds cannot buy upgrades',async()=>{
-  const p=await page('en-US',{'roadster-xp':'100','roadster-progress':progressSave(3999,['machine-gun','twin-gun'])});
+  const p=await page('en-US',{'roadster-xp':'2400','roadster-progress':progressSave(3999,['machine-gun','twin-gun'])});
   await p.click('armory-button');
   p.ids.get('armory-tab-weapons').dispatch('keydown',{code:'ArrowRight'});
   assert.equal(p.ids.get('car-pane').hidden,false);
@@ -932,11 +932,125 @@ test('garage navigation traps focus in its visible tab and insufficient funds ca
   p.key('Digit2'); assert.equal(p.context.snapshot.weapon.id,'machine-gun','car tab must not activate hidden weapon shortcuts');
   await p.click('upgrade-car-boost-reserve');
   assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins,999);
-  p.ids.get('armory-tab-car').focus(); p.key('Tab');
-  assert.equal(p.context.document.activeElement,p.ids.get('armory-close'),'all upgrades are disabled, so Tab wraps to close');
+  p.ids.get('armory-wallet-button').focus(); p.key('Tab');
+  assert.equal(p.context.document.activeElement,p.ids.get('armory-close'),'all upgrades are disabled, so the wallet is the last control');
   p.key('Tab','keydown',{shiftKey:true});
-  assert.equal(p.context.document.activeElement,p.ids.get('armory-tab-car'));
+  assert.equal(p.context.document.activeElement,p.ids.get('armory-wallet-button'));
   p.ids.get('armory-tab-car').dispatch('keydown',{code:'Home'});
   assert.equal(p.ids.get('weapons-pane').hidden,false);
   p.key('Digit2'); assert.equal(p.context.snapshot.weapon.id,'twin-gun');
+});
+
+test('the distance reward bar advances through every goal, shows earned coins, and resets for a new run',async()=>{
+  const p=await page('fa-IR',{'roadster-best':'20000'});
+  const bar=p.ids.get('distance-rewards');
+  assert.equal(bar.classList.contains('is-celebrating'),false);
+  assert.match(p.ids.get('distance-reward-next').textContent,/۱٬۵۰۰.*۵۰/);
+  assert.equal(p.ids.get('distance-reward-fill').style.transform,'scaleX(0)');
+  await p.click('primary-button');
+  p.context.snapshot.distance=1499; p.advance(17);
+  assert.equal(p.ids.get('coin-total').textContent,'۷۰');
+  assert.equal(bar.classList.contains('is-celebrating'),false,'ordinary distance coins should not brighten the bar');
+  p.context.snapshot.distance=1500; p.advance(77);
+  assert.equal(bar.classList.contains('is-celebrating'),true);
+  assert.equal(p.ids.get('coin-total').textContent,'۱۲۰');
+  assert.equal(p.ids.get('distance-reward-earned').textContent,'دریافتی این دور: ۱۲۰ سکه');
+  assert.match(p.ids.get('distance-reward-next').textContent,/۳٬۰۰۰.*۱۲۰/);
+  assert.equal(p.ids.get('distance-reward-mark-0').classList.contains('is-reached'),true);
+  assert.equal(p.ids.get('distance-reward-mark-1').classList.contains('is-reached'),false);
+  assert.equal(p.ids.get('distance-reward-fill').style.transform,'scaleX(0.15)');
+  assert.equal(p.ids.get('distance-reward-meter').getAttribute('aria-valuenow'),'1500');
+  p.context.snapshot.distance=10000; p.advance(137);
+  assert.equal(p.ids.get('coin-total').textContent,'۱٬۹۹۵');
+  assert.equal(p.ids.get('menu-coins').textContent,'۱٬۹۹۵');
+  assert.equal(p.ids.get('distance-reward-fill').style.transform,'scaleX(1)');
+  assert.equal(p.ids.get('distance-reward-next').textContent,'همهٔ جایزه‌های مسیر را گرفتی!');
+  p.context.snapshot.distance=12000; p.advance(197);
+  assert.equal(p.ids.get('distance-reward-meter').getAttribute('aria-valuenow'),'10000');
+  assert.equal(p.ids.get('coin-total').textContent,'۲٬۰۹۵');
+  p.advance(1936);
+  assert.equal(bar.classList.contains('is-celebrating'),true);
+  p.advance(1938);
+  assert.equal(bar.classList.contains('is-celebrating'),false,'the highlight must fade after 1.8 seconds without replaying for the same milestone');
+  p.context.snapshot.health=25; p.context.impactNext=true; p.advance(2257);
+  p.advance(5257); await p.click('primary-button'); p.advance(5274);
+  assert.equal(bar.classList.contains('is-celebrating'),false);
+  assert.equal(p.ids.get('distance-reward-fill').style.transform,'scaleX(0)');
+  assert.equal(p.ids.get('distance-reward-earned').textContent,'دریافتی این دور: ۰ سکه');
+  assert.equal(p.ids.get('coin-total').textContent,'۲٬۰۹۵');
+});
+
+test('menu balance opens a localized earning guide and an unavailable purchase tab without starting the game',async()=>{
+  const p=await page('fa-IR',{'roadster-progress':progressSave(500)});
+  assert.equal(p.ids.get('menu-coins').textContent,'۵۰۰');
+  await p.click('menu-wallet-button');
+  assert.equal(p.ids.get('coin-dialog').hidden,false);
+  assert.equal(p.ids.get('overlay').inert,true);
+  assert.equal(p.ids.get('coin-earn-pane').hidden,false);
+  assert.equal(p.ids.get('coin-buy-pane').hidden,true);
+  assert.equal(p.ids.get('coin-guide-balance').textContent,'۵۰۰');
+  assert.equal(p.ids.get('coin-milestone-distance-0').textContent,'۱٬۵۰۰ متر');
+  assert.equal(p.ids.get('coin-milestone-value-5').textContent,'+۵۰۰ سکه');
+  p.ids.get('coin-tab-earn').dispatch('keydown',{code:'End'});
+  assert.equal(p.ids.get('coin-buy-pane').hidden,false);
+  assert.equal(p.ids.get('coin-earn-pane').hidden,true);
+  assert.equal(p.ids.get('coin-buy-unavailable').textContent,'در حال حاضر امکان خرید سکه وجود ندارد');
+  p.key('KeyG'); p.key('Space'); p.key('Digit8'); await p.click('primary-button'); p.advance(17);
+  assert.equal(p.context.steps,0);
+  assert.equal(p.ids.get('armory').hidden,true);
+  p.ids.get('coin-back-earn').focus(); p.key('Tab');
+  assert.equal(p.context.document.activeElement,p.ids.get('coin-guide-close'));
+  p.key('Tab','keydown',{shiftKey:true});
+  assert.equal(p.context.document.activeElement,p.ids.get('coin-back-earn'));
+  await p.click('coin-back-earn');
+  assert.equal(p.ids.get('coin-earn-pane').hidden,false);
+  p.key('Escape');
+  assert.equal(p.ids.get('coin-dialog').hidden,true);
+  assert.equal(p.ids.get('overlay').inert,false);
+  assert.equal(p.context.document.activeElement,p.ids.get('menu-wallet-button'));
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins,500);
+});
+
+test('coin guide restores an underlying armory and pauses or resumes only the run that opened it',async()=>{
+  const p=await page('en-US',{'roadster-progress':progressSave(500)});
+  await p.click('primary-button'); p.key('KeyF'); p.advance(17);
+  await p.click('armory-button'); await p.click('armory-wallet-button');
+  assert.equal(p.ids.get('armory').inert,true);
+  p.key('Escape'); p.advance(77);
+  assert.equal(p.ids.get('coin-dialog').hidden,true);
+  assert.equal(p.ids.get('armory').hidden,false);
+  assert.equal(p.ids.get('armory').inert,false);
+  assert.equal(p.context.audioRunning,false);
+  p.key('Escape'); p.advance(94);
+  assert.equal(p.context.audioRunning,true);
+  assert.equal(p.context.lastControls.fire,false);
+  await p.click('coin-wallet-button'); p.advance(154);
+  assert.equal(p.context.audioRunning,false);
+  await p.click('coin-guide-close'); p.advance(171);
+  assert.equal(p.context.audioRunning,true);
+  assert.equal(p.context.document.activeElement,p.ids.get('coin-wallet-button'));
+});
+
+test('car upgrades require the displayed player level and never spend XP when purchased',async()=>{
+  const p=await page('fa-IR',{'roadster-xp':'4800','roadster-progress':progressSave(40000)});
+  await p.click('armory-button'); await p.click('armory-tab-car');
+  assert.equal(p.ids.get('upgrade-car-armor').disabled,true);
+  assert.equal(p.ids.get('car-requirement-armor').textContent,'نیاز به سطح ۵۰ · سطح شما ۴۹');
+  await p.click('upgrade-car-armor');
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins,40000);
+  await p.click('armory-close'); await p.click('primary-button');
+  p.context.snapshot.loopCompletions=4; p.advance(17);
+  await p.click('armory-button');
+  assert.equal(p.ids.get('upgrade-car-armor').disabled,false);
+  assert.equal(p.ids.get('car-requirement-armor').classList.contains('is-met'),true);
+  await p.click('upgrade-car-armor');
+  assert.equal(p.storage.get('roadster-xp'),'4900');
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins,36020);
+  assert.equal(p.context.snapshot.maxHealth,125);
+  assert.equal(p.ids.get('upgrade-car-armor').disabled,true);
+  assert.equal(p.ids.get('car-requirement-armor').textContent,'نیاز به سطح ۱۰۰ · سطح شما ۵۰');
+  const restored=await page('fa-IR',Object.fromEntries(p.storage));
+  assert.equal(restored.context.snapshot.armorMask,1);
+  assert.equal(restored.context.snapshot.maxHealth,125);
+  assert.equal(restored.storage.get('roadster-xp'),'4900');
 });

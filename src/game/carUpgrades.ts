@@ -11,6 +11,10 @@ export function carUpgradeCost(id: string, level: number): number | null {
   if (!CAR_UPGRADE_IDS.includes(id as CarUpgradeId) || !Number.isSafeInteger(level) || level < 0 || level >= MAX_CAR_UPGRADE) return null;
   return Math.ceil(STARTING_PRICES[id as CarUpgradeId] * 1.5 ** level);
 }
+export function carUpgradeRequiredLevel(id: string, level: number): number | null {
+  if (carUpgradeCost(id, level) === null) return null;
+  return (id === 'armor' ? 50 : 25) * (level + 1);
+}
 export function carUpgradeStats(upgrades: CarUpgrades = {}): { armor: number; maxHealth: number; boostCapacity: number; boostPower: number } {
   const armor = carUpgradeLevel(upgrades.armor);
   return { armor, maxHealth: 100 + armor * 25,

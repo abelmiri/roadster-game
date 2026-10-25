@@ -5,14 +5,16 @@ import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 
 let PlayerProgress, WEAPONS, WeaponLoadout, weaponUpgradeCost;
-let CAR_UPGRADE_IDS, carUpgradeCost, carUpgradeStats;
+let CAR_UPGRADE_IDS, carUpgradeCost, carUpgradeRequiredLevel, carUpgradeStats;
+let DISTANCE_COIN_REWARDS, distanceCoinProgress;
 before(async () => {
   const outdir = path.resolve('node_modules/.cache/roadster-economy-tests');
-  await build({ entryPoints: ['src/game/playerProgress.ts', 'src/game/weapons.ts', 'src/game/carUpgrades.ts'], bundle: true,
+  await build({ entryPoints: ['src/game/playerProgress.ts', 'src/game/weapons.ts', 'src/game/carUpgrades.ts', 'src/game/coinRewards.ts'], bundle: true,
     platform: 'node', format: 'esm', outdir, outExtension: { '.js': '.mjs' } });
   ({ PlayerProgress } = await import(pathToFileURL(path.join(outdir, 'playerProgress.mjs')).href));
   ({ WEAPONS, WeaponLoadout, weaponUpgradeCost } = await import(pathToFileURL(path.join(outdir, 'weapons.mjs')).href));
-  ({ CAR_UPGRADE_IDS, carUpgradeCost, carUpgradeStats } = await import(pathToFileURL(path.join(outdir, 'carUpgrades.mjs')).href));
+  ({ CAR_UPGRADE_IDS, carUpgradeCost, carUpgradeRequiredLevel, carUpgradeStats } = await import(pathToFileURL(path.join(outdir, 'carUpgrades.mjs')).href));
+  ({ DISTANCE_COIN_REWARDS, distanceCoinProgress } = await import(pathToFileURL(path.join(outdir, 'coinRewards.mjs')).href));
 });
 function store(coins = 0, extra = {}) {
   const values = new Map(Object.entries({ 'roadster-progress': JSON.stringify({ version: 1, coins, ownedWeapons: ['machine-gun'] }), ...extra }));
@@ -146,9 +148,9 @@ test('invalid or unavailable storage preserves safe defaults and session progres
     assert.equal(p.ownsWeapon('machine-gun'), true);
   }
   const p = new PlayerProgress({ getItem() { throw Error(); }, setItem() { throw Error(); } });
-  assert.equal(p.collect(20000, 0, 0), 1000);
+  assert.equal(p.collect(20000, 0, 0), 2495);
   assert.equal(p.purchaseWeapon('twin-gun', 100), 'purchased');
-  assert.equal(p.coins, 0);
+  assert.equal(p.coins, 1495);
   assert.equal(p.finishRun(20001).bonus, 25);
   assert.equal(p.nameRecord('Driver'), true);
 });
@@ -214,7 +216,7 @@ test('old saves retain their wallet and record; corrupt and unowned upgrade leve
   const blocked = new PlayerProgress({ getItem() { throw Error(); }, setItem() { throw Error(); } });
   blocked.collect(30000, 0, 0);
   assert.equal(blocked.upgradeWeapon('machine-gun'), 'upgraded');
-  assert.equal(blocked.coins, 0);
+  assert.equal(blocked.coins, 1495);
 });
 
 test('car upgrades have four exact price steps, debit atomically and persist independently', () => {
@@ -224,7 +226,7 @@ test('car upgrades have four exact price steps, debit atomically and persist ind
   for(const id of CAR_UPGRADE_IDS) {
     for(let level=0;level<4;level++) {
       const coins=p.coins; const writes=s.writes.length;
-      assert.equal(p.upgradeCar(id),'upgraded');
+      assert.equal(p.upgradeCar(id,200),'upgraded');
       assert.equal(s.writes.length,writes+1);
       const saved=JSON.parse(s.values.get('roadster-progress'));
       assert.equal(saved.coins,coins-carUpgradeCost(id,level));
@@ -244,7 +246,7 @@ test('car upgrades have four exact price steps, debit atomically and persist ind
 
 test('insufficient funds and corrupt vehicle levels cannot consume coins or reset older progress', () => {
   const s=store(3999); const p=new PlayerProgress(s.storage);
-  assert.equal(p.upgradeCar('armor'),'insufficient-coins');
+  assert.equal(p.upgradeCar('armor',50),'insufficient-coins');
   assert.equal(p.coins,3999); assert.equal(p.carLevel('armor'),0);
   assert.equal(s.writes.length,0);
   for(const invalid of [-1,5,2.5,'4',null,{}]) {
@@ -257,4 +259,58 @@ test('insufficient funds and corrupt vehicle levels cannot consume coins or rese
     assert.equal(restored.record.name,'Driver');
     assert.equal(restored.coins,9000);
   }
+});
+
+test('all six distance bonuses pay their full value once per run, retain skipped goals, and reset cleanly',()=>{
+  assert.deepEqual(DISTANCE_COIN_REWARDS.map(reward=>[reward.distance,reward.coins]),[[1500,50],[3000,120],[4500,200],[6000,275],[7500,350],[10000,500]]);
+  const s=store(); const p=new PlayerProgress(s.storage);
+  const increments=[120,200,270,355,420,630];
+  for(const [index,reward] of DISTANCE_COIN_REWARDS.entries()) {
+    assert.equal(p.collect(reward.distance,0,0),increments[index],'the goal bonus is in addition to regular 200m rewards');
+    assert.equal(p.collect(reward.distance,0,0),0);
+    assert.equal(p.collect(reward.distance-1,0,0),0);
+  }
+  assert.equal(p.runCoins,1995);
+  assert.equal(new PlayerProgress(s.storage).coins,1995);
+  p.resetRun();
+  assert.equal(p.collect(10000,0,0),1995,'a skipped display interval must retain all six bonuses');
+  assert.equal(p.collect(10000,0,0),0);
+  assert.equal(p.coins,3990);
+  p.finishRun(10000);
+  assert.equal(p.collect(12000,1,1),0,'a wreck cannot keep earning rewards');
+  const boundary=new PlayerProgress();
+  assert.equal(boundary.collect(1499.99,0,0),70);
+  assert.equal(boundary.collect(1500,0,0),50);
+  assert.equal(boundary.collect(Infinity,NaN,NaN),0);
+});
+
+test('the distance bar handles its next goal, completed route and invalid values',()=>{
+  assert.equal(distanceCoinProgress(0).next.distance,1500);
+  const first=distanceCoinProgress(1500);
+  assert.equal(first.fraction,.15); assert.equal(first.next.distance,3000); assert.equal(first.next.coins,120);
+  assert.equal(distanceCoinProgress(9999).next.coins,500);
+  assert.deepEqual(distanceCoinProgress(12000),{distance:12000,fraction:1,next:null});
+  assert.equal(distanceCoinProgress(NaN).fraction,0);
+  assert.equal(distanceCoinProgress(-100).distance,0);
+});
+
+test('vehicle XP level gates apply at every stage without spending XP or removing prior purchases',()=>{
+  assert.deepEqual([0,1,2,3].map(level=>carUpgradeRequiredLevel('armor',level)),[50,100,150,200]);
+  for(const id of ['boost-reserve','boost-power']) assert.deepEqual([0,1,2,3].map(level=>carUpgradeRequiredLevel(id,level)),[25,50,75,100]);
+  const s=store(100000,{'roadster-xp':'19900'}); const p=new PlayerProgress(s.storage);
+  for(const id of CAR_UPGRADE_IDS)for(let level=0;level<4;level++) {
+    const required=carUpgradeRequiredLevel(id,level); const coins=p.coins;
+    assert.equal(p.upgradeCar(id,required-1),'xp-locked');
+    assert.equal(p.carLevel(id),level); assert.equal(p.coins,coins);
+    assert.equal(p.upgradeCar(id,required),'upgraded');
+    assert.equal(s.values.get('roadster-xp'),'19900');
+  }
+  const fresh=new PlayerProgress(store(10000).storage);
+  for(const bad of [NaN,Infinity,49,49.5])assert.equal(fresh.upgradeCar('armor',bad),'xp-locked');
+  assert.equal(fresh.upgradeCar('armor'),'xp-locked','an omitted level cannot bypass the gate');
+  const existing=store(90000,{'roadster-progress':JSON.stringify({version:1,coins:90000,carUpgrades:{armor:3}})});
+  const restored=new PlayerProgress(existing.storage);
+  assert.equal(restored.carLevel('armor'),3);
+  assert.equal(restored.upgradeCar('armor',1),'xp-locked');
+  assert.equal(restored.carLevel('armor'),3,'previous purchases must be retained after adding level gates');
 });

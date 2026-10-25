@@ -5,7 +5,8 @@ import { GameAudio } from './game/audio';
 import { HudFeedback } from './game/hudFeedback';
 import { ExperienceProgress, LEVEL_XP } from './game/experience';
 import { PlayerProgress } from './game/playerProgress';
-import { CAR_UPGRADE_IDS, MAX_CAR_UPGRADE, carUpgradeCost, carUpgradeStats, type CarUpgradeId } from './game/carUpgrades';
+import { CAR_UPGRADE_IDS, MAX_CAR_UPGRADE, carUpgradeCost, carUpgradeRequiredLevel, carUpgradeStats, type CarUpgradeId } from './game/carUpgrades';
+import { DISTANCE_COIN_REWARDS, FINAL_DISTANCE_REWARD, distanceCoinProgress } from './game/coinRewards';
 import { carGarageIcon } from './game/carGarageIcon';
 import { loopsBetween } from './game/track';
 import { ImpactPause, IMPACT_DAMAGE, IMPACT_PAUSE_SECONDS, ExplosionSlowMotion, RESTART_DELAY_SECONDS, WRECK_TIME_SCALE } from './game/damage';
@@ -17,6 +18,7 @@ import './styles.css';
 import './hud.css';
 import './touchLayout.css';
 import './progress.css';
+import './coins.css';
 
 type GameStatus = 'loading' | 'ready' | 'running' | 'paused' | 'crashed' | 'error';
 const carUpgradeNames: Record<CarUpgradeId, MessageKey> = { armor:'carArmor', 'boost-reserve':'carBoostReserve', 'boost-power':'carBoostPower' };
@@ -48,6 +50,10 @@ app.innerHTML = `
         </div>
       </div>
     </header>
+    <div id="distance-rewards" class="distance-rewards">
+      <div class="distance-reward-heading"><span id="distance-reward-next"></span><strong id="distance-reward-earned"></strong></div>
+      <div id="distance-reward-meter" class="distance-reward-track" role="progressbar" aria-valuemin="0" aria-valuemax="${FINAL_DISTANCE_REWARD}"><span id="distance-reward-fill"></span>${DISTANCE_COIN_REWARDS.map((reward,index)=>`<i id="distance-reward-mark-${index}" class="distance-reward-mark" style="left:${reward.distance/FINAL_DISTANCE_REWARD*100}%" aria-hidden="true"></i>`).join('')}</div>
+    </div>
     <div class="district-tag"><span class="district-dot"></span><span id="district"></span></div>
     <div id="pursuit-glow" class="pursuit-glow" aria-hidden="true"></div>
     <div id="impact-flash" class="impact-flash" aria-hidden="true"></div>
@@ -64,7 +70,7 @@ app.innerHTML = `
       <div class="weapon-status-row"><button id="weapon-aim" class="aim-button" type="button"><span id="weapon-direction"></span><kbd lang="en" dir="ltr">Q</kbd></button><span id="weapon-status" role="status"></span></div>
     </div>
     <div class="bottom-hud">
-      <div class="experience-panel"><div><span id="xp-level"></span><strong id="xp-total"></strong></div><div id="xp-meter" class="xp-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><span id="xp-fill"></span></div><div class="coin-wallet"><span class="coin-symbol" aria-hidden="true">●</span><span data-i18n="coins"></span><strong id="coin-total"></strong></div></div>
+      <div class="experience-panel"><div><span id="xp-level"></span><strong id="xp-total"></strong></div><div id="xp-meter" class="xp-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><span id="xp-fill"></span></div><button id="coin-wallet-button" class="coin-wallet" type="button" aria-haspopup="dialog" aria-controls="coin-dialog" aria-expanded="false"><span class="coin-symbol" aria-hidden="true">●</span><span data-i18n="coins"></span><strong id="coin-total"></strong></button></div>
       <div class="speed-panel"><span data-i18n="speed"></span><strong id="speed"></strong><small data-i18n="speedUnit"></small></div>
     </div>
     <div class="keyboard-guide" aria-hidden="true"><span><kbd lang="en" dir="ltr" data-i18n="spaceKey"></kbd><span data-i18n="jumpGuide"></span></span><span><kbd lang="en" dir="ltr">↓</kbd><span data-i18n="suction"></span></span><span><kbd lang="en" dir="ltr" data-i18n="shiftKey"></kbd><span data-i18n="airBoost"></span></span><span><kbd lang="en" dir="ltr">← / →</kbd><span data-i18n="turnWeapon"></span></span><span><kbd lang="en" dir="ltr">F</kbd><span data-i18n="fire"></span></span><span><kbd lang="en" dir="ltr">1–8</kbd><span data-i18n="selectWeapon"></span></span><span><kbd lang="en" dir="ltr">G</kbd><span data-i18n="armory"></span></span></div>
@@ -92,7 +98,7 @@ app.innerHTML = `
           <button id="armory-tab-weapons" type="button" role="tab" aria-controls="weapons-pane" aria-selected="true" data-i18n="weaponsTab"></button>
           <button id="armory-tab-car" type="button" role="tab" aria-controls="car-pane" aria-selected="false" tabindex="-1" data-i18n="carTab"></button>
         </div>
-        <div class="armory-wallet"><span data-i18n="coinBalance"></span><strong id="armory-coins"></strong></div>
+        <button id="armory-wallet-button" class="armory-wallet" type="button" aria-haspopup="dialog" aria-controls="coin-dialog" aria-expanded="false"><span class="coin-symbol" aria-hidden="true">●</span><span data-i18n="coinBalance"></span><strong id="armory-coins"></strong><span class="coin-info-label" data-i18n="coinDetails"></span></button>
         <section id="weapons-pane" role="tabpanel" aria-labelledby="armory-tab-weapons">
         <p class="armory-description" data-i18n="armoryDescription"></p>
         <p class="armory-help" data-i18n="armoryHelp"></p>
@@ -114,7 +120,7 @@ app.innerHTML = `
           <div class="garage-vehicle"><div id="garage-car-preview" class="garage-car-preview" role="img">${carGarageIcon(0)}</div><h3 data-i18n="carName"></h3><p id="garage-car-summary"></p></div>
           <div class="car-upgrade-grid">${CAR_UPGRADE_IDS.map(id=>`<article class="car-upgrade-card">
             <h3 data-i18n="${carUpgradeNames[id]}"></h3><div class="weapon-level-row"><span id="car-level-${id}"></span><span class="upgrade-steps" aria-hidden="true">${Array.from({length:MAX_CAR_UPGRADE},(_,step)=>`<i id="car-upgrade-step-${id}-${step}"></i>`).join('')}</span></div>
-            <p id="car-current-${id}" class="car-current-stats"></p><p id="car-next-${id}" class="car-next-stats"></p><button id="upgrade-car-${id}" class="weapon-upgrade-button" type="button"></button>
+            <p id="car-current-${id}" class="car-current-stats"></p><p id="car-next-${id}" class="car-next-stats"></p><p id="car-requirement-${id}" class="car-level-requirement"></p><button id="upgrade-car-${id}" class="weapon-upgrade-button" type="button"></button>
           </article>`).join('')}</div>
           <p class="garage-help" data-i18n="carUpgradeHelp"></p>
         </section>
@@ -127,6 +133,7 @@ app.innerHTML = `
         <h1 id="overlay-title"></h1>
         <p id="overlay-description" class="overlay-description"></p>
         <div id="overlay-controls" class="control-summary"><div><span data-number="1"></span><strong data-i18n="jump"></strong><small data-i18n="jumpSummary"></small></div><div><span data-number="2"></span><strong data-i18n="suction"></strong><small data-i18n="suctionSummary"></small></div><div><span data-number="3"></span><strong data-i18n="boost"></strong><small data-i18n="boostSummary"></small></div></div>
+        <button id="menu-wallet-button" class="menu-coin-wallet" type="button" aria-haspopup="dialog" aria-controls="coin-dialog" aria-expanded="false"><span class="coin-symbol" aria-hidden="true">●</span><span data-i18n="coinBalance"></span><strong id="menu-coins"></strong><span class="coin-info-label" data-i18n="coinDetails"></span></button>
         <button id="primary-button" class="primary-button" type="button"><span id="primary-label"></span><span class="button-arrow" aria-hidden="true">↗</span></button>
         <div id="overlay-foot" class="overlay-foot"></div>
         <footer class="app-credits">
@@ -136,6 +143,22 @@ app.innerHTML = `
         </footer>
       </div>
       <div class="overlay-side" aria-hidden="true"><span data-i18n="sideIndex"></span><span data-i18n="sideMotto"></span></div>
+    </div>
+    <div id="coin-dialog" class="coin-dialog" role="dialog" aria-modal="true" aria-labelledby="coin-dialog-title" hidden>
+      <div class="coin-dialog-card">
+        <div class="coin-dialog-heading"><div><span class="coin-eyebrow" data-i18n="coinGuideEyebrow"></span><h2 id="coin-dialog-title" data-i18n="coinGuideTitle"></h2></div><button id="coin-guide-close" class="armory-close" type="button" data-i18n="coinGuideClose"></button></div>
+        <div class="coin-guide-hero"><p data-i18n="coinGuideIntro"></p><div class="coin-guide-balance"><span data-i18n="coinBalance"></span><strong id="coin-guide-balance"></strong><small data-i18n="coins"></small></div></div>
+        <div id="coin-guide-tabs" class="armory-tabs" role="tablist"><button id="coin-tab-earn" type="button" role="tab" aria-controls="coin-earn-pane" aria-selected="true" data-i18n="coinEarnTab"></button><button id="coin-tab-buy" type="button" role="tab" aria-controls="coin-buy-pane" aria-selected="false" tabindex="-1" data-i18n="coinBuyTab"></button></div>
+        <section id="coin-earn-pane" role="tabpanel" aria-labelledby="coin-tab-earn">
+          <div class="coin-milestone-guide"><div class="coin-route-heading"><span class="coin-guide-symbol" aria-hidden="true">↗</span><div><h3 data-i18n="coinMilestoneTitle"></h3><p data-i18n="coinMilestoneDescription"></p></div></div><div class="coin-milestone-grid">${DISTANCE_COIN_REWARDS.map((_,index)=>`<div id="coin-milestone-${index}" class="coin-milestone"><span id="coin-milestone-distance-${index}"></span><strong id="coin-milestone-value-${index}"></strong></div>`).join('')}</div></div>
+          <div class="coin-method-grid">${[
+            ['↗','coinDrivingTitle','coinDrivingDescription'],['↻','coinLoopTitle','coinLoopDescription'],
+            ['⌖','coinPoliceTitle','coinPoliceDescription'],['★','coinRecordTitle','coinRecordDescription'],
+          ].map(([symbol,heading,copy])=>`<article class="coin-method"><span class="coin-guide-symbol" aria-hidden="true">${symbol}</span><h3 data-i18n="${heading}"></h3><p data-i18n="${copy}"></p></article>`).join('')}</div>
+          <p class="coin-guide-note" data-i18n="coinXpNote"></p>
+        </section>
+        <section id="coin-buy-pane" class="coin-buy-pane" role="tabpanel" aria-labelledby="coin-tab-buy" hidden><span class="coin-buy-symbol" aria-hidden="true">●</span><h3 id="coin-buy-unavailable" data-i18n="coinBuyUnavailable"></h3><p data-i18n="coinBuyDescription"></p><button id="coin-back-earn" class="coin-back-earn" type="button" data-i18n="coinBackEarn"></button></section>
+      </div>
     </div>
     <div id="record-dialog" class="record-dialog" role="dialog" aria-modal="true" aria-labelledby="record-title" aria-describedby="record-description" hidden>
       <form id="record-form" class="record-card">
@@ -213,6 +236,13 @@ const recordDialog = element('record-dialog');
 const recordName = element<HTMLInputElement>('record-name');
 const recordSave = element<HTMLButtonElement>('record-save');
 recordDialog.hidden = true;
+const coinDialog = element('coin-dialog');
+const coinClose = element<HTMLButtonElement>('coin-guide-close');
+const walletButtons = ['coin-wallet-button','armory-wallet-button','menu-wallet-button'].map(id=>element<HTMLButtonElement>(id));
+coinDialog.hidden = true;
+let coinTab: 'earn' | 'buy' = 'earn';
+let resumeAfterCoins = false;
+let coinOpener: HTMLButtonElement | null = null;
 const armory = element('armory');
 const armoryButton = element<HTMLButtonElement>('armory-button');
 const armoryClose = element<HTMLButtonElement>('armory-close');
@@ -253,6 +283,8 @@ let lastRewardMessage: MessageKey = 'loopReward';
 let coinRewardTime = 0;
 let lastCoinReward = 0;
 let recordBonus = 0;
+let displayedDistanceMilestones = 0;
+let distanceRewardHighlightUntil = 0;
 
 let status: GameStatus = 'loading';
 let physics: GamePhysics;
@@ -330,11 +362,17 @@ function refreshGarage(): void {
     textIfChanged(element(`car-current-${id}`),describe(stats));
     textIfChanged(element(`car-next-${id}`),t('carNextStats',{stats:describe(next)}));
     const cost=carUpgradeCost(id,level);
+    const required=carUpgradeRequiredLevel(id,level);
+    const eligible=required!==null&&experience.level>=required;
+    const requirement=element(`car-requirement-${id}`);
+    requirement.hidden=required===null;
+    requirement.textContent=t('carLevelRequired',{level:formatNumber(required??0),current:formatNumber(experience.level)});
+    requirement.classList.toggle('is-met',eligible);
     element(`car-next-${id}`).hidden=cost===null;
     const button=element<HTMLButtonElement>(`upgrade-car-${id}`);
-    button.disabled=cost===null||player.coins<cost;
+    button.disabled=cost===null||!eligible||player.coins<cost;
     button.textContent=cost===null?t('weaponUpgradeMax'):t('weaponUpgradeBuy',{level:formatNumber(level+1),coins:formatNumber(cost)});
-    button.title=cost!==null&&player.coins<cost?t('needCoins',{coins:formatNumber(cost-player.coins)}):button.textContent;
+    button.title=required!==null&&!eligible?requirement.textContent:cost!==null&&player.coins<cost?t('needCoins',{coins:formatNumber(cost-player.coins)}):button.textContent;
     button.setAttribute('aria-label',`${t(carUpgradeNames[id])} · ${button.textContent} · ${button.title}`);
   }
   textIfChanged(element('armory-title'),t(armoryTab==='car'?'garageTitle':'armoryTitle'));
@@ -377,6 +415,24 @@ function attributeIfChanged(node: HTMLElement, name: string, value: string): voi
   if (node.getAttribute(name) !== value) node.setAttribute(name, value);
 }
 
+function updateDistanceRewards(distance: number): void {
+  const progress=distanceCoinProgress(distance);
+  const reached=DISTANCE_COIN_REWARDS.filter(reward=>progress.distance>=reward.distance).length;
+  if(reached<displayedDistanceMilestones) distanceRewardHighlightUntil=0;
+  else if(reached>displayedDistanceMilestones) distanceRewardHighlightUntil=performance.now()+1800;
+  displayedDistanceMilestones=reached;
+  element('distance-rewards').classList.toggle('is-celebrating',performance.now()<distanceRewardHighlightUntil);
+  const label=progress.next?t('distanceRewardNext',{distance:formatNumber(progress.next.distance),coins:formatNumber(progress.next.coins)}):t('distanceRewardComplete');
+  textIfChanged(element('distance-reward-next'),label);
+  textIfChanged(element('distance-reward-earned'),t('distanceRewardEarned',{coins:formatNumber(player.runCoins)}));
+  fillIfChanged(element('distance-reward-fill'),progress.fraction);
+  const meter=element('distance-reward-meter');
+  attributeIfChanged(meter,'aria-label',t('distanceRewardTitle'));
+  attributeIfChanged(meter,'aria-valuenow',String(Math.min(FINAL_DISTANCE_REWARD,progress.distance)));
+  attributeIfChanged(meter,'aria-valuetext',`${formatNumber(progress.distance)} ${t('meter')} · ${label}`);
+  for(const [index,reward] of DISTANCE_COIN_REWARDS.entries()) element(`distance-reward-mark-${index}`).classList.toggle('is-reached',progress.distance>=reward.distance);
+}
+
 function updateHud(snapshot?: GameSnapshot): void {
   const charge = snapshot?.boost ?? 1;
   const maxHealth = snapshot?.maxHealth ?? carUpgradeStats(player.carUpgrades).maxHealth;
@@ -395,6 +451,10 @@ function updateHud(snapshot?: GameSnapshot): void {
   element('best-player').hidden = !player.record.name;
   attributeIfChanged(element('best-player'), 'title', player.record.name);
   textIfChanged(element('coin-total'), formatNumber(player.coins));
+  textIfChanged(element('menu-coins'), formatNumber(player.coins));
+  textIfChanged(element('coin-guide-balance'), formatNumber(player.coins));
+  for(const button of walletButtons) attributeIfChanged(button,'aria-label',`${t('coinDetails')} · ${t('coinBalance')}: ${formatNumber(player.coins)}`);
+  updateDistanceRewards(snapshot?.distance??0);
   textIfChanged(element('coin-toast'), t('coinReward', { coins: formatNumber(lastCoinReward) }));
   element('coin-toast').hidden = coinRewardTime <= 0;
   const percentage = Math.round(charge * 100);
@@ -502,6 +562,12 @@ function updateLanguage(): void {
   element('weapon-aim').title = t('turnWeapon');
   armoryButton.setAttribute('aria-label', t('armory'));
   element('armory-tabs').setAttribute('aria-label',t('garageTitle'));
+  element('coin-guide-tabs').setAttribute('aria-label',t('coinGuideTitle'));
+  for(const button of walletButtons) button.setAttribute('aria-label',t('coinDetails'));
+  for(const [index,reward] of DISTANCE_COIN_REWARDS.entries()) {
+    element(`coin-milestone-distance-${index}`).textContent=`${formatNumber(reward.distance)} ${t('meter')}`;
+    element(`coin-milestone-value-${index}`).textContent=t('coinReward',{coins:formatNumber(reward.coins)});
+  }
   armoryButton.title = `${t('armory')} (G)`;
   armoryButton.setAttribute('aria-keyshortcuts', 'G');
   touchLayoutButton.setAttribute('aria-label', t('touchLayout'));
@@ -527,7 +593,7 @@ function clearHeld(): void {
 }
 
 function start(): void {
-  if (touchLayout.editing || !armory.hidden || !recordDialog.hidden) return;
+  if (touchLayout.editing || !armory.hidden || !recordDialog.hidden || !coinDialog.hidden) return;
   if (status === 'loading' || status === 'error' || status === 'running') return;
   if (status === 'crashed' && performance.now() < restartAvailableAt) return;
   const resuming = status === 'paused';
@@ -643,7 +709,7 @@ function jumpDown(source: string): void {
 function bindTouch(id: string, action: keyof typeof held): void {
   const button = element<HTMLButtonElement>(id);
   button.addEventListener('pointerdown', (event) => {
-    if (touchLayout.editing || !armory.hidden || !recordDialog.hidden) return;
+    if (touchLayout.editing || !armory.hidden || !recordDialog.hidden || !coinDialog.hidden) return;
     event.preventDefault();
     void audio.unlock();
     button.setPointerCapture(event.pointerId);
@@ -670,11 +736,11 @@ function turnWeapon(direction: AimDirection = aimDirection === 1 ? -1 : 1): void
   aimDirection = direction;
   updateHud(physics?.snapshot(Math.min(1, accumulator / FIXED_STEP)));
 }
-element('touch-aim').addEventListener('click', () => { if (!touchLayout.editing && armory.hidden && recordDialog.hidden) turnWeapon(); });
+element('touch-aim').addEventListener('click', () => { if (!touchLayout.editing && armory.hidden && recordDialog.hidden && coinDialog.hidden) turnWeapon(); });
 element('weapon-aim').addEventListener('click', () => { turnWeapon(); element('weapon-aim').blur(); });
 
 function openArmory(): void {
-  if (status === 'loading' || status === 'error' || !armory.hidden || touchLayout.editing || !recordDialog.hidden) return;
+  if (status === 'loading' || status === 'error' || !armory.hidden || touchLayout.editing || !recordDialog.hidden || !coinDialog.hidden) return;
   resumeAfterArmory = status === 'running';
   if (resumeAfterArmory) pause();
   clearHeld(); jumpQueued = false;
@@ -692,6 +758,51 @@ function closeArmory(): void {
 }
 armoryButton.addEventListener('click', openArmory);
 armoryClose.addEventListener('click', closeArmory);
+
+function setCoinTab(tab:'earn'|'buy',focus=false):void {
+  coinTab=tab;
+  for(const name of ['earn','buy'] as const) {
+    const active=name===tab;
+    const button=element<HTMLButtonElement>(`coin-tab-${name}`);
+    button.setAttribute('aria-selected',String(active)); button.tabIndex=active?0:-1;
+    element(`coin-${name}-pane`).hidden=!active;
+  }
+  if(focus) element(`coin-tab-${tab}`).focus();
+}
+
+function openCoinGuide(opener:HTMLButtonElement):void {
+  if(status==='loading'||status==='error'||touchLayout.editing||!recordDialog.hidden||!coinDialog.hidden)return;
+  resumeAfterCoins=status==='running';
+  if(resumeAfterCoins)pause();
+  clearHeld(); jumpQueued=false;
+  coinOpener=opener;
+  coinDialog.hidden=false;
+  armory.inert=true; overlay.inert=true;
+  for(const button of walletButtons)button.setAttribute('aria-expanded','true');
+  setCoinTab('earn');
+  textIfChanged(element('coin-guide-balance'),formatNumber(player.coins));
+  coinClose.focus();
+}
+
+function closeCoinGuide():void {
+  coinDialog.hidden=true;
+  armory.inert=false; overlay.inert=false;
+  for(const button of walletButtons)button.setAttribute('aria-expanded','false');
+  clearHeld(); jumpQueued=false;
+  if(resumeAfterCoins&&status==='paused')start();
+  coinOpener?.focus(); coinOpener=null; resumeAfterCoins=false;
+}
+for(const button of walletButtons)button.addEventListener('click',()=>openCoinGuide(button));
+coinClose.addEventListener('click',closeCoinGuide);
+element('coin-back-earn').addEventListener('click',()=>setCoinTab('earn',true));
+for(const tab of ['earn','buy'] as const) {
+  element(`coin-tab-${tab}`).addEventListener('click',()=>setCoinTab(tab,true));
+  element(`coin-tab-${tab}`).addEventListener('keydown',event=>{
+    if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.code))return;
+    event.preventDefault();
+    setCoinTab(event.code==='Home'?'earn':event.code==='End'?'buy':tab==='earn'?'buy':'earn',true);
+  });
+}
 for (const tab of ['weapons','car'] as const) {
   element(`armory-tab-${tab}`).addEventListener('click',()=>setArmoryTab(tab,true));
   element(`armory-tab-${tab}`).addEventListener('keydown',event=>{
@@ -701,15 +812,15 @@ for (const tab of ['weapons','car'] as const) {
   });
 }
 for (const id of CAR_UPGRADE_IDS) element(`upgrade-car-${id}`).addEventListener('click',()=>{
-  if(!physics||armory.hidden||armoryTab!=='car'||!recordDialog.hidden||touchLayout.editing) return;
-  if(player.upgradeCar(id)!=='upgraded') return;
+  if(!physics||armory.hidden||armoryTab!=='car'||!recordDialog.hidden||touchLayout.editing||!coinDialog.hidden) return;
+  if(player.upgradeCar(id,experience.level)!=='upgraded') return;
   physics.upgradeCar(player.carUpgrades);
   refreshArmory(); updateHud(physics.snapshot(1));
   if(element<HTMLButtonElement>(`upgrade-car-${id}`).disabled) element('armory-tab-car').focus();
   void audio.unlock().then(()=>audio.play('click'));
 });
 function openTouchLayout(): void {
-  if (status === 'loading' || status === 'error' || !armory.hidden || touchLayout.editing || !recordDialog.hidden) return;
+  if (status === 'loading' || status === 'error' || !armory.hidden || touchLayout.editing || !recordDialog.hidden || !coinDialog.hidden) return;
   resumeAfterTouchLayout = status === 'running';
   if (resumeAfterTouchLayout) pause();
   clearHeld(); jumpQueued = false;
@@ -732,7 +843,7 @@ element('touch-layout-cancel').addEventListener('click', () => closeTouchLayout(
 element('touch-layout-reset').addEventListener('click', () => touchLayout.reset());
 function selectWeapon(index: number, purchase = false): void {
   const spec = WEAPONS[index];
-  if (!physics || !spec || !recordDialog.hidden) return;
+  if (!physics || !spec || !recordDialog.hidden || !coinDialog.hidden) return;
   if (!player.ownsWeapon(spec.id)) {
     if (!purchase || player.purchaseWeapon(spec.id, experience.total) !== 'purchased') return;
   }
@@ -745,7 +856,7 @@ for (const [index, spec] of WEAPONS.entries()) {
   element(`equip-${spec.id}`).setAttribute('aria-keyshortcuts', String(index + 1));
   element(`equip-${spec.id}`).addEventListener('click', () => selectWeapon(index, true));
   element(`upgrade-${spec.id}`).addEventListener('click', () => {
-    if (!physics || armory.hidden || !recordDialog.hidden || touchLayout.editing) return;
+    if (!physics || armory.hidden || !recordDialog.hidden || touchLayout.editing || !coinDialog.hidden) return;
     if (player.upgradeWeapon(spec.id) !== 'upgraded') return;
     physics.upgradeWeapon(spec.id, player.weaponLevel(spec.id));
     refreshArmory(); updateHud(physics.snapshot(1));
@@ -772,6 +883,15 @@ function toggleSound(): void {
 
 window.addEventListener('keydown', (event) => {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if(!coinDialog.hidden) {
+    if(event.code==='Escape') {event.preventDefault();if(!event.repeat)closeCoinGuide();}
+    if(event.code==='Tab') {
+      const last=coinTab==='buy'?element('coin-back-earn'):element('coin-tab-earn');
+      if(event.shiftKey&&document.activeElement===coinClose){event.preventDefault();last.focus();}
+      else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();coinClose.focus();}
+    }
+    return;
+  }
   if (!recordDialog.hidden) {
     if (event.code === 'Tab') {
       if (event.shiftKey && document.activeElement === recordName) { event.preventDefault(); recordSave.focus(); }
@@ -808,9 +928,9 @@ window.addEventListener('keydown', (event) => {
     return;
   }
   if (!armory.hidden) {
-    if (event.code === 'Escape') { event.preventDefault(); closeArmory(); }
+    if (event.code === 'Escape') { event.preventDefault(); if(!event.repeat)closeArmory(); }
     if (event.code === 'Tab') {
-      const buttons = [armoryClose,element<HTMLButtonElement>(`armory-tab-${armoryTab}`),
+      const buttons = [armoryClose,element<HTMLButtonElement>(`armory-tab-${armoryTab}`),element<HTMLButtonElement>('armory-wallet-button'),
         ...element(armoryTab==='car'?'car-pane':'weapons-pane').querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
       const first = buttons[0]; const last = buttons.at(-1);
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
@@ -1003,5 +1123,6 @@ async function boot(): Promise<void> {
 }
 
 setArmoryTab('weapons');
+setCoinTab('earn');
 updateLanguage();
 void boot();

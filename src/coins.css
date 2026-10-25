@@ -1,0 +1,98 @@
+.distance-rewards { position: absolute; top: 64px; left: calc(50% + (var(--hud-resource-width) - var(--hud-weapon-width)) * .5); transform: translateX(-50%) scale(var(--distance-reward-scale,1)); transform-origin: center; z-index: 4; width: min(480px,calc(100% - var(--hud-resource-width) - var(--hud-weapon-width) - var(--hud-edge) * 2 - 24px)); padding: 6px 10px 8px; border: 1px solid #e8cd8426; border-radius: 9px; background: #10283b35; opacity: .45; pointer-events: none; transition: opacity .28s ease, transform .28s ease, background-color .28s ease, border-color .28s ease, box-shadow .28s ease; }
+.distance-rewards.is-celebrating { --distance-reward-scale: 1.04; opacity: 1; background: #10283bd9; border-color: #f8da8fcc; box-shadow: 0 0 20px #edbd5338; }
+.distance-reward-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #e5d2a0; font-size: 9px; line-height: 1.5; margin-bottom: 7px; }
+.distance-reward-heading strong { color: #e3fff3; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.distance-reward-track { height: 5px; position: relative; border-radius: 4px; background: #ffffff20; direction: ltr; }
+.distance-reward-track > span { display: block; width: 100%; height: 100%; background: linear-gradient(90deg,#7ae1ce,#f1ca73); border-radius: inherit; transform-origin: left; transition: transform .2s linear; }
+.distance-reward-mark { position: absolute; top: 50%; width: 7px; height: 7px; border: 1px solid #829798; border-radius: 50%; background: #173347; transform: translate(-50%,-50%); }
+.distance-reward-mark.is-reached { background: #ffe1a0; border-color: #fff0ca; box-shadow: 0 0 7px #f2c76a80; }
+.coin-wallet { font: inherit; font-size: 10px; cursor: pointer; pointer-events: auto; }
+.armory-wallet, .menu-coin-wallet { cursor: pointer; font: inherit; border: 1px solid #e9c87960; background: #edbd5f0c; border-radius: 12px; padding: 10px 14px; color: #ffe5a1; text-align: start; }
+.armory-wallet:hover, .menu-coin-wallet:hover, .coin-wallet:hover { border-color: #ffe5a1; background-color: #edbd5f22; }
+.coin-info-label { font-size: 11px; color: #b5decf; }
+.menu-coin-wallet { display: flex; align-items: center; gap: 10px; min-height: 42px; margin-bottom: 16px; font-size: 12px; }
+.menu-coin-wallet strong { font-size: 20px; font-variant-numeric: tabular-nums; }
+.car-level-requirement { margin: 0 0 10px; color: #efbc84; font-size: 11px; line-height: 1.7; }
+.car-level-requirement.is-met { color: #a6e2ce; }
+.car-level-requirement[hidden] { display: none; }
+.coin-dialog[hidden], #coin-earn-pane[hidden], #coin-buy-pane[hidden] { display: none; }
+.coin-dialog { position: absolute; inset: 0; z-index: 19; display: grid; place-items: center; padding: max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left)); background: #071322d9; backdrop-filter: blur(14px); }
+.coin-dialog-card { width: min(820px,100%); max-height: 100%; overflow: auto; overscroll-behavior: contain; padding: 28px; border: 1px solid #efcd8170; border-radius: 22px; background: radial-gradient(ellipse at 90% 0,#cba35120,transparent 50%),linear-gradient(145deg,#20394c,#101e2e); box-shadow: 0 24px 90px #0008; scrollbar-width: thin; }
+.coin-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.coin-eyebrow { color: #efcd8b; font-size: 10px; letter-spacing: .12em; font-weight: 800; }
+.coin-dialog-heading h2 { margin: 7px 0 0; font-size: clamp(20px,3vw,28px); line-height: 1.5; }
+.coin-guide-hero { display: flex; align-items: center; gap: 30px; margin: 20px 0; }
+.coin-guide-hero > p { flex: 1; margin: 0; color: #c4d5dc; font-size: 13px; line-height: 1.9; }
+.coin-guide-balance { min-width: 130px; padding: 16px; border: 1px solid #e8c77950; border-radius: 14px; background: #e9bd5310; text-align: center; color: #ffe7ac; }
+.coin-guide-balance > span, .coin-guide-balance small { display: block; font-size: 10px; }
+.coin-guide-balance strong { display: block; margin: 5px 0; font-size: 29px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.coin-milestone-guide { padding: 17px; border: 1px solid #edbd5f55; border-radius: 14px; background: #e6b24f08; }
+.coin-route-heading { display: flex; align-items: center; gap: 14px; }
+.coin-guide-symbol { display: grid; place-items: center; flex-shrink: 0; width: 38px; height: 38px; border: 1px solid #e8c77950; border-radius: 11px; color: #ffe1a0; background: #edbd5f0e; font-size: 23px; }
+.coin-route-heading h3, .coin-method h3 { margin: 0; color: #eaf8ef; font-size: 14px; }
+.coin-route-heading p, .coin-method p { margin: 6px 0 0; color: #a9c2ce; font-size: 12px; line-height: 1.9; }
+.coin-milestone-grid { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 7px; margin-top: 16px; }
+.coin-milestone { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 11px 5px; border-radius: 10px; border: 1px solid #d6b55b40; background: #102536; }
+.coin-milestone span { color: #b5cbd4; font-size: 10px; font-variant-numeric: tabular-nums; }
+.coin-milestone strong { font-size: 12px; color: #ffe5a1; white-space: nowrap; }
+.coin-method-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-top: 14px; }
+.coin-method { padding: 16px; border: 1px solid #7eafba35; border-radius: 13px; background: #ffffff03; }
+.coin-method .coin-guide-symbol { margin-bottom: 11px; color: #b4efdd; border-color: #9cecd23d; background: #9cecd208; }
+.coin-guide-note { color: #b5e4d4; padding: 13px 16px; border-radius: 10px; background: #a6f4df08; font-size: 12px; line-height: 1.9; margin: 16px 0 0; }
+.coin-buy-pane { text-align: center; padding: 35px 12px; }
+.coin-buy-symbol { display: grid; place-items: center; width: 72px; height: 72px; margin: 0 auto 20px; border-radius: 50%; border: 2px solid #e6c37666; color: #e9c779; background: #edbd5f10; box-shadow: 0 0 40px #edbd5f10; font-size: 38px; }
+.coin-buy-pane h3 { font-size: 19px; color: #ffedbd; margin: 0 0 10px; }
+.coin-buy-pane p { color: #acc5ce; font-size: 13px; line-height: 1.9; margin: 0 0 22px; }
+.coin-back-earn { border: 1px solid #a6f4df70; border-radius: 9px; background: #a6f4df; color: #142c3b; min-height: 42px; padding: 9px 17px; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
+.challenge-hint { top: 142px; }
+.xp-toast { top: 188px; }
+.coin-toast { top: 233px; }
+.is-editing-touch .distance-rewards { visibility: hidden; }
+html[lang=fa] .coin-dialog-card, html[lang=fa] .menu-coin-wallet, html[lang=fa] .distance-reward-heading { direction: rtl; }
+html[lang=fa] .distance-reward-heading { font-size: 11px; }
+@media(max-width:900px), (pointer:coarse) and (orientation:landscape) {
+  .distance-rewards { top: 58px; left: var(--hud-edge); right: var(--hud-edge); width: auto; transform: scale(var(--distance-reward-scale,1)); }
+  .resources-panel, .weapon-panel { top: 118px; }
+  .district-tag { display: none; }
+  .challenge-hint { top: 178px; }
+  .xp-toast { top: 217px; }
+  .coin-toast { top: 253px; }
+}
+@media(max-height:580px) {
+  .overlay-card { max-height: calc(100dvh - 86px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+  .coin-dialog-card { padding: 17px; }
+  .coin-guide-hero { margin: 12px 0; gap: 18px; }
+  .coin-guide-balance { padding: 10px; }
+  .coin-guide-balance strong { font-size: 24px; }
+  .coin-eyebrow { display: none; }
+  .coin-dialog-heading h2 { font-size: 20px; margin: 0; }
+  .menu-coin-wallet { min-height: 34px; margin-bottom: 10px; padding: 5px 10px; }
+  .menu-coin-wallet strong { font-size: 17px; }
+}
+@media(max-width:650px) {
+  .coin-dialog-heading { gap: 12px; }
+  .coin-dialog-card { padding: 15px; }
+  .coin-guide-hero { gap: 12px; }
+  .coin-guide-balance { min-width: 100px; }
+  .coin-guide-hero > p { font-size: 12px; }
+  .coin-milestone-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .coin-method { padding: 12px; }
+  .coin-info-label { font-size: 10px; }
+}
+@media(max-height:330px) {
+  .distance-rewards { top: 49px; padding: 5px 9px 7px; }
+  .distance-reward-heading { margin-bottom: 5px; font-size: 9px; }
+  html[lang=fa] .distance-reward-heading { font-size: 10px; }
+  .resources-panel, .weapon-panel { top: 95px; }
+  .best-player { display: none; }
+  .challenge-hint { top: 144px; }
+  .xp-toast { top: 177px; }
+  .coin-toast { top: 209px; }
+}
+@media(max-width:650px) and (orientation:portrait) {
+  .distance-rewards, .coin-dialog { visibility: hidden; }
+}
+@media(prefers-reduced-motion:reduce) {
+  .distance-rewards, .distance-reward-track > span { transition: none; }
+  .distance-rewards.is-celebrating { --distance-reward-scale: 1; }
+}

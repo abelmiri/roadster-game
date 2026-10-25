@@ -1,10 +1,11 @@
 import { canEquip, WEAPONS, MAX_WEAPON_UPGRADE, weaponUpgradeCost, type WeaponId, type WeaponUpgrades } from './weapons';
-import { CAR_UPGRADE_IDS, MAX_CAR_UPGRADE, carUpgradeCost, type CarUpgradeId, type CarUpgrades } from './carUpgrades';
+import { CAR_UPGRADE_IDS, MAX_CAR_UPGRADE, carUpgradeCost, carUpgradeRequiredLevel, type CarUpgradeId, type CarUpgrades } from './carUpgrades';
+import { DISTANCE_COIN_REWARDS } from './coinRewards';
 
 type ProgressStorage = Pick<Storage, 'getItem' | 'setItem'>;
 type RecordEntry = { distance: number; name: string; needsName: boolean };
 export type PurchaseResult = 'purchased' | 'owned' | 'xp-locked' | 'insufficient-coins' | 'unknown';
-export type UpgradeResult = 'upgraded' | 'unowned' | 'max-level' | 'insufficient-coins' | 'unknown';
+export type UpgradeResult = 'upgraded' | 'unowned' | 'max-level' | 'insufficient-coins' | 'xp-locked' | 'unknown';
 const STORAGE_KEY = 'roadster-progress';
 const validCount = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 const cleanName = (value: string): string => value.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 32);
@@ -20,6 +21,7 @@ export class PlayerProgress {
   private readonly vehicleUpgrades: CarUpgrades = {};
   private collected = [0, 0, 0];
   private finished = false;
+  private distanceRewardsCollected = 0;
 
   constructor(private readonly storage?: ProgressStorage) {
     try {
@@ -59,12 +61,14 @@ export class PlayerProgress {
   get carUpgrades(): CarUpgrades { return { ...this.vehicleUpgrades }; }
   carLevel(id: CarUpgradeId): number { return this.vehicleUpgrades[id] ?? 0; }
 
-  upgradeCar(id: string): UpgradeResult {
+  upgradeCar(id: string, playerLevel = 1): UpgradeResult {
     if (!CAR_UPGRADE_IDS.includes(id as CarUpgradeId)) return 'unknown';
     const key = id as CarUpgradeId;
     const level = this.carLevel(key);
     const cost = carUpgradeCost(key, level);
     if (cost === null) return 'max-level';
+    const requiredLevel = carUpgradeRequiredLevel(key, level)!;
+    if (!Number.isSafeInteger(playerLevel) || playerLevel < requiredLevel) return 'xp-locked';
     if (this.coins < cost) return 'insufficient-coins';
     this.coins -= cost;
     this.vehicleUpgrades[key] = level + 1;
@@ -109,6 +113,13 @@ export class PlayerProgress {
       gained += (count - this.collected[index]) * rewards[index];
       this.collected[index] = count;
     });
+    if (Number.isFinite(distance)) {
+      while (this.distanceRewardsCollected < DISTANCE_COIN_REWARDS.length &&
+          distance >= DISTANCE_COIN_REWARDS[this.distanceRewardsCollected].distance) {
+        gained += DISTANCE_COIN_REWARDS[this.distanceRewardsCollected].coins;
+        this.distanceRewardsCollected++;
+      }
+    }
     if (!gained) return 0;
     return this.credit(gained);
   }
@@ -140,6 +151,7 @@ export class PlayerProgress {
   resetRun(): void {
     this.collected = [0, 0, 0];
     this.finished = false;
+    this.distanceRewardsCollected = 0;
     this.runCoins = 0;
   }
 
