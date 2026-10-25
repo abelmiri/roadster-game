@@ -489,6 +489,65 @@ test('airborne rotation retains inertia instead of instantly aiming at the road'
   } finally { game.dispose(); }
 });
 
+test('front and rear air nozzles allow repeated full flips across angle wrapping, while wreck spins stop scoring', () => {
+  for (const action of ['frontJet', 'rearJet']) {
+    const game = new GamePhysics();
+    try {
+      game.car.setTranslation({ x:7, y:100 }, true);
+      game.car.setRotation(0, true);
+      game.car.setLinvel({ x:0, y:0 }, true);
+      let rotation = 0;
+      let previous = 0;
+      for (let i=0;i<270;i++) {
+        game.step({...idle, [action]:true});
+        const angle = game.car.rotation();
+        rotation += Math.atan2(Math.sin(angle - previous), Math.cos(angle - previous));
+        previous = angle;
+        assert.equal(game.snapshot(1).flipsCompleted, Math.floor(Math.abs(rotation) / (Math.PI * 2)));
+      }
+      const state = game.snapshot(1);
+      assert.equal(state.crashed, false);
+      assert.equal(state.grounded, false);
+      assert.equal(state.flipsCompleted, 2);
+      assert.equal(state.frontJetActive, action === 'frontJet');
+      assert.equal(state.rearJetActive, action === 'rearJet');
+      assert.ok((action === 'frontJet' ? 1 : -1) * rotation > Math.PI * 4);
+      game.crashed = true;
+      for(let i=0;i<120;i++) game.stepWreck();
+      assert.equal(game.snapshot(1).flipsCompleted, 2);
+      assert.equal(game.snapshot(1).frontJetActive, false);
+      assert.equal(game.snapshot(1).rearJetActive, false);
+    } finally { game.dispose(); }
+  }
+});
+
+test('partial airborne turns cancel on reversal and cannot carry progress across landings', () => {
+  const game = new GamePhysics();
+  try {
+    game.car.setTranslation({x:7, y:50}, true);
+    game.car.setRotation(0, true);
+    game.car.setLinvel({x:0, y:0}, true);
+    game.car.setAngvel(6, true);
+    stepFor(game, .6);
+    assert.equal(game.snapshot(1).flipsCompleted, 0);
+    game.car.setAngvel(-6, true);
+    stepFor(game, .6);
+    assert.equal(game.snapshot(1).flipsCompleted, 0);
+    game.car.setAngvel(6, true);
+    stepFor(game, .6);
+    assert.equal(game.snapshot(1).flipsCompleted, 0);
+    placeOnRoad(game, 7, 16);
+    stepFor(game, .1);
+    assert.equal(game.snapshot(1).grounded, true);
+    game.car.setTranslation({x:7, y:50}, true);
+    game.car.setRotation(0, true);
+    game.car.setLinvel({x:0, y:0}, true);
+    game.car.setAngvel(6, true);
+    stepFor(game, .6);
+    assert.equal(game.snapshot(1).flipsCompleted, 0, 'landing retained a partial flip');
+  } finally { game.dispose(); }
+});
+
 test('tilted landings catch each tire separately and transfer rotation without snapping', () => {
   const spec = loopsBetween(0, 500)[0];
   function drop(pitch) {
@@ -597,7 +656,7 @@ test('holding suction completes full loops at early and late speeds, awards once
       let previousDistance = 0;
       let maximumProgress = 0;
       for (let i = 0; i < 700 && !game.crashed; i++) {
-        game.step({ ...idle, suction: true, boost: index === 3 });
+        game.step({ ...idle, suction: true, boost: index === 3, frontJet:true, rearJet:true });
         const state = game.snapshot(1);
         assert.ok(state.distance >= previousDistance, 'score regressed inside the loop');
         previousDistance = state.distance;
@@ -621,6 +680,9 @@ test('holding suction completes full loops at early and late speeds, awards once
       assert.equal(sawTop, true);
       assert.ok(maximumProgress > .97);
       assert.equal(game.snapshot(1).loopCompletions, 1);
+      assert.equal(game.snapshot(1).flipsCompleted, 0, 'magnetic loop paid an airborne flip');
+      assert.equal(game.snapshot(1).frontJetActive, false);
+      assert.equal(game.snapshot(1).rearJetActive, false);
       assert.equal(game.snapshot(1).runXp, 25);
       stepFor(game, .7, { ...idle, suction: true });
       assert.equal(game.crashed, false);
@@ -935,7 +997,7 @@ test('every unlocked weapon can destroy a real road barrier and disable its Rapi
   const barrier = new TrackGenerator().chunk(2).hazards[0];
   for (const id of ['machine-gun','twin-gun','gatling-gun','cannon','rocket-launcher','missile-launcher','laser-gun','plasma-cannon']) {
     // Allow the heavy weapons their firing interval before contact at 60 km/h.
-    const game = new GamePhysics(barrier.x - 20, { id, xp: 1900 });
+    const game = new GamePhysics(barrier.x - 20, { id, xp: 3800 });
     try {
       for (let i=0;i<240&&!game.crashed&&game.car.translation().x<barrier.x+3;i++) {
         game.step({...idle,suction:true,fire:true,aim:1});
@@ -1095,7 +1157,7 @@ test('destroyed obstacles stay destroyed when a chunk reloads and cannot pay XP 
 
 test('weapons follow a complete loop without changing driving, XP, or suspension stability', () => {
   const spec=loopsBetween(0,500)[0];
-  const game=new GamePhysics(spec.entryX-.2,{id:'plasma-cannon',xp:1900});
+  const game=new GamePhysics(spec.entryX-.2,{id:'plasma-cannon',xp:3800});
   try {
     for(let i=0;i<600&&!game.crashed&&!game.snapshot(1).loopCompletions;i++) {
       game.step({...idle,suction:true,fire:true,aim:-1});
@@ -1107,13 +1169,13 @@ test('weapons follow a complete loop without changing driving, XP, or suspension
     assert.equal(state.health,100);
     assert.equal(state.grounded,true);
     assert.ok(state.weapon.ammo<18);
-    assert.equal(game.equipWeapon('laser-gun',1399),false);
+    assert.equal(game.equipWeapon('laser-gun',2799),false);
     assert.equal(game.snapshot(1).weapon.id,'plasma-cannon');
   } finally { game.dispose(); }
 });
 
 test('real physics loads saved upgrades and applies extra capacity without refilling spent ammunition', () => {
-  const game = new GamePhysics(7, { id:'machine-gun', xp:100,
+  const game = new GamePhysics(7, { id:'machine-gun', xp:200,
     upgrades:{ 'machine-gun':2, 'twin-gun':3 } });
   try {
     assert.equal(game.snapshot(1).weapon.level, 2);
@@ -1125,11 +1187,11 @@ test('real physics loads saved upgrades and applies extra capacity without refil
     assert.equal(game.snapshot(1).weapon.ammo, 127);
     game.upgradeWeapon('machine-gun', 3);
     assert.equal(game.snapshot(1).weapon.ammo, 127);
-    assert.equal(game.equipWeapon('twin-gun', 100), true);
+    assert.equal(game.equipWeapon('twin-gun', 200), true);
     assert.equal(game.snapshot(1).weapon.level, 3);
     assert.equal(game.snapshot(1).weapon.capacity, 160);
     assert.equal(game.snapshot(1).weapon.ammo, 160);
-    game.equipWeapon('machine-gun', 100);
+    game.equipWeapon('machine-gun', 200);
     assert.equal(game.snapshot(1).weapon.ammo, 127);
   } finally { game.dispose(); }
 });

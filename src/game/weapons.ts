@@ -11,13 +11,13 @@ export interface WeaponSpec {
 /** Ammo is per weapon per run; changing equipment never refills it. */
 export const WEAPONS: readonly WeaponSpec[] = [
   { id: 'machine-gun', name: 'MACHINE GUN', power: 1, xp: 0, price: 0, ammo: 80, interval: .18, turnSeconds: .55, damage: 1, speed: 62, range: 38, radius: .07, splash: 0, barrels: 1, muzzle: 1.5, color: '#ffe2a1' },
-  { id: 'twin-gun', name: 'TWIN GUN', power: 2, xp: 100, price: 1000, ammo: 100, interval: .23, turnSeconds: .60, damage: 1, speed: 66, range: 40, radius: .07, splash: 0, barrels: 2, muzzle: 1.5, color: '#ffe2a1' },
-  { id: 'gatling-gun', name: 'GATLING GUN', power: 3, xp: 250, price: 2000, ammo: 150, interval: .065, turnSeconds: .75, damage: 1, speed: 72, range: 40, radius: .07, splash: 0, barrels: 1, muzzle: 1.6, color: '#ffd16b' },
-  { id: 'cannon', name: 'CANNON', power: 4, xp: 450, price: 3000, ammo: 16, interval: .75, turnSeconds: .85, damage: 5, speed: 52, range: 42, radius: .14, splash: 1.3, barrels: 1, muzzle: 1.5, color: '#ffbd6b' },
-  { id: 'rocket-launcher', name: 'ROCKET LAUNCHER', power: 5, xp: 700, price: 4000, ammo: 12, interval: .70, turnSeconds: .95, damage: 6, speed: 36, range: 44, radius: .16, splash: 2.3, barrels: 1, muzzle: 1.05, color: '#ff8d68' },
-  { id: 'missile-launcher', name: 'MISSILE LAUNCHER', power: 5, xp: 1000, price: 5000, ammo: 10, interval: .85, turnSeconds: .80, damage: 7, speed: 34, range: 48, radius: .16, splash: 1.5, barrels: 1, muzzle: 1.25, color: '#ffb395' },
-  { id: 'laser-gun', name: 'LASER GUN', power: 6, xp: 1400, price: 6000, ammo: 50, interval: .15, turnSeconds: .65, damage: 2, speed: 0, range: 44, radius: .10, splash: 0, barrels: 1, muzzle: 1.3, color: '#66f8ee' },
-  { id: 'plasma-cannon', name: 'PLASMA CANNON', power: 6, xp: 1900, price: 7000, ammo: 18, interval: .42, turnSeconds: .90, damage: 10, speed: 44, range: 46, radius: .28, splash: 2.8, barrels: 1, muzzle: 1.6, color: '#e98bff' },
+  { id: 'twin-gun', name: 'TWIN GUN', power: 2, xp: 200, price: 1000, ammo: 100, interval: .23, turnSeconds: .60, damage: 1, speed: 66, range: 40, radius: .07, splash: 0, barrels: 2, muzzle: 1.5, color: '#ffe2a1' },
+  { id: 'gatling-gun', name: 'GATLING GUN', power: 3, xp: 500, price: 2000, ammo: 150, interval: .065, turnSeconds: .75, damage: 1, speed: 72, range: 40, radius: .07, splash: 0, barrels: 1, muzzle: 1.6, color: '#ffd16b' },
+  { id: 'cannon', name: 'CANNON', power: 4, xp: 900, price: 3000, ammo: 16, interval: .75, turnSeconds: .85, damage: 5, speed: 52, range: 42, radius: .14, splash: 1.3, barrels: 1, muzzle: 1.5, color: '#ffbd6b' },
+  { id: 'rocket-launcher', name: 'ROCKET LAUNCHER', power: 5, xp: 1400, price: 4000, ammo: 12, interval: .70, turnSeconds: .95, damage: 6, speed: 36, range: 44, radius: .16, splash: 2.3, barrels: 1, muzzle: 1.05, color: '#ff8d68' },
+  { id: 'missile-launcher', name: 'MISSILE LAUNCHER', power: 5, xp: 2000, price: 5000, ammo: 10, interval: .85, turnSeconds: .80, damage: 7, speed: 34, range: 48, radius: .16, splash: 1.5, barrels: 1, muzzle: 1.25, color: '#ffb395' },
+  { id: 'laser-gun', name: 'LASER GUN', power: 6, xp: 2800, price: 6000, ammo: 50, interval: .15, turnSeconds: .65, damage: 2, speed: 0, range: 44, radius: .10, splash: 0, barrels: 1, muzzle: 1.3, color: '#66f8ee' },
+  { id: 'plasma-cannon', name: 'PLASMA CANNON', power: 6, xp: 3800, price: 7000, ammo: 18, interval: .42, turnSeconds: .90, damage: 10, speed: 44, range: 46, radius: .28, splash: 2.8, barrels: 1, muzzle: 1.6, color: '#e98bff' },
 ];
 
 export const MAX_WEAPON_UPGRADE = 5;
@@ -38,7 +38,7 @@ export function weaponSpec(id: string, level = 0): WeaponSpec {
 export function weaponUpgradeCost(id: string, level: number): number | null {
   const spec = WEAPONS.find(weapon => weapon.id === id);
   if (!spec || !Number.isSafeInteger(level) || level < 0 || level >= MAX_WEAPON_UPGRADE) return null;
-  return Math.ceil(Math.max(1000, spec.price) * 1.5 ** (level + 1));
+  return Math.ceil(Math.max(1000, spec.price) * 0.5 * 1.25 ** level);
 }
 export function canEquip(id: string, xp: number): boolean {
   const spec = WEAPONS.find(weapon => weapon.id === id);

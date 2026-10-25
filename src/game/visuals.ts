@@ -9,7 +9,7 @@ import { CarArmorVisual } from './carArmor';
 import { CityBuildings } from './cityBuildings';
 import { ObstacleDebris } from './obstacleDebris';
 import { ImpactSparks } from './impactSparks';
-import { ImpactCamera, VIEW_HALF_HEIGHT } from './impactCamera';
+import { ImpactCamera, VIEW_HALF_HEIGHT, CAMERA_LOOK_AHEAD } from './impactCamera';
 import { createTerrainMaterial, createTerrainGeometry, createRoadCapGeometry } from './terrain';
 import { StartDepot } from './startDepot';
 import { BackdropBlur } from './backdropBlur';
@@ -472,7 +472,7 @@ export class GameVisuals {
       this.camera.updateProjectionMatrix();
     }
     const width = this.baseViewHeight * this.aspect * 2;
-    let targetX = snapshot.loop && center ? center.x + width * 0.08 : snapshot.car.x + width * 0.27;
+    let targetX = snapshot.loop && center ? center.x + width * 0.08 : snapshot.car.x + width * CAMERA_LOOK_AHEAD;
     const roadY = roadHeight(snapshot.car.x + 8) + 2.0;
     let targetY = center ? roadY + (center.y - roadY) * loopView : roadY;
     const focus = this.impactCamera.focus(snapshot.car);

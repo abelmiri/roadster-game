@@ -1,6 +1,6 @@
 .distance-rewards { position: absolute; top: 64px; left: calc(50% + (var(--hud-resource-width) - var(--hud-weapon-width)) * .5); transform: translateX(-50%) scale(var(--distance-reward-scale,1)); transform-origin: center; z-index: 4; width: min(480px,calc(100% - var(--hud-resource-width) - var(--hud-weapon-width) - var(--hud-edge) * 2 - 24px)); padding: 6px 10px 8px; border: 1px solid #e8cd8426; border-radius: 9px; background: #10283b35; opacity: .45; pointer-events: none; transition: opacity .28s ease, transform .28s ease, background-color .28s ease, border-color .28s ease, box-shadow .28s ease; }
 .distance-rewards.is-celebrating { --distance-reward-scale: 1.04; opacity: 1; background: #10283bd9; border-color: #f8da8fcc; box-shadow: 0 0 20px #edbd5338; }
-.distance-reward-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #e5d2a0; font-size: 9px; line-height: 1.5; margin-bottom: 7px; }
+.distance-reward-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 2px 12px; color: #e5d2a0; font-size: 9px; line-height: 1.5; margin-bottom: 7px; }
 .distance-reward-heading strong { color: #e3fff3; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .distance-reward-track { height: 5px; position: relative; border-radius: 4px; background: #ffffff20; direction: ltr; }
 .distance-reward-track > span { display: block; width: 100%; height: 100%; background: linear-gradient(90deg,#7ae1ce,#f1ca73); border-radius: inherit; transform-origin: left; transition: transform .2s linear; }
@@ -35,6 +35,7 @@
 .coin-milestone { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 11px 5px; border-radius: 10px; border: 1px solid #d6b55b40; background: #102536; }
 .coin-milestone span { color: #b5cbd4; font-size: 10px; font-variant-numeric: tabular-nums; }
 .coin-milestone strong { font-size: 12px; color: #ffe5a1; white-space: nowrap; }
+.coin-milestone-xp { font-size: 11px; color: #a6f4df; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .coin-method-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-top: 14px; }
 .coin-method { padding: 16px; border: 1px solid #7eafba35; border-radius: 13px; background: #ffffff03; }
 .coin-method .coin-guide-symbol { margin-bottom: 11px; color: #b4efdd; border-color: #9cecd23d; background: #9cecd208; }

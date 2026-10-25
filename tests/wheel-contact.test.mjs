@@ -15,6 +15,35 @@ const flat = { height: () => 0, slope: () => 0, exists: () => true };
 const bodyAt = (overrides = {}) => ({ x: 0, y: 0.79, angle: 0, vx: 0, vy: 0, omega: 0, ...overrides });
 const dt = 1 / 120;
 
+test('air nozzles lift opposite ends, balance together, and yield to even a single grounded tire', () => {
+  for (const surface of [flat, { ...flat, exists: x => x < 0 }, { ...flat, exists: x => x > 0 }]) {
+    const idleContact = new WheelContactPhysics(surface);
+    const jetContact = new WheelContactPhysics(surface);
+    const initial = bodyAt();
+    const idle = idleContact.step(initial, false, dt);
+    const jets = jetContact.step(initial, false, dt, false, {front:true, rear:true});
+    assert.deepEqual(jets, idle, 'a grounded axle allowed air thrust');
+    assert.equal(jetContact.frontJetActive, false);
+    assert.equal(jetContact.rearJetActive, false);
+  }
+  for (const [front, rear, sign] of [[true,false,1], [false,true,-1], [true,true,0]]) {
+    const contact = new WheelContactPhysics(flat);
+    let body = bodyAt({y:20});
+    contact.beginJump(body, true);
+    for(let i=0;i<20;i++) body = contact.step(body, false, dt, true, {front,rear});
+    assert.equal(contact.frontJetActive, front);
+    assert.equal(contact.rearJetActive, rear);
+    if(sign) assert.ok(sign * body.omega > 3, 'jump leveling resisted deliberate nozzle control');
+    else assert.equal(body.omega, 0);
+    assert.ok(body.vy < 0 && body.vy > -22 * 20 * dt, 'jets must lift without allowing a hover');
+    const spin = body.omega;
+    body = contact.step(body, false, dt);
+    assert.equal(contact.frontJetActive, false);
+    assert.equal(contact.rearJetActive, false);
+    assert.ok(Math.abs(body.omega - spin * Math.exp(-.65 * dt)) < 1e-9);
+  }
+});
+
 test('aligned landings preserve forward speed on level and sloped roads while the springs absorb the drop', () => {
   for (const slope of [-0.25, 0, 0.25]) {
     const contact = new WheelContactPhysics({ height: x => x * slope, slope: () => slope, exists: () => true });

@@ -218,6 +218,59 @@ test('invalid combat counters are ignored independently of valid rewards', () =>
   assert.equal(progress.collect(1,-1,1),0);
   assert.equal(progress.total,55);
 });
+
+test('all six distance goals award their exact XP once, persist, and contribute to run XP and levels', () => {
+  const values = new Map();
+  const storage = {getItem:key=>values.get(key), setItem:(key,value)=>values.set(key,value)};
+  const progress = new ExperienceProgress(storage);
+  let total = 0;
+  for(const [distance,xp] of [[1500,150],[3000,300],[4500,600],[6000,1000],[7500,1500],[10000,2000]]) {
+    assert.equal(progress.collect(0,0,0,distance-.01), 0);
+    assert.equal(progress.collect(0,0,0,distance), xp);
+    assert.equal(progress.lastRewardKind, 'distance');
+    total += xp;
+    assert.equal(progress.runXp, total);
+    assert.equal(progress.total, total);
+    assert.equal(values.get('roadster-xp'), String(total));
+    assert.equal(progress.collect(0,0,0,distance), 0);
+    assert.equal(progress.collect(0,0,0,distance-1), 0);
+  }
+  assert.equal(progress.total, 5550);
+  assert.equal(progress.level, 56);
+  assert.equal(progress.levelProgress, 50);
+  assert.equal(progress.collect(0,0,0,20000), 0);
+  const restored = new ExperienceProgress(storage);
+  assert.equal(restored.total, 5550);
+  assert.equal(restored.runXp, 0);
+});
+
+test('skipped distance goals combine with combat XP, end at game over, and reset only per-run claims', () => {
+  const progress = new ExperienceProgress();
+  assert.equal(progress.collect(2,3,1,4500), 1150);
+  assert.equal(progress.lastRewardKind, 'mixed');
+  assert.equal(progress.runXp, 1150);
+  assert.equal(progress.collect(2,3,1,4500), 0);
+  assert.equal(progress.collect(2,3,1,NaN), 0);
+  progress.finishRun();
+  assert.equal(progress.collect(3,4,2,10000), 0, 'wreck frames must never earn XP');
+  assert.equal(progress.total, 1150);
+  progress.resetRun();
+  assert.equal(progress.runXp, 0);
+  assert.equal(progress.collect(0,0,0,10000), 5550);
+  assert.equal(progress.total, 6700);
+  assert.equal(progress.runXp, 5550);
+});
+
+test('invalid distance cannot grant bonuses or discard valid combat XP, and storage failures remain playable', () => {
+  const progress = new ExperienceProgress({getItem(){throw Error();}, setItem(){throw Error();}});
+  for(const distance of [NaN,Infinity,-Infinity,-1]) assert.equal(progress.collect(0,0,0,distance), 0);
+  assert.equal(progress.collect(1,0,0,Infinity), 25);
+  assert.equal(progress.lastRewardKind, 'loop');
+  assert.equal(progress.collect(NaN,NaN,Infinity,1500), 150);
+  assert.equal(progress.lastRewardKind, 'distance');
+  assert.equal(progress.total, 175);
+  assert.equal(progress.runXp, 175);
+});
 test('unavailable or invalid storage never prevents XP progression', () => {
   const blocked = { getItem() { throw Error(); }, setItem() { throw Error(); } };
   const progress = new ExperienceProgress(blocked);

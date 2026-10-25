@@ -3,15 +3,16 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
-let ImpactCamera, VIEW_HALF_HEIGHT, CRASH_ZOOM;
+let ImpactCamera, VIEW_HALF_HEIGHT, CRASH_ZOOM, CAMERA_LOOK_AHEAD;
 before(async()=>{
   const outdir=path.resolve('node_modules/.cache/roadster-camera-tests');
   await build({entryPoints:['src/game/impactCamera.ts'],bundle:true,platform:'node',format:'esm',outdir,outExtension:{'.js':'.mjs'}});
-  ({ImpactCamera,VIEW_HALF_HEIGHT,CRASH_ZOOM}=await import(pathToFileURL(path.join(outdir,'impactCamera.mjs')).href));
+  ({ImpactCamera,VIEW_HALF_HEIGHT,CRASH_ZOOM,CAMERA_LOOK_AHEAD}=await import(pathToFileURL(path.join(outdir,'impactCamera.mjs')).href));
 });
 const contact={serial:1,x:22,y:3,kind:'collision'};
 test('the ordinary view is 20% wider; collisions zoom 70% toward the car and contact, then ease back',()=>{
   assert.ok(Math.abs(VIEW_HALF_HEIGHT-10.8*1.2)<1e-9);
+  assert.equal(CAMERA_LOOK_AHEAD, .27 * 1.2);
   const camera=new ImpactCamera();
   camera.update([contact],1,false,.04);
   assert.ok(camera.zoom>1&&camera.zoom<1.7);

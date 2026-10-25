@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import type { GameSnapshot } from './physics';
 import { sprungBodyPose } from './vehicle';
+import { AIR_JET_X, AIR_JET_Y } from './airJets';
 
 type SmokeSnapshot = Pick<GameSnapshot, 'car' | 'suspensionOffset' | 'suspensionPitch' | 'speed' | 'distance' |
-  'health' | 'wrecked' | 'crashed' | 'jumpSerial' | 'boostActive' | 'jumpJetActive'>;
+  'health' | 'wrecked' | 'crashed' | 'jumpSerial' | 'boostActive' | 'jumpJetActive'> &
+  Partial<Pick<GameSnapshot, 'frontJetActive' | 'rearJetActive'>>;
 
 const CAPACITY = 128;
 const BOOST_INTERVAL = 1 / 45;
@@ -55,6 +57,8 @@ export class CarSmoke {
   private dirty = false;
   private boostClock = 0;
   private jumpClock = 0;
+  private frontJetClock = 0;
+  private rearJetClock = 0;
   private damageClock = 0;
   private jumpSerial = 0;
   private previousDistance = 0;
@@ -71,7 +75,7 @@ export class CarSmoke {
     this.writeInstances();
   }
 
-  private emit(snapshot: SmokeSnapshot, kind: 'boost' | 'jump' | 'damage', nozzle: number, burst = false): void {
+  private emit(snapshot: SmokeSnapshot, kind: 'boost' | 'jump' | 'air' | 'damage', nozzle: number, burst = false): void {
     this.dirty = true;
     const puff = this.puffs[this.cursor];
     this.cursor = (this.cursor + 1) % CAPACITY;
@@ -79,8 +83,8 @@ export class CarSmoke {
     const angle = body.angle;
     const cos = Math.cos(angle);
     const sin = Math.sin(angle);
-    const localX = kind === 'damage' ? 1.25 + nozzle * 0.14 : kind === 'boost' ? -2.15 : nozzle * 0.46;
-    const localY = kind === 'damage' ? 0.30 : kind === 'boost' ? -0.25 : -0.55;
+    const localX = kind === 'damage' ? 1.25 + nozzle * 0.14 : kind === 'boost' ? -2.15 : nozzle * (kind === 'air' ? AIR_JET_X : 0.46);
+    const localY = kind === 'damage' ? 0.30 : kind === 'boost' ? -0.25 : kind === 'air' ? AIR_JET_Y : -0.55;
     const spread = (Math.random() - 0.5) * (burst ? 1.8 : 0.65);
     puff.x = body.x + localX * cos - localY * sin;
     puff.y = body.y + localX * sin + localY * cos;
@@ -137,6 +141,17 @@ export class CarSmoke {
           this.jumpClock -= JUMP_INTERVAL;
         }
       } else this.jumpClock = 0;
+      for (const front of [true, false]) {
+        const active = front ? snapshot.frontJetActive : snapshot.rearJetActive;
+        let clock = front ? this.frontJetClock : this.rearJetClock;
+        clock = active ? clock + dt : 0;
+        while (clock >= JUMP_INTERVAL) {
+          this.emit(snapshot, 'air', front ? 1 : -1);
+          clock -= JUMP_INTERVAL;
+        }
+        if (front) this.frontJetClock = clock;
+        else this.rearJetClock = clock;
+      }
     }
     this.jumpSerial = snapshot.jumpSerial;
     for (const puff of this.puffs) {
@@ -190,6 +205,7 @@ export class CarSmoke {
     for (const puff of this.puffs) puff.life = 0;
     this.boostClock = 0;
     this.jumpClock = 0;
+    this.frontJetClock = this.rearJetClock = 0;
     this.damageClock = 0;
   }
 

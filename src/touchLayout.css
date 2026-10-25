@@ -2,12 +2,31 @@
 .touch-controls {
   inset: max(140px, env(safe-area-inset-top)) max(28px, env(safe-area-inset-right)) max(26px, env(safe-area-inset-bottom)) max(28px, env(safe-area-inset-left));
 }
-.touch-controls .touch-button { position: absolute; margin: 0; }
+.touch-controls .touch-button {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  gap: 2px;
+  background: rgb(22 45 64 / 23%);
+  border-color: rgb(255 255 255 / 35%);
+  color: rgb(255 255 255 / 86%);
+  backdrop-filter: blur(3px);
+  box-shadow: 0 4px 18px rgb(10 24 35 / 8%);
+  transition: background .15s, border-color .15s, color .15s;
+}
+.touch-controls .touch-button[hidden] { display: none; }
+.touch-controls .touch-jump { background: rgb(159 245 221 / 35%); border-color: rgb(200 255 235 / 48%); color: #effff9; }
+.touch-controls .touch-fire { background: rgb(163 120 66 / 25%); border-color: rgb(248 217 156 / 40%); color: #fff3d8; }
+.touch-controls .touch-button.is-pressed { background: rgb(104 233 212 / 60%); border-color: #a6f4df; color: #fff; }
+.touch-icon { width: 48%; height: 48%; max-width: 34px; max-height: 34px; flex-shrink: 0; }
 .touch-fire { left: 0; bottom: 87px; }
 .touch-suction { left: 0; bottom: 0; }
 .touch-aim { left: 84px; bottom: 16px; width: 44px; height: 44px; }
 .touch-boost { right: 105px; bottom: 0; }
 .touch-jump { right: 0; bottom: 0; }
+.touch-front-jet, .touch-rear-jet { width: 52px; height: 52px; }
+.touch-front-jet { right: 4px; bottom: 108px; }
+.touch-rear-jet { right: 108px; bottom: 88px; }
 .touch-controls .is-positioned { right: auto; bottom: auto; }
 .touch-layout-button { display: none; }
 .touch-layout-editor[hidden] { display: none; }
@@ -29,7 +48,7 @@
 .touch-layout-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .touch-layout-heading strong { font-size: 14px; }
 .touch-layout-heading > span { color: #adc9d4; font-size: 11px; }
-.touch-layout-options { display: flex; align-items: center; gap: 10px; }
+.touch-layout-options { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .touch-layout-options label { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .touch-layout-sizing { flex: 1; }
 .touch-layout-options select, .touch-layout-options button {
@@ -46,11 +65,17 @@
 .touch-layout-options input { width: 100%; min-width: 60px; margin: 0; accent-color: #a6f4df; touch-action: pan-x; }
 .touch-layout-options output { min-width: 44px; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
 .touch-layout-options .touch-layout-save { background: #a6f4df; border-color: #a6f4df; color: #142c3b; font-weight: 800; }
+.touch-layout-options .touch-layout-visibility { display: flex; align-items: center; justify-content: center; gap: 5px; color: #a6f4df; }
+.touch-layout-visibility[aria-pressed=false] { color: #b6bcc4; }
+.touch-visibility-slash { display: none; }
+.touch-layout-visibility[aria-pressed=false] .touch-visibility-slash { display: block; }
 .is-editing-touch .overlay, .is-editing-touch .topbar { visibility: hidden; }
 .is-editing-touch .resources-panel, .is-editing-touch .weapon-panel, .is-editing-touch .bottom-hud { opacity: .3; pointer-events: none; }
 .is-editing-touch .touch-controls { z-index: 11; }
-.is-editing-touch .touch-button { cursor: move; border-style: dashed; box-shadow: 0 0 0 3px #152b4055; }
+.is-editing-touch .touch-controls .touch-button { cursor: move; border-style: dashed; background: #193c51b3; box-shadow: 0 0 0 3px #152b4055; }
 .is-editing-touch .touch-button.is-empty { opacity: 1; }
+.is-editing-touch .touch-button.is-layout-hidden { opacity: .35; }
+.is-editing-touch .touch-button.is-layout-hidden.is-selected { opacity: .65; }
 .is-editing-touch .touch-button.is-selected { outline: 3px solid #a6f4df; outline-offset: 4px; }
 html[lang=fa] .touch-layout-editor { direction: rtl; }
 html[lang=fa] .touch-layout-heading > span { font-size: 12px; }
@@ -62,6 +87,8 @@ html[lang=fa] .touch-layout-heading > span { font-size: 12px; }
   .touch-fire { bottom: 69px; }
   .touch-aim { left: 69px; bottom: 8px; }
   .touch-boost { right: 90px; }
+  .touch-front-jet { right: 10px; bottom: 92px; width: 48px; height: 48px; }
+  .touch-rear-jet { right: 96px; bottom: 76px; width: 48px; height: 48px; }
 }
 @media(max-width:700px) {
   .touch-layout-editor { padding: 10px 12px; }
@@ -71,6 +98,7 @@ html[lang=fa] .touch-layout-heading > span { font-size: 12px; }
   .touch-layout-options label > span { display: none; }
   .touch-layout-options select, .touch-layout-options button { padding: 7px 9px; }
   .touch-layout-options select { max-width: 90px; }
+  .touch-layout-visibility > span { display: none; }
 }
 @media(max-width:650px) and (orientation:portrait) {
   .touch-layout-editor { visibility: hidden; }

@@ -1,4 +1,5 @@
 import { CAR_AXLE_Y, CAR_SUSPENSION_TRAVEL, CAR_WHEEL_OFFSET, CAR_WHEEL_RADIUS } from './vehicle';
+import { AIR_JET_THRUST, AIR_JET_TURN_ACCELERATION, AIR_JET_MAX_SPIN } from './airJets';
 
 export const ROAD_GRAVITY = 22;
 export const SUCTION_ACCELERATION = 68;
@@ -47,6 +48,8 @@ export class WheelContactPhysics {
   })) as [WheelState, WheelState];
   suction = 0;
   undershot = false;
+  frontJetActive = false;
+  rearJetActive = false;
   private readonly spinning = [0, 0];
   private readonly touching = [false, false];
   private readonly samples: [Sample, Sample] = [0, 1].map(() => ({
@@ -128,11 +131,13 @@ export class WheelContactPhysics {
     body.omega += sample.lever * amount / INERTIA;
   }
 
-  step(initial: ContactBody, suctionHeld: boolean, dt: number, jumpJetActive = false): ContactBody {
+  step(initial: ContactBody, suctionHeld: boolean, dt: number, jumpJetActive = false,
+    airJets?: { front?: boolean; rear?: boolean }): ContactBody {
     const body = { ...initial };
     const h = dt / SUBSTEPS;
     this.suction = 0;
     this.undershot = false;
+    this.frontJetActive = this.rearJetActive = false;
     // Preserve the driver's current speed through touchdown, including any
     // deliberate drive deceleration, rather than restoring a stale boost speed.
     this.landingSpeed = Math.min(this.landingSpeed, initial.vx + this.landingLoss);
@@ -203,6 +208,25 @@ export class WheelContactPhysics {
         this.touching[index] = contact;
       }
       this.suction = Math.max(this.suction, attraction);
+      // Test both tires at every substep: a single grounded axle disables the
+      // air controls. Thrust follows the chassis; opposing jets cancel torque.
+      if (!this.touching[0] && !this.touching[1]) {
+        const front = airJets?.front === true;
+        const rear = airJets?.rear === true;
+        if (front || rear) {
+          this.frontJetActive ||= front;
+          this.rearJetActive ||= rear;
+          this.jumpLeveling = false;
+          const thrust = (Number(front) + Number(rear)) * AIR_JET_THRUST;
+          ax -= Math.sin(body.angle) * thrust;
+          ay += Math.cos(body.angle) * thrust;
+          const direction = Number(front) - Number(rear);
+          if (direction) {
+            const acceleration = direction * clamp((AIR_JET_MAX_SPIN - direction * body.omega) / h, 0, AIR_JET_TURN_ACCELERATION);
+            torque += INERTIA * acceleration;
+          }
+        }
+      }
       if (this.jumpLeveling) {
         if (!supported) this.jumpAirborne = true;
         else if (this.jumpAirborne) this.jumpLeveling = false;

@@ -19,7 +19,7 @@ export class PlayerProgress {
   private readonly owned = new Set<WeaponId>(['machine-gun']);
   private readonly upgrades: WeaponUpgrades = {};
   private readonly vehicleUpgrades: CarUpgrades = {};
-  private collected = [0, 0, 0];
+  private collected = [0, 0, 0, 0];
   private finished = false;
   private distanceRewardsCollected = 0;
 
@@ -102,11 +102,11 @@ export class PlayerProgress {
     return 'purchased';
   }
 
-  collect(distance: number, completedLoops: number, destroyedPolice: number): number {
+  collect(distance: number, completedLoops: number, destroyedPolice: number, completedFlips = 0): number {
     if (this.finished) return 0;
     const milestones = Number.isFinite(distance) && distance >= 0 ? Math.floor(distance / 200) : NaN;
-    const counters = [milestones, completedLoops, destroyedPolice];
-    const rewards = [10, 5, 10];
+    const counters = [milestones, completedLoops, destroyedPolice, completedFlips];
+    const rewards = [10, 5, 10, 5];
     let gained = 0;
     counters.forEach((count, index) => {
       if (!validCount(count) || count <= this.collected[index]) return;
@@ -149,7 +149,7 @@ export class PlayerProgress {
   }
 
   resetRun(): void {
-    this.collected = [0, 0, 0];
+    this.collected = [0, 0, 0, 0];
     this.finished = false;
     this.distanceRewardsCollected = 0;
     this.runCoins = 0;

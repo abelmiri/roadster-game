@@ -106,6 +106,31 @@ test('each accepted jump emits underneath, including the double jump', () => {
   } finally { smoke.dispose(); }
 });
 
+test('air jet exhaust follows only the active front or rear outlet and rotates with the chassis', () => {
+  for (const front of [true, false]) {
+    const smoke = new CarSmoke();
+    try {
+      const active = { frontJetActive:front, rearJetActive:!front, speed:0 };
+      smoke.update(snapshot(active), .02);
+      const puffs = positions(smoke);
+      assert.equal(puffs.length, 1);
+      assert.ok(Math.abs(puffs[0].x - (10 + (front ? 1.87 : -1.87))) < .03);
+      assert.ok(puffs[0].y < 3.43);
+      const count = smoke.activeCount;
+      smoke.update(snapshot(), .02);
+      assert.equal(smoke.activeCount, count, 'released air jet kept emitting');
+      smoke.clear();
+      smoke.update(snapshot({...active, car:{x:10,y:4,angle:Math.PI/2}}), .02);
+      const rotated = positions(smoke)[0];
+      assert.ok(rotated.x > 10.57);
+      assert.ok(Math.abs(rotated.y - (4 + (front ? 1.87 : -1.87))) < .03);
+      const frozen = positions(smoke);
+      smoke.update(snapshot(active), .06, false);
+      assert.deepEqual(positions(smoke), frozen);
+    } finally { smoke.dispose(); }
+  }
+});
+
 test('downward smoke follows active jump thrust and stops emitting as soon as it ends', () => {
   const smoke = new CarSmoke();
   try {

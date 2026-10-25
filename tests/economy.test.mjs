@@ -72,6 +72,23 @@ test('record bonuses use one exclusive tier and are awarded only once for a stri
   assert.equal(p.coins, 35);
 });
 
+test('airborne flips pay five each, retain skipped turns, persist, and never pay twice or during a wreck', () => {
+  const s = store(); const p = new PlayerProgress(s.storage);
+  assert.equal(p.collect(0, 0, 0, 1), 5);
+  assert.equal(p.collect(0, 0, 0, 4), 15);
+  assert.equal(p.collect(0, 0, 0, 4), 0);
+  assert.equal(p.collect(0, 0, 0, 2), 0);
+  assert.equal(p.collect(200, 1, 1, NaN), 25);
+  assert.equal(p.collect(200, 1, 1, 5), 5);
+  assert.equal(new PlayerProgress(s.storage).coins, 50);
+  p.finishRun(200);
+  assert.equal(p.collect(200, 1, 1, 100), 0);
+  p.resetRun();
+  assert.equal(p.collect(0, 0, 0, 1), 5);
+  assert.equal(p.runCoins, 5);
+  assert.equal(new PlayerProgress(s.storage).coins, 55);
+});
+
 test('record score persists before naming, a reload retains the pending form, and a name survives updates', () => {
   const s = store(30, { 'roadster-language': 'fa', 'roadster-best': '900' });
   const p = new PlayerProgress(s.storage);
@@ -122,22 +139,22 @@ test('purchases require both XP and coins, debit once, persist ownership atomica
   assert.equal(p.coins, 0);
   p.resetRun();
   assert.equal(p.ownsWeapon('plasma-cannon'), true);
-  assert.equal(new PlayerProgress().purchaseWeapon('twin-gun', 100), 'insufficient-coins');
+  assert.equal(new PlayerProgress().purchaseWeapon('twin-gun', 200), 'insufficient-coins');
 });
 
 test('XP and saved selection cannot bypass a purchase, while owned weapons can be equipped for free', () => {
   const s = store(1000, { 'roadster-weapon': 'plasma-cannon' });
   const p = new PlayerProgress(s.storage);
-  const loadout = new WeaponLoadout(1900, s.storage, id => p.ownsWeapon(id));
+  const loadout = new WeaponLoadout(3800, s.storage, id => p.ownsWeapon(id));
   assert.equal(loadout.selected, 'machine-gun');
-  assert.equal(loadout.select('twin-gun', 1900), false);
+  assert.equal(loadout.select('twin-gun', 3800), false);
   assert.equal(p.coins, 1000);
-  p.purchaseWeapon('twin-gun', 100);
-  assert.equal(loadout.select('twin-gun', 100), true);
-  assert.equal(loadout.select('twin-gun', 100), true);
+  p.purchaseWeapon('twin-gun', 200);
+  assert.equal(loadout.select('twin-gun', 200), true);
+  assert.equal(loadout.select('twin-gun', 200), true);
   assert.equal(p.coins, 0);
   const restored = new PlayerProgress(s.storage);
-  assert.equal(new WeaponLoadout(100, s.storage, id => restored.ownsWeapon(id)).selected, 'twin-gun');
+  assert.equal(new WeaponLoadout(200, s.storage, id => restored.ownsWeapon(id)).selected, 'twin-gun');
 });
 
 test('invalid or unavailable storage preserves safe defaults and session progress', () => {
@@ -148,9 +165,9 @@ test('invalid or unavailable storage preserves safe defaults and session progres
     assert.equal(p.ownsWeapon('machine-gun'), true);
   }
   const p = new PlayerProgress({ getItem() { throw Error(); }, setItem() { throw Error(); } });
-  assert.equal(p.collect(20000, 0, 0), 2495);
-  assert.equal(p.purchaseWeapon('twin-gun', 100), 'purchased');
-  assert.equal(p.coins, 1495);
+  assert.equal(p.collect(20000, 0, 0), 5100);
+  assert.equal(p.purchaseWeapon('twin-gun', 200), 'purchased');
+  assert.equal(p.coins, 4100);
   assert.equal(p.finishRun(20001).bonus, 25);
   assert.equal(p.nameRecord('Driver'), true);
 });
@@ -182,13 +199,13 @@ test('each owned weapon has exactly five paid upgrade levels saved with one atom
 });
 
 test('unowned weapons and insufficient balances cannot be upgraded or charged', () => {
-  const s = store(1499); const p = new PlayerProgress(s.storage);
+  const s = store(499); const p = new PlayerProgress(s.storage);
   assert.equal(p.upgradeWeapon('unknown'), 'unknown');
   assert.equal(p.upgradeWeapon('twin-gun'), 'unowned');
   assert.equal(p.upgradeWeapon('machine-gun'), 'insufficient-coins');
   assert.equal(p.weaponLevel('machine-gun'), 0);
   assert.equal(p.weaponLevel('__proto__'), 0);
-  assert.equal(p.coins, 1499);
+  assert.equal(p.coins, 499);
   assert.equal(s.writes.length, 0);
   p.collect(200, 0, 0);
   assert.equal(p.upgradeWeapon('machine-gun'), 'upgraded');
@@ -210,13 +227,13 @@ test('old saves retain their wallet and record; corrupt and unowned upgrade leve
     assert.equal(p.weaponLevel('twin-gun'), 0);
     assert.equal(p.coins, 3000);
     assert.equal(p.record.name, 'Driver');
-    p.purchaseWeapon('twin-gun', 100);
+    p.purchaseWeapon('twin-gun', 200);
     assert.equal(p.weaponLevel('twin-gun'), 0);
   }
   const blocked = new PlayerProgress({ getItem() { throw Error(); }, setItem() { throw Error(); } });
   blocked.collect(30000, 0, 0);
   assert.equal(blocked.upgradeWeapon('machine-gun'), 'upgraded');
-  assert.equal(blocked.coins, 1495);
+  assert.equal(blocked.coins, 5100);
 });
 
 test('car upgrades have four exact price steps, debit atomically and persist independently', () => {
@@ -262,33 +279,33 @@ test('insufficient funds and corrupt vehicle levels cannot consume coins or rese
 });
 
 test('all six distance bonuses pay their full value once per run, retain skipped goals, and reset cleanly',()=>{
-  assert.deepEqual(DISTANCE_COIN_REWARDS.map(reward=>[reward.distance,reward.coins]),[[1500,50],[3000,120],[4500,200],[6000,275],[7500,350],[10000,500]]);
+  assert.deepEqual(DISTANCE_COIN_REWARDS.map(reward=>[reward.distance,reward.coins]),[[1500,100],[3000,250],[4500,500],[6000,750],[7500,1000],[10000,1500]]);
   const s=store(); const p=new PlayerProgress(s.storage);
-  const increments=[120,200,270,355,420,630];
+  const increments=[170,330,570,830,1070,1630];
   for(const [index,reward] of DISTANCE_COIN_REWARDS.entries()) {
     assert.equal(p.collect(reward.distance,0,0),increments[index],'the goal bonus is in addition to regular 200m rewards');
     assert.equal(p.collect(reward.distance,0,0),0);
     assert.equal(p.collect(reward.distance-1,0,0),0);
   }
-  assert.equal(p.runCoins,1995);
-  assert.equal(new PlayerProgress(s.storage).coins,1995);
+  assert.equal(p.runCoins,4600);
+  assert.equal(new PlayerProgress(s.storage).coins,4600);
   p.resetRun();
-  assert.equal(p.collect(10000,0,0),1995,'a skipped display interval must retain all six bonuses');
+  assert.equal(p.collect(10000,0,0),4600,'a skipped display interval must retain all six bonuses');
   assert.equal(p.collect(10000,0,0),0);
-  assert.equal(p.coins,3990);
+  assert.equal(p.coins,9200);
   p.finishRun(10000);
   assert.equal(p.collect(12000,1,1),0,'a wreck cannot keep earning rewards');
   const boundary=new PlayerProgress();
   assert.equal(boundary.collect(1499.99,0,0),70);
-  assert.equal(boundary.collect(1500,0,0),50);
+  assert.equal(boundary.collect(1500,0,0),100);
   assert.equal(boundary.collect(Infinity,NaN,NaN),0);
 });
 
 test('the distance bar handles its next goal, completed route and invalid values',()=>{
   assert.equal(distanceCoinProgress(0).next.distance,1500);
   const first=distanceCoinProgress(1500);
-  assert.equal(first.fraction,.15); assert.equal(first.next.distance,3000); assert.equal(first.next.coins,120);
-  assert.equal(distanceCoinProgress(9999).next.coins,500);
+  assert.equal(first.fraction,.15); assert.equal(first.next.distance,3000); assert.equal(first.next.coins,250);
+  assert.equal(distanceCoinProgress(9999).next.coins,1500);
   assert.deepEqual(distanceCoinProgress(12000),{distance:12000,fraction:1,next:null});
   assert.equal(distanceCoinProgress(NaN).fraction,0);
   assert.equal(distanceCoinProgress(-100).distance,0);

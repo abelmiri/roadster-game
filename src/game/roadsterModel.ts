@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CAR_ARCH_RADIUS, CAR_AXLE_Y, CAR_WHEEL_OFFSET, CAR_WHEEL_RADIUS } from './vehicle';
+import { AIR_JET_X, AIR_JET_Y } from './airJets';
 
 export const profileY = (y: number): number => y > 0.30 ? 0.30 + (y - 0.30) * 0.62 : y;
 
@@ -140,6 +141,21 @@ export function createRoadsterBody(): THREE.Group {
     rim.rotation.x = Math.PI / 2;
     rim.position.set(x, -0.555, 0.38);
     group.add(rim);
+  }
+  const jetGlow = new THREE.MeshBasicMaterial({ color: '#a6f4ef' });
+  for (const direction of [-1, 1]) {
+    const jet = new THREE.Group();
+    jet.name = direction > 0 ? 'front-air-nozzle' : 'rear-air-nozzle';
+    jet.position.set(direction * AIR_JET_X, AIR_JET_Y, 0.56);
+    const housing = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.095, 0.18, 12), trim);
+    housing.position.y = 0.09;
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.095, 0.025, 6, 12), shade);
+    rim.rotation.x = Math.PI / 2;
+    const outlet = new THREE.Mesh(new THREE.CircleGeometry(0.072, 12), jetGlow);
+    outlet.rotation.x = Math.PI / 2;
+    outlet.position.y = -0.005;
+    jet.add(housing, rim, outlet);
+    group.add(jet);
   }
   group.position.z = 1.15;
   return group;

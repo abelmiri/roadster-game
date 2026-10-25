@@ -1,6 +1,7 @@
 import type { SparkEvent } from './impactSparks';
 
 export const VIEW_HALF_HEIGHT = 10.8 * 1.2;
+export const CAMERA_LOOK_AHEAD = 0.27 * 1.2;
 export const IMPACT_ZOOM = 1.7;
 export const CRASH_ZOOM = 1.5;
 const CRASH_TRANSITION = 2;

@@ -12,7 +12,7 @@ const stubs = {
   export const FIXED_STEP=1/120; export class GamePhysics {
     weapon=new VehicleWeapon();
     damage=new VehicleDamage();
-    constructor(x,loadout){this.weapon=new VehicleWeapon('machine-gun',loadout?.upgrades);this.damage=new VehicleDamage(loadout?.carUpgrades?.armor??0);if(loadout)this.weapon.equip(loadout.id,loadout.xp);Object.assign(globalThis.snapshot,{distance:0,health:this.damage.health,hullHealth:100,maxHealth:this.damage.maxHealth,armorMask:this.damage.armorMask,carUpgrades:loadout?.carUpgrades??{},impactSerial:0,invincibilityRemaining:0,crashed:false,wrecked:false,loopCompletions:0,obstaclesDestroyed:0,policeDestroyed:0,runXp:0,weapon:this.weapon.snapshot()});globalThis.dead=false}
+    constructor(x,loadout){this.weapon=new VehicleWeapon('machine-gun',loadout?.upgrades);this.damage=new VehicleDamage(loadout?.carUpgrades?.armor??0);if(loadout)this.weapon.equip(loadout.id,loadout.xp);Object.assign(globalThis.snapshot,{distance:0,health:this.damage.health,hullHealth:100,maxHealth:this.damage.maxHealth,armorMask:this.damage.armorMask,carUpgrades:loadout?.carUpgrades??{},impactSerial:0,invincibilityRemaining:0,crashed:false,wrecked:false,loopCompletions:0,obstaclesDestroyed:0,policeDestroyed:0,flipsCompleted:0,runXp:0,weapon:this.weapon.snapshot()});globalThis.dead=false}
     get impactSerial(){return globalThis.snapshot.impactSerial}
     get explosionSerial(){return this.weapon.destructionSerial}
     stepWreck(){globalThis.wreckSteps++}
@@ -95,22 +95,23 @@ async function page(language = 'en-US', saved = {}, development = false, reduced
     querySelectorAll(selector) {
       if(this.attrs.id==='car-pane'&&selector==='button:not(:disabled)') return ['armor','boost-reserve','boost-power'].map(id=>ids.get(`upgrade-car-${id}`)).filter(button=>!button.disabled);
       if(this.attrs.id==='weapons-pane'&&selector==='button:not(:disabled)') return weaponIds.flatMap(id=>[ids.get(`equip-${id}`),ids.get(`upgrade-${id}`)]).filter(button=>!button.disabled);
-      if (this.attrs.id === 'touch-controls' && selector === 'button') return ['fire', 'suction', 'aim', 'boost', 'jump'].map(id => ids.get(`touch-${id}`));
-      if (this.attrs.id === 'touch-layout-editor' && selector === 'select, input, button') return ['control', 'size', 'reset', 'cancel', 'save'].map(id => ids.get(`touch-layout-${id}`));
+      if (this.attrs.id === 'touch-controls' && selector === 'button') return ['fire', 'suction', 'aim', 'boost', 'front-jet', 'rear-jet', 'jump'].map(id => ids.get(`touch-${id}`));
+      if (this.attrs.id === 'touch-layout-editor' && selector === 'select, input, button') return ['control', 'size', 'visibility', 'reset', 'cancel', 'save'].map(id => ids.get(`touch-layout-${id}`));
       return document.querySelectorAll(selector);
     }
     getBoundingClientRect() {
+      if (this.hidden) return {left:0, top:0, width:0, height:0};
       const width = context.window.innerWidth - 56;
       const height = context.window.innerHeight - 152;
       if (this.attrs.id === 'touch-controls') return { left: 28, top: 134, width, height };
       const id = this.attrs.id?.replace(/^touch-/, '');
-      const sizes = { jump: 76, fire: 54, boost: 60, aim: 44, suction: 60 };
+      const sizes = { jump: 76, fire: 54, boost: 60, aim: 44, suction: 60, 'front-jet': 48, 'rear-jet': 48 };
       if (!(id in sizes)) return { left: 0, top: 0, width: 0, height: 0 };
       const size = Number.parseFloat(this.style.width) || sizes[id];
       const left = this.classes.has('is-positioned') ? Number.parseFloat(this.style.left)
-        : id === 'jump' ? width - size : id === 'boost' ? width - 90 - size : id === 'aim' ? 69 : 0;
+        : id === 'jump' ? width - size : id === 'boost' ? width - 90 - size : id === 'front-jet' ? width - 10 - size : id === 'rear-jet' ? width - 96 - size : id === 'aim' ? 69 : 0;
       const top = this.classes.has('is-positioned') ? Number.parseFloat(this.style.top)
-        : height - size - (id === 'fire' ? 69 : id === 'aim' ? 8 : 0);
+        : height - size - (id === 'front-jet' ? 92 : id === 'rear-jet' ? 76 : id === 'fire' ? 69 : id === 'aim' ? 8 : 0);
       return { left: 28 + left, top: 134 + top, width: size, height: size };
     }
   }
@@ -233,7 +234,7 @@ test('XP rewards celebrate level changes and fill through the boundary instead o
 });
 
 test('air use and refill have different feedback; speed eases and ammunition reacts to firing', async () => {
-  const p = await page('en-US', { 'roadster-xp': '100', 'roadster-progress': progressSave(0, ['machine-gun', 'twin-gun']) });
+  const p = await page('en-US', { 'roadster-xp': '200', 'roadster-progress': progressSave(0, ['machine-gun', 'twin-gun']) });
   await p.click('primary-button');
   p.context.snapshot.boost = .82; p.context.snapshot.speed = 25;
   p.key('KeyF'); p.advance(17); p.key('KeyF', 'keyup');
@@ -452,7 +453,7 @@ test('Farsi keeps physical key names in English across ready, pause, and restart
 });
 
 test('armory respects XP locks, remembers equipment, pauses combat, and switching cannot refill ammo', async () => {
-  const p = await page('fa-IR', { 'roadster-xp':'250', 'roadster-progress': progressSave(2000) });
+  const p = await page('fa-IR', { 'roadster-xp':'500', 'roadster-progress': progressSave(2000) });
   assert.equal(p.ids.get('equip-gatling-gun').disabled, false);
   assert.equal(p.ids.get('equip-cannon').disabled, true);
   await p.click('armory-button');
@@ -519,7 +520,7 @@ test('touch layout edits every control independently, pauses input, persists, an
   assert.equal(p.context.document.activeElement, p.ids.get('touch-fire'));
   p.key('Tab', 'keydown', { shiftKey: true });
   assert.equal(p.context.document.activeElement, p.ids.get('touch-layout-save'));
-  const sizes = { jump: 98, fire: 87, boost: 103, aim: 63, suction: 72 };
+  const sizes = { jump: 98, fire: 87, boost: 103, aim: 63, suction: 72, 'front-jet': 65, 'rear-jet': 68 };
   for (const [id, size] of Object.entries(sizes)) {
     const button = p.ids.get(`touch-${id}`);
     const before = button.getBoundingClientRect();
@@ -633,14 +634,18 @@ test('earned loop XP allows a coin purchase, and the purchased weapon survives a
   await p.click('armory-close');
   p.context.snapshot.loopCompletions=2;p.advance(77);
   await p.click('armory-button');
-  assert.equal(p.ids.get('equip-twin-gun').disabled,true,'the doubled requirement is 100 XP');
+  assert.equal(p.ids.get('equip-twin-gun').disabled,true,'50 XP is below the 200 XP requirement');
   await p.click('armory-close');
   p.context.snapshot.loopCompletions=4;p.advance(137);
   await p.click('armory-button');
+  assert.equal(p.ids.get('equip-twin-gun').disabled,true,'the previous 100 XP threshold must remain locked');
+  await p.click('armory-close');
+  p.context.snapshot.loopCompletions=8;p.advance(197);
+  await p.click('armory-button');
   assert.equal(p.ids.get('equip-twin-gun').disabled,false);
   await p.click('equip-twin-gun');
-  assert.equal(p.storage.get('roadster-xp'),'100','buying must not spend XP');
-  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins,20,'four loops earned 20 coins before the 1000-coin purchase');
+  assert.equal(p.storage.get('roadster-xp'),'200','buying must not spend XP');
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins,40,'eight loops earned 40 coins before the 1000-coin purchase');
   assert.equal(p.context.snapshot.weapon.id,'twin-gun');
   const reloaded=await page('fa-IR',Object.fromEntries(p.storage));
   assert.equal(reloaded.context.snapshot.weapon.id,'twin-gun');
@@ -677,7 +682,7 @@ test('combat XP shows its source, persists, and never pays twice on restart', as
 
 
 test('number row and numpad select all eight weapons without opening armory or refilling ammunition', async () => {
-  const p = await page('fa-IR', { 'roadster-xp': '1900', 'roadster-progress': progressSave(0, weaponIds) });
+  const p = await page('fa-IR', { 'roadster-xp': '3800', 'roadster-progress': progressSave(0, weaponIds) });
   await p.click('primary-button');
   p.key('KeyF'); p.advance(100); p.key('KeyF', 'keyup');
   const spent = p.context.snapshot.weapon.ammo;
@@ -700,17 +705,17 @@ test('number row and numpad select all eight weapons without opening armory or r
 });
 
 test('weapon hotkeys respect XP locks, editable fields, repeats and browser modifier shortcuts', async () => {
-  const locked = await page('en-US', { 'roadster-xp': '100', 'roadster-progress': progressSave(0, ['machine-gun','twin-gun']) });
+  const locked = await page('en-US', { 'roadster-xp': '200', 'roadster-progress': progressSave(0, ['machine-gun','twin-gun']) });
   locked.key('Digit8');
   assert.equal(locked.context.snapshot.weapon.id, 'machine-gun');
   locked.key('Numpad2');
   assert.equal(locked.context.snapshot.weapon.id, 'twin-gun');
-  const translated = await page('fa-IR', { 'roadster-xp': '1900', 'roadster-progress': progressSave(0, weaponIds) });
+  const translated = await page('fa-IR', { 'roadster-xp': '3800', 'roadster-progress': progressSave(0, weaponIds) });
   translated.key('Unidentified', 'keydown', { key: '۸' });
   assert.equal(translated.context.snapshot.weapon.id, 'plasma-cannon');
   translated.key('Unidentified', 'keydown', { key: '٢' });
   assert.equal(translated.context.snapshot.weapon.id, 'twin-gun');
-  const p = await page('en-US', { 'roadster-xp': '1900', 'roadster-progress': progressSave(0, weaponIds) });
+  const p = await page('en-US', { 'roadster-xp': '3800', 'roadster-progress': progressSave(0, weaponIds) });
   for (const fields of [{ctrlKey:true},{metaKey:true},{altKey:true},{repeat:true},
     {target:new p.context.HTMLElement('input')},{target:new p.context.HTMLElement('textarea')},
     {target:Object.assign(new p.context.HTMLElement('div'),{isContentEditable:true})}]) {
@@ -741,10 +746,10 @@ test('coin HUD awards distance, loops and destroyed police once and ignores obst
 });
 
 test('armory purchases require XP and coins; number shortcuts only equip already purchased weapons', async () => {
-  const p = await page('en-US', { 'roadster-xp': '99', 'roadster-progress': progressSave(1000) });
+  const p = await page('en-US', { 'roadster-xp': '199', 'roadster-progress': progressSave(1000) });
   assert.equal(p.ids.get('equip-twin-gun').disabled, true);
   assert.equal(p.ids.get('weapon-price-twin-gun').textContent, 'PRICE: 1,000 COINS');
-  assert.equal(p.ids.get('weapon-unlock-twin-gun').textContent, 'REQUIRES 100 XP');
+  assert.equal(p.ids.get('weapon-unlock-twin-gun').textContent, 'REQUIRES 200 XP');
   p.key('Digit2');
   assert.equal(p.context.snapshot.weapon.id, 'machine-gun');
   await p.click('primary-button');
@@ -759,13 +764,13 @@ test('armory purchases require XP and coins; number shortcuts only equip already
   assert.equal(p.context.snapshot.weapon.id, 'twin-gun');
   assert.equal(p.ids.get('coin-total').textContent, '5');
   assert.equal(p.ids.get('armory-coins').textContent, '5');
-  assert.equal(p.storage.get('roadster-xp'), '124');
+  assert.equal(p.storage.get('roadster-xp'), '224');
   p.key('Digit1'); p.key('Digit2'); await p.click('equip-twin-gun');
   assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins, 5);
   const restored = await page('en-US', Object.fromEntries(p.storage));
   assert.equal(restored.context.snapshot.weapon.id, 'twin-gun');
   assert.equal(restored.ids.get('weapon-price-twin-gun').textContent, 'OWNED');
-  const poor = await page('en-US', { 'roadster-xp': '1900', 'roadster-progress': progressSave(999) });
+  const poor = await page('en-US', { 'roadster-xp': '3800', 'roadster-progress': progressSave(999) });
   assert.equal(poor.ids.get('equip-twin-gun').disabled, true);
   assert.equal(poor.ids.get('weapon-unlock-twin-gun').textContent, 'NEED 1 MORE COINS');
   await poor.click('equip-twin-gun');
@@ -784,7 +789,7 @@ test('new records open a medal form, persist before naming, block gameplay, and 
   assert.equal(p.ids.get('record-title').textContent, 'رکورد جدید!');
   assert.equal(p.ids.get('record-distance').textContent, '۲٬۱۰۱ متر');
   assert.equal(p.ids.get('record-bonus').textContent, 'پاداش رکورد: +۲۵ سکه');
-  assert.equal(p.ids.get('coin-total').textContent, '۲۱۰');
+  assert.equal(p.ids.get('coin-total').textContent, '۲۶۰');
   assert.equal(p.storage.get('roadster-best'), '2101');
   assert.equal(JSON.parse(p.storage.get('roadster-progress')).record.needsName, true);
   p.key('Tab', 'keydown', { shiftKey: true });
@@ -798,7 +803,7 @@ test('new records open a medal form, persist before naming, block gameplay, and 
   assert.equal(p.ids.get('record-name-error').hidden, false);
   const pending = await page('fa-IR', Object.fromEntries(p.storage));
   assert.equal(pending.ids.get('record-dialog').hidden, false);
-  assert.equal(pending.ids.get('coin-total').textContent, '۲۱۰', 'recovering the pending form must not duplicate its bonus');
+  assert.equal(pending.ids.get('coin-total').textContent, '۲۶۰', 'recovering the pending form must not duplicate its bonus');
   pending.ids.get('record-name').value = '  آبل  '; pending.ids.get('record-form').dispatch('submit');
   assert.equal(pending.ids.get('record-dialog').hidden, true);
   assert.equal(pending.ids.get('best-player').textContent, 'آبل');
@@ -806,16 +811,16 @@ test('new records open a medal form, persist before naming, block gameplay, and 
   assert.equal(restored.ids.get('record-dialog').hidden, true);
   assert.equal(restored.ids.get('best-player').textContent, 'آبل');
   assert.match(restored.ids.get('best').innerHTML, /۲٬۱۰۱/);
-  assert.equal(restored.ids.get('coin-total').textContent, '۲۱۰');
+  assert.equal(restored.ids.get('coin-total').textContent, '۲۶۰');
   await restored.click('primary-button');
   restored.context.snapshot.distance = 1800; restored.context.snapshot.health = 25;
   restored.context.impactNext = true; restored.advance(17);
   assert.equal(restored.ids.get('record-dialog').hidden, true, 'a shorter run must not ask for a record name');
-  assert.equal(JSON.parse(restored.storage.get('roadster-progress')).coins, 350, 'the shorter run earns 90 regular distance coins and its 50-coin milestone');
+  assert.equal(JSON.parse(restored.storage.get('roadster-progress')).coins, 450, 'the shorter run earns 90 regular distance coins and its 100-coin milestone');
 });
 
 test('five armory upgrades debit once, affect active ammo immediately, persist, and survive restarting', async () => {
-  const p = await page('fa-IR', { 'roadster-xp':'100', 'roadster-weapon':'twin-gun',
+  const p = await page('fa-IR', { 'roadster-xp':'200', 'roadster-weapon':'twin-gun',
     'roadster-progress':progressSave(50000, ['machine-gun','twin-gun']) });
   assert.equal(p.ids.get('weapon-upgrades-twin-gun').hidden, false);
   assert.equal(p.ids.get('weapon-upgrades-laser-gun').hidden, true);
@@ -823,7 +828,7 @@ test('five armory upgrades debit once, affect active ammo immediately, persist, 
   p.key('KeyF'); p.advance(17); p.key('KeyF','keyup');
   assert.equal(p.context.snapshot.weapon.ammo, 98);
   await p.click('armory-button');
-  assert.match(p.ids.get('upgrade-twin-gun').textContent, /۱٬۵۰۰/);
+  assert.match(p.ids.get('upgrade-twin-gun').textContent, /۵۰۰/);
   await p.click('upgrade-twin-gun');
   assert.equal(p.context.snapshot.weapon.level, 1);
   assert.equal(p.context.snapshot.weapon.capacity, 120);
@@ -841,16 +846,16 @@ test('five armory upgrades debit once, affect active ammo immediately, persist, 
   assert.equal(p.ids.get('weapon-upgrade-preview-twin-gun').hidden, true);
   assert.equal(p.context.snapshot.weapon.capacity, 200);
   assert.equal(p.context.snapshot.weapon.ammo, 198);
-  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins, 30218);
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins, 45895);
   await p.click('upgrade-twin-gun');
-  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins, 30218);
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins, 45895);
   p.key('Digit1'); p.key('Digit2');
   assert.equal(p.context.snapshot.weapon.ammo, 198);
   const restored = await page('fa-IR', Object.fromEntries(p.storage));
   assert.equal(restored.context.snapshot.weapon.level, 5);
   assert.equal(restored.context.snapshot.weapon.capacity, 200);
   assert.equal(restored.context.snapshot.weapon.ammo, 200);
-  assert.equal(restored.ids.get('coin-total').textContent, '۳۰٬۲۱۸');
+  assert.equal(restored.ids.get('coin-total').textContent, '۴۵٬۸۹۵');
   await restored.click('primary-button');
   restored.context.snapshot.health=25; restored.context.impactNext=true; restored.advance(17);
   restored.advance(3017); await restored.click('primary-button');
@@ -859,7 +864,7 @@ test('five armory upgrades debit once, affect active ammo immediately, persist, 
 });
 
 test('upgrading an unequipped gun preserves the active loadout and requires enough coins and ownership', async () => {
-  const p = await page('en-US', { 'roadster-xp':'100', 'roadster-progress':progressSave(1500, ['machine-gun','twin-gun']) });
+  const p = await page('en-US', { 'roadster-xp':'200', 'roadster-progress':progressSave(500, ['machine-gun','twin-gun']) });
   await p.click('primary-button');
   p.key('KeyF'); p.advance(17); p.key('KeyF','keyup');
   await p.click('armory-button');
@@ -876,7 +881,7 @@ test('upgrading an unequipped gun preserves the active loadout and requires enou
   p.key('Digit2');
   assert.equal(p.context.snapshot.weapon.level, 1);
   assert.equal(p.context.snapshot.weapon.ammo, 120);
-  const starter = await page('en-US', { 'roadster-progress':progressSave(1500) });
+  const starter = await page('en-US', { 'roadster-progress':progressSave(500) });
   await starter.click('armory-button'); await starter.click('upgrade-machine-gun');
   assert.equal(starter.context.snapshot.weapon.level, 1);
   assert.equal(starter.ids.get('coin-total').textContent, '0');
@@ -945,7 +950,7 @@ test('the distance reward bar advances through every goal, shows earned coins, a
   const p=await page('fa-IR',{'roadster-best':'20000'});
   const bar=p.ids.get('distance-rewards');
   assert.equal(bar.classList.contains('is-celebrating'),false);
-  assert.match(p.ids.get('distance-reward-next').textContent,/۱٬۵۰۰.*۵۰/);
+  assert.match(p.ids.get('distance-reward-next').textContent,/۱٬۵۰۰.*۱۰۰/);
   assert.equal(p.ids.get('distance-reward-fill').style.transform,'scaleX(0)');
   await p.click('primary-button');
   p.context.snapshot.distance=1499; p.advance(17);
@@ -953,21 +958,26 @@ test('the distance reward bar advances through every goal, shows earned coins, a
   assert.equal(bar.classList.contains('is-celebrating'),false,'ordinary distance coins should not brighten the bar');
   p.context.snapshot.distance=1500; p.advance(77);
   assert.equal(bar.classList.contains('is-celebrating'),true);
-  assert.equal(p.ids.get('coin-total').textContent,'۱۲۰');
-  assert.equal(p.ids.get('distance-reward-earned').textContent,'دریافتی این دور: ۱۲۰ سکه');
-  assert.match(p.ids.get('distance-reward-next').textContent,/۳٬۰۰۰.*۱۲۰/);
+  assert.equal(p.ids.get('coin-total').textContent,'۱۷۰');
+  assert.equal(p.ids.get('xp-total').textContent,'۱۵۰ XP');
+  assert.equal(p.storage.get('roadster-xp'),'150');
+  assert.equal(p.ids.get('distance-reward-earned').textContent,'دریافتی این دور: ۱۷۰ سکه · ۱۵۰ XP');
+  assert.match(p.ids.get('distance-reward-next').textContent,/۳٬۰۰۰.*۲۵۰/);
   assert.equal(p.ids.get('distance-reward-mark-0').classList.contains('is-reached'),true);
   assert.equal(p.ids.get('distance-reward-mark-1').classList.contains('is-reached'),false);
   assert.equal(p.ids.get('distance-reward-fill').style.transform,'scaleX(0.15)');
   assert.equal(p.ids.get('distance-reward-meter').getAttribute('aria-valuenow'),'1500');
   p.context.snapshot.distance=10000; p.advance(137);
-  assert.equal(p.ids.get('coin-total').textContent,'۱٬۹۹۵');
-  assert.equal(p.ids.get('menu-coins').textContent,'۱٬۹۹۵');
+  assert.equal(p.ids.get('coin-total').textContent,'۴٬۶۰۰');
+  assert.equal(p.ids.get('xp-total').textContent,'۵٬۵۵۰ XP');
+  assert.equal(p.ids.get('distance-reward-earned').textContent,'دریافتی این دور: ۴٬۶۰۰ سکه · ۵٬۵۵۰ XP');
+  assert.equal(p.storage.get('roadster-xp'),'5550');
+  assert.equal(p.ids.get('menu-coins').textContent,'۴٬۶۰۰');
   assert.equal(p.ids.get('distance-reward-fill').style.transform,'scaleX(1)');
   assert.equal(p.ids.get('distance-reward-next').textContent,'همهٔ جایزه‌های مسیر را گرفتی!');
   p.context.snapshot.distance=12000; p.advance(197);
   assert.equal(p.ids.get('distance-reward-meter').getAttribute('aria-valuenow'),'10000');
-  assert.equal(p.ids.get('coin-total').textContent,'۲٬۰۹۵');
+  assert.equal(p.ids.get('coin-total').textContent,'۴٬۷۰۰');
   p.advance(1936);
   assert.equal(bar.classList.contains('is-celebrating'),true);
   p.advance(1938);
@@ -976,8 +986,8 @@ test('the distance reward bar advances through every goal, shows earned coins, a
   p.advance(5257); await p.click('primary-button'); p.advance(5274);
   assert.equal(bar.classList.contains('is-celebrating'),false);
   assert.equal(p.ids.get('distance-reward-fill').style.transform,'scaleX(0)');
-  assert.equal(p.ids.get('distance-reward-earned').textContent,'دریافتی این دور: ۰ سکه');
-  assert.equal(p.ids.get('coin-total').textContent,'۲٬۰۹۵');
+  assert.equal(p.ids.get('distance-reward-earned').textContent,'دریافتی این دور: ۰ سکه · ۰ XP');
+  assert.equal(p.ids.get('coin-total').textContent,'۴٬۷۰۰');
 });
 
 test('menu balance opens a localized earning guide and an unavailable purchase tab without starting the game',async()=>{
@@ -990,7 +1000,9 @@ test('menu balance opens a localized earning guide and an unavailable purchase t
   assert.equal(p.ids.get('coin-buy-pane').hidden,true);
   assert.equal(p.ids.get('coin-guide-balance').textContent,'۵۰۰');
   assert.equal(p.ids.get('coin-milestone-distance-0').textContent,'۱٬۵۰۰ متر');
-  assert.equal(p.ids.get('coin-milestone-value-5').textContent,'+۵۰۰ سکه');
+  assert.equal(p.ids.get('coin-milestone-value-5').textContent,'+۱٬۵۰۰ سکه');
+  assert.equal(p.ids.get('coin-milestone-xp-0').textContent,'+۱۵۰ XP');
+  assert.equal(p.ids.get('coin-milestone-xp-5').textContent,'+۲٬۰۰۰ XP');
   p.ids.get('coin-tab-earn').dispatch('keydown',{code:'End'});
   assert.equal(p.ids.get('coin-buy-pane').hidden,false);
   assert.equal(p.ids.get('coin-earn-pane').hidden,true);
@@ -1053,4 +1065,183 @@ test('car upgrades require the displayed player level and never spend XP when pu
   assert.equal(restored.context.snapshot.armorMask,1);
   assert.equal(restored.context.snapshot.maxHealth,125);
   assert.equal(restored.storage.get('roadster-xp'),'4900');
+});
+
+
+test('Z and X hold separate air nozzles, Shift retains boost, and modal/pointer releases clear input', async () => {
+  const p = await page('en-US', {'roadster-touch-layout':JSON.stringify({version:1, buttons:{'rear-jet':{x:.8,y:.5,size:48,hidden:false}}})});
+  await p.click('primary-button');
+  p.key('KeyZ'); p.advance(17);
+  assert.equal(p.context.lastControls.frontJet, true);
+  assert.equal(p.context.lastControls.rearJet, false);
+  p.key('KeyX'); p.advance(34);
+  assert.equal(p.context.lastControls.frontJet, true);
+  assert.equal(p.context.lastControls.rearJet, true);
+  assert.equal(p.context.lastControls.boost, false, 'X must no longer trigger boost');
+  p.key('ShiftLeft'); p.advance(51);
+  assert.equal(p.context.lastControls.boost, true);
+  p.key('KeyZ', 'keyup'); p.key('KeyX', 'keyup'); p.key('ShiftLeft', 'keyup');
+  p.pointer('touch-front-jet', 'pointerdown', {pointerId:2});
+  p.pointer('touch-rear-jet', 'pointerdown', {pointerId:3}); p.advance(68);
+  assert.equal(p.context.lastControls.frontJet, true);
+  assert.equal(p.context.lastControls.rearJet, true);
+  p.pointer('touch-front-jet', 'pointercancel', {pointerId:2});
+  p.pointer('touch-rear-jet', 'lostpointercapture', {pointerId:3}); p.advance(85);
+  assert.equal(p.context.lastControls.frontJet, false);
+  assert.equal(p.context.lastControls.rearJet, false);
+  p.key('KeyZ'); p.key('KeyG'); p.key('KeyX'); p.key('KeyG'); p.advance(102);
+  assert.equal(p.context.lastControls.frontJet, false);
+  assert.equal(p.context.lastControls.rearJet, false);
+});
+
+test('flip coins reach the wallet, toast and save once, and reset for the next run', async () => {
+  const p = await page('en-US');
+  await p.click('primary-button');
+  p.context.snapshot.flipsCompleted = 3; p.advance(17);
+  assert.equal(p.ids.get('coin-total').textContent, '15');
+  assert.equal(p.ids.get('coin-toast').textContent, '+15 COINS');
+  assert.equal(p.ids.get('coin-toast').hidden, false);
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins, 15);
+  p.advance(34);
+  assert.equal(p.ids.get('coin-total').textContent, '15');
+  await p.click('pause-button'); await p.click('coin-wallet-button');
+  const description = p.context.document.querySelectorAll('[data-i18n]').find(node => node.dataset.i18n === 'coinFlipDescription');
+  assert.match(description.textContent, /360°.*5 coins/);
+  await p.click('coin-guide-close');
+  await p.click('pause-button');
+  p.context.snapshot.health=0; p.context.snapshot.crashed=true; p.context.dead=true;
+  p.advance(51); p.advance(3052);
+  p.key('Space'); p.advance(3069);
+  p.context.snapshot.flipsCompleted=1; p.advance(3086);
+  assert.equal(p.ids.get('coin-total').textContent, '20');
+});
+
+
+test('mobile starts with one nozzle, and a hidden touch button leaves keyboard control available', async () => {
+  const p = await page();
+  assert.equal(p.ids.get('touch-front-jet').hidden, false);
+  assert.equal(p.ids.get('touch-rear-jet').hidden, true);
+  await p.click('primary-button');
+  p.pointer('touch-rear-jet', 'pointerdown'); p.advance(17);
+  assert.equal(p.context.lastControls.rearJet, false);
+  p.key('KeyX'); p.advance(34);
+  assert.equal(p.context.lastControls.rearJet, true);
+  p.key('KeyX', 'keyup');
+  await p.click('touch-layout-button');
+  p.ids.get('touch-layout-control').value = 'rear-jet';
+  p.ids.get('touch-layout-control').dispatch('change');
+  assert.equal(p.ids.get('touch-rear-jet').hidden, false, 'hidden button must remain reachable in the editor');
+  assert.equal(p.ids.get('touch-rear-jet').classList.contains('is-layout-hidden'), true);
+  assert.equal(p.ids.get('touch-layout-visibility').getAttribute('aria-pressed'), 'false');
+  await p.click('touch-layout-visibility');
+  assert.equal(p.ids.get('touch-layout-visibility-status').textContent, 'Visible');
+  await p.click('touch-layout-save');
+  p.pointer('touch-rear-jet', 'pointerdown'); p.advance(51);
+  assert.equal(p.context.lastControls.rearJet, true);
+  assert.equal(JSON.parse(p.storage.get('roadster-touch-layout')).buttons['rear-jet'].hidden, false);
+});
+
+test('all mobile buttons can be hidden, persisted, resized while hidden, and individually recovered', async () => {
+  const controls = ['jump','fire','boost','aim','suction','front-jet','rear-jet'];
+  const p = await page('fa-IR');
+  await p.click('touch-layout-button');
+  for (const id of controls) {
+    p.ids.get('touch-layout-control').value = id;
+    p.ids.get('touch-layout-control').dispatch('change');
+    if (p.ids.get('touch-layout-visibility').getAttribute('aria-pressed') === 'true') await p.click('touch-layout-visibility');
+    assert.equal(p.ids.get('touch-layout-visibility-status').textContent, 'مخفی');
+    p.ids.get('touch-layout-size').value = '80'; p.ids.get('touch-layout-size').dispatch('input');
+  }
+  assert.equal(p.storage.has('roadster-touch-layout'), false);
+  await p.click('touch-layout-save');
+  for(const id of controls) assert.equal(p.ids.get(`touch-${id}`).hidden, true);
+  const saved = p.storage.get('roadster-touch-layout');
+  const restored = await page('fa-IR', {'roadster-touch-layout':saved});
+  for(const id of controls) assert.equal(restored.ids.get(`touch-${id}`).hidden, true);
+  restored.resize(740, 360);
+  await restored.click('touch-layout-button');
+  for(const id of controls) {
+    assert.equal(restored.ids.get(`touch-${id}`).hidden, false);
+    assert.equal(restored.ids.get(`touch-${id}`).style.width, '80px', 'measuring a hidden button must retain its size');
+  }
+  restored.ids.get('touch-layout-control').value = 'aim';
+  restored.ids.get('touch-layout-control').dispatch('change');
+  assert.equal(restored.ids.get('touch-layout-visibility').getAttribute('aria-controls'), 'touch-aim');
+  restored.ids.get('touch-layout-size').value = '92'; restored.ids.get('touch-layout-size').dispatch('input');
+  await restored.click('touch-layout-visibility'); await restored.click('touch-layout-save');
+  for(const id of controls) assert.equal(restored.ids.get(`touch-${id}`).hidden, id !== 'aim');
+  assert.equal(restored.ids.get('touch-aim').style.width, '92px');
+  const again = await page('en-US', Object.fromEntries(restored.storage));
+  assert.equal(again.ids.get('touch-aim').hidden, false);
+  assert.equal(again.ids.get('touch-aim').style.width, '92px');
+});
+
+test('old layouts retain placement, cancel discards visibility edits, and reset restores the single-nozzle default', async () => {
+  const saved = JSON.stringify({version:1,buttons:{jump:{x:.4,y:.6,size:100},'rear-jet':{x:.7,y:.5,size:64,hidden:false}}});
+  const p = await page('en-US', {'roadster-touch-layout':saved});
+  assert.equal(p.ids.get('touch-jump').style.width, '100px');
+  assert.equal(p.ids.get('touch-jump').hidden, false);
+  assert.equal(p.ids.get('touch-rear-jet').hidden, false);
+  for (const cancel of ['touch-layout-cancel', 'Escape']) {
+    await p.click('touch-layout-button');
+    await p.click('touch-layout-visibility');
+    assert.equal(p.ids.get('touch-layout-visibility').getAttribute('aria-pressed'), 'false');
+    if(cancel === 'Escape') p.key('Escape'); else await p.click(cancel);
+    assert.equal(p.ids.get('touch-jump').hidden, false);
+    assert.equal(p.storage.get('roadster-touch-layout'), saved);
+  }
+  await p.click('touch-layout-button'); await p.click('touch-layout-visibility');
+  await p.click('touch-layout-reset'); await p.click('touch-layout-save');
+  assert.equal(p.ids.get('touch-jump').hidden, false);
+  assert.equal(p.ids.get('touch-jump').style.width, '76px');
+  assert.equal(p.ids.get('touch-rear-jet').hidden, true);
+  assert.equal(p.ids.get('touch-front-jet').hidden, false);
+});
+
+
+test('distance XP is shown alongside coins, unlocks weapons, and persists without spending XP on purchases', async () => {
+  const p = await page('en-US', {'roadster-xp':'50', 'roadster-progress':progressSave(1000)});
+  assert.equal(p.ids.get('distance-reward-next').textContent, 'NEXT: 1,500 m · +100 COINS · +150 XP');
+  assert.equal(p.ids.get('distance-reward-earned').textContent, 'THIS RUN: 0 COINS · 0 XP');
+  await p.click('primary-button');
+  p.context.snapshot.distance=1499; p.advance(17);
+  assert.equal(p.storage.get('roadster-xp'), '50');
+  assert.equal(p.ids.get('equip-twin-gun').disabled, true);
+  p.context.snapshot.distance=1500; p.advance(77);
+  assert.equal(p.storage.get('roadster-xp'), '200');
+  assert.equal(p.ids.get('xp-total').textContent, '200 XP');
+  assert.equal(p.ids.get('xp-level').textContent, 'LEVEL 3');
+  assert.equal(p.ids.get('xp-toast').textContent, 'DISTANCE BONUS · +150 XP');
+  assert.equal(p.ids.get('distance-reward-next').textContent, 'NEXT: 3,000 m · +250 COINS · +300 XP');
+  assert.equal(p.ids.get('distance-reward-earned').textContent, 'THIS RUN: 170 COINS · 150 XP');
+  assert.match(p.ids.get('distance-reward-meter').getAttribute('aria-valuetext'), /300 XP/);
+  p.advance(137);
+  assert.equal(p.storage.get('roadster-xp'), '200');
+  await p.click('armory-button');
+  assert.equal(p.ids.get('equip-twin-gun').disabled, false);
+  await p.click('equip-twin-gun');
+  assert.equal(p.context.snapshot.weapon.id, 'twin-gun');
+  assert.equal(p.storage.get('roadster-xp'), '200');
+  const restored = await page('en-US', Object.fromEntries(p.storage));
+  assert.equal(restored.ids.get('xp-total').textContent, '200 XP');
+  assert.equal(restored.context.snapshot.weapon.id, 'twin-gun');
+  assert.equal(restored.ids.get('distance-reward-earned').textContent, 'THIS RUN: 0 COINS · 0 XP');
+});
+
+test('a goal reached on the fatal frame pays once, appears in the game-over total, and can pay in a new run', async () => {
+  const p = await page('fa-IR', {'roadster-best':'20000'});
+  await p.click('primary-button');
+  p.context.snapshot.distance=1500; p.context.snapshot.health=25; p.context.impactNext=true;
+  p.advance(17);
+  assert.equal(p.storage.get('roadster-xp'), '150');
+  assert.match(p.ids.get('overlay-description').textContent, /۱۵۰ XP/);
+  assert.equal(p.ids.get('distance-reward-earned').textContent, 'دریافتی این دور: ۱۷۰ سکه · ۱۵۰ XP');
+  p.context.snapshot.distance=10000; p.advance(77);
+  assert.equal(p.storage.get('roadster-xp'), '150', 'wreck frames cannot award XP');
+  p.advance(3017); await p.click('primary-button'); p.advance(3034);
+  assert.equal(p.ids.get('distance-reward-earned').textContent, 'دریافتی این دور: ۰ سکه · ۰ XP');
+  assert.equal(p.ids.get('xp-total').textContent, '۱۵۰ XP');
+  p.context.snapshot.distance=1500; p.advance(3051);
+  assert.equal(p.storage.get('roadster-xp'), '300');
+  assert.equal(p.ids.get('distance-reward-earned').textContent, 'دریافتی این دور: ۱۷۰ سکه · ۱۵۰ XP');
 });

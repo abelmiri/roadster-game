@@ -1,12 +1,13 @@
 import { formatNumber, t } from './i18n';
 
-const CONTROL_IDS = ['jump', 'fire', 'boost', 'aim', 'suction'] as const;
+const CONTROL_IDS = ['jump', 'fire', 'boost', 'aim', 'suction', 'front-jet', 'rear-jet'] as const;
 type ControlId = typeof CONTROL_IDS[number];
-type Placement = { x: number; y: number; size: number };
+type Placement = { x: number; y: number; size: number; hidden?: boolean };
 type Layout = Partial<Record<ControlId, Placement>>;
 const STORAGE_KEY = 'roadster-touch-layout';
 const MIN_SIZE = 44;
 const MAX_SIZE = 128;
+const defaultHidden = (id: ControlId): boolean => id === 'rear-jet';
 const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
 
 function readLayout(storage?: Storage): Layout {
@@ -17,7 +18,8 @@ function readLayout(storage?: Storage): Layout {
     for (const id of CONTROL_IDS) {
       const value = saved.buttons[id];
       if (!value || ![value.x, value.y, value.size].every(number => typeof number === 'number' && Number.isFinite(number))) continue;
-      layout[id] = { x: clamp(value.x, 0, 1), y: clamp(value.y, 0, 1), size: clamp(value.size, MIN_SIZE, MAX_SIZE) };
+      layout[id] = { x: clamp(value.x, 0, 1), y: clamp(value.y, 0, 1), size: clamp(value.size, MIN_SIZE, MAX_SIZE),
+        hidden: typeof value.hidden === 'boolean' ? value.hidden : defaultHidden(id) };
     }
     return layout;
   } catch { return {}; }
@@ -35,6 +37,8 @@ export class TouchLayoutEditor {
   private readonly selector = document.getElementById('touch-layout-control') as HTMLSelectElement;
   private readonly sizeInput = document.getElementById('touch-layout-size') as HTMLInputElement;
   private readonly sizeOutput = document.getElementById('touch-layout-size-value')!;
+  private readonly visibilityButton = document.getElementById('touch-layout-visibility') as HTMLButtonElement;
+  private readonly visibilityStatus = document.getElementById('touch-layout-visibility-status')!;
 
   constructor(private readonly root: HTMLElement, private readonly storage?: Storage) {
     this.saved = readLayout(storage);
@@ -49,6 +53,13 @@ export class TouchLayoutEditor {
       const placement = this.draft[this.selected];
       if (!this.editing || !placement) return;
       placement.size = clamp(Number(this.sizeInput.value) || MIN_SIZE, MIN_SIZE, MAX_SIZE);
+      this.render();
+      this.updateLanguage();
+    });
+    this.visibilityButton.addEventListener('click', () => {
+      const placement = this.draft[this.selected];
+      if (!this.editing || !placement) return;
+      placement.hidden = !this.isHidden(this.selected);
       this.render();
       this.updateLanguage();
     });
@@ -99,6 +110,10 @@ export class TouchLayoutEditor {
 
   begin(): void {
     this.editing = true;
+    // Reveal hidden controls before measuring, so their positions and sizes
+    // survive an edit. They stay available as ghost buttons in the editor.
+    this.draft = { ...this.saved };
+    this.render();
     this.draft = this.capture();
     this.panel.hidden = false;
     this.render();
@@ -133,6 +148,11 @@ export class TouchLayoutEditor {
     this.sizeInput.value = String(size);
     this.sizeOutput.textContent = t('touchSizeValue', { size: formatNumber(size) });
     this.sizeInput.setAttribute('aria-valuetext', this.sizeOutput.textContent);
+    this.visibilityButton.setAttribute('aria-label', t('touchVisibility'));
+    this.visibilityButton.title = t('touchVisibility');
+    this.visibilityButton.setAttribute('aria-controls', `touch-${this.selected}`);
+    this.visibilityButton.setAttribute('aria-pressed', String(!this.isHidden(this.selected)));
+    this.visibilityStatus.textContent = t(this.isHidden(this.selected) ? 'touchHidden' : 'touchVisible');
   }
 
   private select(id: ControlId): void {
@@ -148,7 +168,7 @@ export class TouchLayoutEditor {
       const button = this.buttons[id].getBoundingClientRect();
       return [id, { x: clamp((button.left - rect.left) / Math.max(1, rect.width - button.width), 0, 1),
         y: clamp((button.top - rect.top) / Math.max(1, rect.height - button.height), 0, 1),
-        size: clamp(button.width, MIN_SIZE, MAX_SIZE) }];
+        size: clamp(button.width, MIN_SIZE, MAX_SIZE), hidden: this.isHidden(id) }];
     }));
   }
 
@@ -156,12 +176,19 @@ export class TouchLayoutEditor {
     return Math.min(size, rect.width, rect.height);
   }
 
+  private isHidden(id: ControlId): boolean {
+    return (this.editing ? this.draft : this.saved)[id]?.hidden ?? defaultHidden(id);
+  }
+
   private render(): void {
     const rect = this.root.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
     const layout = this.editing ? this.draft : this.saved;
     for (const id of CONTROL_IDS) {
       const button = this.buttons[id];
+      const hidden = this.isHidden(id);
+      button.hidden = hidden && !this.editing;
+      button.classList.toggle('is-layout-hidden', hidden);
+      if (rect.width <= 0 || rect.height <= 0) continue;
       const placement = layout[id];
       button.classList.toggle('is-positioned', Boolean(placement));
       button.classList.toggle('is-selected', this.editing && id === this.selected);

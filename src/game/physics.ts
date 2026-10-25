@@ -22,6 +22,8 @@ export interface Controls {
   jumpHeld: boolean;
   suction: boolean;
   boost: boolean;
+  frontJet?: boolean;
+  rearJet?: boolean;
   fire?: boolean;
   aim?: AimDirection;
 }
@@ -48,6 +50,9 @@ export interface GameSnapshot {
   jumpSerial: number;
   jumpJetActive: boolean;
   jumpJetRemaining: number;
+  frontJetActive: boolean;
+  rearJetActive: boolean;
+  flipsCompleted: number;
   jumpsUsed: number;
   landingSerial: number;
   landingImpact: number;
@@ -110,6 +115,10 @@ export class GamePhysics {
   private jumpLock = 0;
   private jumpHoldTime = 0;
   private jumpJetActive = false;
+  private frontJetActive = false;
+  private rearJetActive = false;
+  private airborneRotation = 0;
+  private flipsCompleted = 0;
   private jumpCount = 0;
   private charge = 1;
   private isGrounded = false;
@@ -574,6 +583,7 @@ export class GamePhysics {
   step(controls: Controls): void {
     if (this.crashed) return;
     this.jumpJetActive = false;
+    this.frontJetActive = this.rearJetActive = false;
     this.damage.step(FIXED_STEP);
     this.previousPoliceX = this.currentPoliceX;
     this.previousSuspensionOffset = this.suspension.offset;
@@ -587,7 +597,10 @@ export class GamePhysics {
     this.jumpLock = Math.max(0, this.jumpLock - FIXED_STEP);
     const before = this.contactBody();
     this.ensureChunks(before.x);
-    if (this.stepLoop(controls)) return;
+    if (this.stepLoop(controls)) {
+      this.airborneRotation = 0;
+      return;
+    }
 
     const support = this.roadSupport(before.x);
     if (support && before.y < support.y + 0.3 && Math.abs(before.angle) > 1.65) {
@@ -626,9 +639,12 @@ export class GamePhysics {
     // The chassis remains a free body: springs, dampers, tire impulses, gravity
     // and finite fan forces determine its motion on the road and in the air.
     const wasGrounded = this.isGrounded;
-    const body = this.roadContact.step(before, controls.suction && this.jumpLock <= 0.08, FIXED_STEP, this.jumpJetActive);
+    const body = this.roadContact.step(before, controls.suction && this.jumpLock <= 0.08, FIXED_STEP, this.jumpJetActive,
+      { front: controls.frontJet, rear: controls.rearJet });
     if (this.roadContact.undershot) this.crashed = true;
     this.isGrounded = this.roadContact.wheels.some((wheel) => wheel.grounded);
+    this.frontJetActive = !this.isGrounded && this.roadContact.frontJetActive;
+    this.rearJetActive = !this.isGrounded && this.roadContact.rearJetActive;
     this.fansOn = this.roadContact.suction > 0;
     if (!wasGrounded && this.isGrounded && this.jumpLock <= 0) {
       this.landingSerial++;
@@ -664,6 +680,16 @@ export class GamePhysics {
     this.furthestX = Math.max(this.furthestX, body.x);
     this.updatePursuit();
     this.updateWeapon(controls);
+    if (!this.isGrounded && !this.crashed) {
+      if (wasGrounded) this.airborneRotation = 0;
+      // Rapier wraps angles at ±π. Accumulate signed, unwrapped motion so
+      // partial turns cancel when reversed, and each full turn pays once.
+      this.airborneRotation += angleDelta(before.angle, body.angle);
+      while (Math.abs(this.airborneRotation) >= Math.PI * 2) {
+        this.flipsCompleted++;
+        this.airborneRotation -= Math.sign(this.airborneRotation) * Math.PI * 2;
+      }
+    } else this.airborneRotation = 0;
     if (this.crashed) this.beginWreck();
     this.current = this.readPoses();
   }
@@ -678,6 +704,8 @@ export class GamePhysics {
     this.wrecked = true;
     this.activeLoop = null;
     this.fansOn = this.boostOn = this.jumpJetActive = this.isGrounded = false;
+    this.frontJetActive = this.rearJetActive = false;
+    this.airborneRotation = 0;
     const velocity = this.car.linvel();
     const omega = this.car.angvel();
     const carPosition = this.car.translation();
@@ -784,6 +812,8 @@ export class GamePhysics {
       suspensionPitch: this.activeLoop ? lerp(this.previousSuspensionPitch, this.suspension.pitch, alpha) : 0,
       jumpSerial: this.jumpSerial, jumpsUsed: this.jumpCount,
       jumpJetActive: this.jumpJetActive,
+      frontJetActive: this.frontJetActive, rearJetActive: this.rearJetActive,
+      flipsCompleted: this.flipsCompleted,
       jumpJetRemaining: this.jumpCount > 0 ? Math.max(0, JUMP_THRUST_DURATION - this.jumpHoldTime) : 0,
       landingSerial: this.landingSerial, landingImpact: this.landingImpact,
       crashReason: this.crashReason,
