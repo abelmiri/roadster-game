@@ -16,6 +16,9 @@ let CAR_AXLE_Y;
 let CAR_BODY_CLEARANCE;
 let CAR_ARCH_RADIUS;
 let loopsBetween;
+let rampsBetween;
+let RAMP_APPROACH;
+let RAMP_LANDING;
 let loopGeometry;
 let sprungBodyPose;
 
@@ -32,7 +35,7 @@ before(async () => {
   });
   await RAPIER.init();
   ({ GamePhysics, FIXED_STEP } = await import(pathToFileURL(path.join(outdir, 'physics.mjs')).href));
-  ({ TrackGenerator, roadHeight, roadSlope, loopsBetween, loopGeometry } = await import(pathToFileURL(path.join(outdir, 'track.mjs')).href));
+  ({ TrackGenerator, roadHeight, roadSlope, loopsBetween, loopGeometry, rampsBetween, RAMP_APPROACH, RAMP_LANDING } = await import(pathToFileURL(path.join(outdir, 'track.mjs')).href));
   ({ CAR_WHEEL_RADIUS, CAR_WHEEL_OFFSET, CAR_AXLE_Y, CAR_BODY_CLEARANCE, CAR_ARCH_RADIUS, sprungBodyPose } =
     await import(pathToFileURL(path.join(outdir, 'vehicle.mjs')).href));
 });
@@ -110,6 +113,55 @@ test('automatic driving follows ordinary contours without bouncing or reversing'
     assert.ok(game.distance > 45, `distance=${game.distance}`);
     assert.ok(maximumClearance < CAR_WHEEL_RADIUS + 0.15, `clearance=${maximumClearance}`);
   } finally { game.dispose(); }
+});
+
+test('ramps begin after 1000m, stream deterministically, and reserve a continuous approach and landing', () => {
+  const track = new TrackGenerator();
+  assert.deepEqual(rampsBetween(-64, 1007), []);
+  const ramps = rampsBetween(0, 10000);
+  assert.ok(ramps.length > 5);
+  for (const ramp of ramps) {
+    assert.ok(ramp.start - 7 > 1000);
+    assert.deepEqual(rampsBetween(ramp.start + 1, ramp.end), [ramp]);
+    assert.equal(loopsBetween(ramp.start - RAMP_APPROACH - 20, ramp.end + RAMP_LANDING + 20).length, 0);
+    for (let x = ramp.start - RAMP_APPROACH; x <= ramp.end + RAMP_LANDING; x += .5) {
+      const chunk = track.chunk(Math.floor(x / 30));
+      assert.equal(chunk.gap, null);
+      assert.equal(chunk.hazards.length, 0);
+      assert.equal(track.hasRoad(x), true);
+    }
+    for (const x of [ramp.start, ramp.takeoffX, ramp.takeoffX + 4, ramp.end]) {
+      const epsilon = .0001;
+      assert.ok(Math.abs(roadHeight(x + epsilon) - roadHeight(x - epsilon)) < .001);
+      assert.ok(Math.abs(roadSlope(x + epsilon) - roadSlope(x - epsilon)) < .001);
+      assert.ok(Math.abs((roadHeight(x + epsilon) - roadHeight(x - epsilon)) / (2 * epsilon) - roadSlope(x)) < .001);
+    }
+  }
+  assert.deepEqual(new TrackGenerator().chunk(38), track.chunk(38));
+});
+
+test('boosting over ramps produces long natural jumps and clean landings without pressing jump', () => {
+  for (const ramp of rampsBetween(0, 10000)) for (const upgraded of [false, true]) {
+    const game = new GamePhysics(ramp.start - 10, { id:'machine-gun', xp:0,
+      carUpgrades: upgraded ? {'boost-power':4,'boost-reserve':4} : {} });
+    let airTime = 0, longestFlight = 0, clearance = 0, landed = false;
+    try {
+      for (let i = 0; i < 1400 && !game.crashed && game.snapshot(1).car.x < ramp.end + RAMP_LANDING - 5; i++) {
+        game.step({ ...idle, boost: true });
+        const state = game.snapshot(1);
+        if (state.grounded) { if (airTime > 1) landed = true; airTime = 0; }
+        else airTime += FIXED_STEP;
+        longestFlight = Math.max(longestFlight, airTime);
+        clearance = Math.max(clearance, state.car.y - roadHeight(state.car.x));
+      }
+      assert.equal(game.crashed, false, `ramp ${ramp.id} crashed`);
+      assert.ok(longestFlight > 1.5, `ramp ${ramp.id}: flight=${longestFlight}`);
+      assert.ok(clearance > 10, `ramp ${ramp.id}: clearance=${clearance}`);
+      assert.equal(landed, true);
+      assert.equal(game.snapshot(1).health, 100);
+      assert.equal(game.snapshot(1).jumpSerial, 0);
+    } finally { game.dispose(); }
+  }
 });
 
 test('the launch depot has a continuous level apron and supports detached wreck parts behind the start', () => {
@@ -503,7 +555,9 @@ test('front and rear air nozzles allow repeated full flips across angle wrapping
         const angle = game.car.rotation();
         rotation += Math.atan2(Math.sin(angle - previous), Math.cos(angle - previous));
         previous = angle;
-        assert.equal(game.snapshot(1).flipsCompleted, Math.floor(Math.abs(rotation) / (Math.PI * 2)));
+        const count = Math.floor(Math.abs(rotation) / (Math.PI * 2));
+        assert.equal(game.snapshot(1).flipsCompleted, count);
+        assert.equal(game.snapshot(1).flipCoins, 5 * count * count);
       }
       const state = game.snapshot(1);
       assert.equal(state.crashed, false);
@@ -515,10 +569,34 @@ test('front and rear air nozzles allow repeated full flips across angle wrapping
       game.crashed = true;
       for(let i=0;i<120;i++) game.stepWreck();
       assert.equal(game.snapshot(1).flipsCompleted, 2);
+      assert.equal(game.snapshot(1).flipCoins, 20);
       assert.equal(game.snapshot(1).frontJetActive, false);
       assert.equal(game.snapshot(1).rearJetActive, false);
     } finally { game.dispose(); }
   }
+});
+
+test('landing resets the flip multiplier, and skipped snapshots retain separate jumps', () => {
+  const game = new GamePhysics();
+  try {
+    const fly = count => {
+      game.car.setTranslation({ x:7, y:100 }, true);
+      game.car.setRotation(0, true);
+      game.car.setLinvel({ x:0, y:0 }, true);
+      game.car.setAngvel(0, true);
+      for (let i=0; i<600 && game.snapshot(1).flipsCompleted<count; i++) game.step({...idle,frontJet:true});
+      assert.equal(game.snapshot(1).flipsCompleted,count);
+    };
+    fly(2);
+    assert.equal(game.snapshot(1).flipCoins,20);
+    placeOnRoad(game,7,16);
+    stepFor(game,.1);
+    assert.equal(game.snapshot(1).grounded,true);
+    fly(3);
+    assert.equal(game.snapshot(1).flipCoins,25,'a new jump starts at ×1');
+    fly(4);
+    assert.equal(game.snapshot(1).flipCoins,40,'the second flip in this jump tops its reward up to 20');
+  } finally {game.dispose();}
 });
 
 test('partial airborne turns cancel on reversal and cannot carry progress across landings', () => {
@@ -681,6 +759,7 @@ test('holding suction completes full loops at early and late speeds, awards once
       assert.ok(maximumProgress > .97);
       assert.equal(game.snapshot(1).loopCompletions, 1);
       assert.equal(game.snapshot(1).flipsCompleted, 0, 'magnetic loop paid an airborne flip');
+      assert.equal(game.snapshot(1).flipCoins, 0);
       assert.equal(game.snapshot(1).frontJetActive, false);
       assert.equal(game.snapshot(1).rearJetActive, false);
       assert.equal(game.snapshot(1).runXp, 25);

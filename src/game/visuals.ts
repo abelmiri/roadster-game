@@ -10,6 +10,7 @@ import { CityBuildings } from './cityBuildings';
 import { ObstacleDebris } from './obstacleDebris';
 import { ImpactSparks } from './impactSparks';
 import { ImpactCamera, VIEW_HALF_HEIGHT, CAMERA_LOOK_AHEAD } from './impactCamera';
+import { DrivingCamera } from './drivingCamera';
 import { createTerrainMaterial, createTerrainGeometry, createRoadCapGeometry } from './terrain';
 import { StartDepot } from './startDepot';
 import { BackdropBlur } from './backdropBlur';
@@ -91,11 +92,11 @@ export class GameVisuals {
   private readonly policeWreck = new PoliceVisual(true);
   private readonly policeSmoke = new CarSmoke();
   private readonly impactCamera = new ImpactCamera();
+  private readonly drivingCamera = new DrivingCamera();
   private readonly weapon = new WeaponVisual();
   private readonly combat = new CombatVisual();
   private readonly loops = new Map<number, THREE.Group>();
   private viewHeight = VIEW_HALF_HEIGHT;
-  private baseViewHeight = VIEW_HALF_HEIGHT;
   private sun!: THREE.Mesh;
   private moon!: THREE.Mesh;
   private stars!: THREE.Points;
@@ -460,26 +461,28 @@ export class GameVisuals {
     const upcoming = loopsBetween(snapshot.car.x - 12, snapshot.car.x + 25)[0];
     const center = snapshot.loop ? { x: snapshot.loop.centerX, y: snapshot.loop.centerY } : upcoming ? loopGeometry(upcoming) : null;
     const loopView = snapshot.crashed ? 0 : snapshot.loop ? 1 : upcoming ? Math.max(0, 1 - Math.abs(upcoming.entryX - snapshot.car.x) / 25) : 0;
-    const smoothing = 1 - Math.exp(-sceneDelta * 4.2);
+    const roadY = roadHeight(snapshot.car.x + 8) + 2.0;
+    const drivingDelta = running ? sceneDelta : 0;
+    this.drivingCamera.update({ speed: snapshot.speed, height: snapshot.car.y - roadY,
+      verticalSpeed: physics.car.linvel().y, grounded: snapshot.grounded, loopView, crashed: snapshot.crashed }, drivingDelta);
     this.impactCamera.update(snapshot.sparkEvents, snapshot.sparkSerial, snapshot.crashed, wallDelta,
       running || impactFrozen, snapshot.crashPosition ?? snapshot.car);
-    if (!snapshot.crashed) this.baseViewHeight += (VIEW_HALF_HEIGHT + loopView * 1.7 - this.baseViewHeight) * smoothing;
-    const nextHeight = this.baseViewHeight / this.impactCamera.zoom;
+    const baseViewHeight = this.drivingCamera.halfHeight;
+    const nextHeight = baseViewHeight / this.impactCamera.zoom;
     if (Math.abs(nextHeight - this.viewHeight) > 0.00001) {
       this.viewHeight = nextHeight;
       this.camera.left = -this.viewHeight * this.aspect; this.camera.right = this.viewHeight * this.aspect;
       this.camera.top = this.viewHeight; this.camera.bottom = -this.viewHeight;
       this.camera.updateProjectionMatrix();
     }
-    const width = this.baseViewHeight * this.aspect * 2;
+    const width = baseViewHeight * this.aspect * 2;
     let targetX = snapshot.loop && center ? center.x + width * 0.08 : snapshot.car.x + width * CAMERA_LOOK_AHEAD;
-    const roadY = roadHeight(snapshot.car.x + 8) + 2.0;
-    let targetY = center ? roadY + (center.y - roadY) * loopView : roadY;
+    let targetY = (center ? roadY + (center.y - roadY) * loopView : roadY) + this.drivingCamera.lift;
     const focus = this.impactCamera.focus(snapshot.car);
     const amount = this.impactCamera.amount;
     targetX += (focus.x - targetX) * amount;
     targetY += (focus.y - targetY) * amount;
-    const cameraDelta = sceneDelta + Math.max(0, wallDelta - sceneDelta) * amount;
+    const cameraDelta = drivingDelta + Math.max(0, wallDelta - drivingDelta) * amount;
     const tracking = 1 - Math.exp(-cameraDelta * (4.2 + amount * 10));
     this.cameraX += (targetX - this.cameraX) * tracking;
     this.cameraY += (targetY - this.cameraY) * tracking;

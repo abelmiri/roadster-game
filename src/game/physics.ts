@@ -53,6 +53,7 @@ export interface GameSnapshot {
   frontJetActive: boolean;
   rearJetActive: boolean;
   flipsCompleted: number;
+  flipCoins: number;
   jumpsUsed: number;
   landingSerial: number;
   landingImpact: number;
@@ -119,6 +120,8 @@ export class GamePhysics {
   private rearJetActive = false;
   private airborneRotation = 0;
   private flipsCompleted = 0;
+  private airborneFlips = 0;
+  private flipCoins = 0;
   private jumpCount = 0;
   private charge = 1;
   private isGrounded = false;
@@ -599,6 +602,7 @@ export class GamePhysics {
     this.ensureChunks(before.x);
     if (this.stepLoop(controls)) {
       this.airborneRotation = 0;
+      this.airborneFlips = 0;
       return;
     }
 
@@ -681,15 +685,24 @@ export class GamePhysics {
     this.updatePursuit();
     this.updateWeapon(controls);
     if (!this.isGrounded && !this.crashed) {
-      if (wasGrounded) this.airborneRotation = 0;
+      if (wasGrounded) {
+        this.airborneRotation = 0;
+        this.airborneFlips = 0;
+      }
       // Rapier wraps angles at ±π. Accumulate signed, unwrapped motion so
       // partial turns cancel when reversed, and each full turn pays once.
       this.airborneRotation += angleDelta(before.angle, body.angle);
       while (Math.abs(this.airborneRotation) >= Math.PI * 2) {
         this.flipsCompleted++;
+        this.airborneFlips++;
+        // Top up this jump to 5 × n² coins: 5, 20, 45, 80, ... .
+        this.flipCoins += 5 * (2 * this.airborneFlips - 1);
         this.airborneRotation -= Math.sign(this.airborneRotation) * Math.PI * 2;
       }
-    } else this.airborneRotation = 0;
+    } else {
+      this.airborneRotation = 0;
+      this.airborneFlips = 0;
+    }
     if (this.crashed) this.beginWreck();
     this.current = this.readPoses();
   }
@@ -813,7 +826,7 @@ export class GamePhysics {
       jumpSerial: this.jumpSerial, jumpsUsed: this.jumpCount,
       jumpJetActive: this.jumpJetActive,
       frontJetActive: this.frontJetActive, rearJetActive: this.rearJetActive,
-      flipsCompleted: this.flipsCompleted,
+      flipsCompleted: this.flipsCompleted, flipCoins: this.flipCoins,
       jumpJetRemaining: this.jumpCount > 0 ? Math.max(0, JUMP_THRUST_DURATION - this.jumpHoldTime) : 0,
       landingSerial: this.landingSerial, landingImpact: this.landingImpact,
       crashReason: this.crashReason,

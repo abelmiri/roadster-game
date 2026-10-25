@@ -12,7 +12,7 @@ const stubs = {
   export const FIXED_STEP=1/120; export class GamePhysics {
     weapon=new VehicleWeapon();
     damage=new VehicleDamage();
-    constructor(x,loadout){this.weapon=new VehicleWeapon('machine-gun',loadout?.upgrades);this.damage=new VehicleDamage(loadout?.carUpgrades?.armor??0);if(loadout)this.weapon.equip(loadout.id,loadout.xp);Object.assign(globalThis.snapshot,{distance:0,health:this.damage.health,hullHealth:100,maxHealth:this.damage.maxHealth,armorMask:this.damage.armorMask,carUpgrades:loadout?.carUpgrades??{},impactSerial:0,invincibilityRemaining:0,crashed:false,wrecked:false,loopCompletions:0,obstaclesDestroyed:0,policeDestroyed:0,flipsCompleted:0,runXp:0,weapon:this.weapon.snapshot()});globalThis.dead=false}
+    constructor(x,loadout){this.weapon=new VehicleWeapon('machine-gun',loadout?.upgrades);this.damage=new VehicleDamage(loadout?.carUpgrades?.armor??0);if(loadout)this.weapon.equip(loadout.id,loadout.xp);Object.assign(globalThis.snapshot,{distance:0,health:this.damage.health,hullHealth:100,maxHealth:this.damage.maxHealth,armorMask:this.damage.armorMask,carUpgrades:loadout?.carUpgrades??{},impactSerial:0,invincibilityRemaining:0,crashed:false,wrecked:false,loopCompletions:0,obstaclesDestroyed:0,policeDestroyed:0,flipsCompleted:0,flipCoins:0,runXp:0,weapon:this.weapon.snapshot()});globalThis.dead=false}
     get impactSerial(){return globalThis.snapshot.impactSerial}
     get explosionSerial(){return this.weapon.destructionSerial}
     stepWreck(){globalThis.wreckSteps++}
@@ -1097,23 +1097,23 @@ test('Z and X hold separate air nozzles, Shift retains boost, and modal/pointer 
 test('flip coins reach the wallet, toast and save once, and reset for the next run', async () => {
   const p = await page('en-US');
   await p.click('primary-button');
-  p.context.snapshot.flipsCompleted = 3; p.advance(17);
-  assert.equal(p.ids.get('coin-total').textContent, '15');
-  assert.equal(p.ids.get('coin-toast').textContent, '+15 COINS');
+  p.context.snapshot.flipsCompleted = 3; p.context.snapshot.flipCoins = 45; p.advance(17);
+  assert.equal(p.ids.get('coin-total').textContent, '45');
+  assert.equal(p.ids.get('coin-toast').textContent, '+45 COINS');
   assert.equal(p.ids.get('coin-toast').hidden, false);
-  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins, 15);
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins, 45);
   p.advance(34);
-  assert.equal(p.ids.get('coin-total').textContent, '15');
+  assert.equal(p.ids.get('coin-total').textContent, '45');
   await p.click('pause-button'); await p.click('coin-wallet-button');
   const description = p.context.document.querySelectorAll('[data-i18n]').find(node => node.dataset.i18n === 'coinFlipDescription');
-  assert.match(description.textContent, /360°.*5 coins/);
+  assert.match(description.textContent, /5 coins.*2 = 20.*3 = 45/);
   await p.click('coin-guide-close');
   await p.click('pause-button');
   p.context.snapshot.health=0; p.context.snapshot.crashed=true; p.context.dead=true;
   p.advance(51); p.advance(3052);
   p.key('Space'); p.advance(3069);
-  p.context.snapshot.flipsCompleted=1; p.advance(3086);
-  assert.equal(p.ids.get('coin-total').textContent, '20');
+  p.context.snapshot.flipsCompleted=1; p.context.snapshot.flipCoins=5; p.advance(3086);
+  assert.equal(p.ids.get('coin-total').textContent, '50');
 });
 
 

@@ -72,21 +72,23 @@ test('record bonuses use one exclusive tier and are awarded only once for a stri
   assert.equal(p.coins, 35);
 });
 
-test('airborne flips pay five each, retain skipped turns, persist, and never pay twice or during a wreck', () => {
+test('cumulative flip coin rewards retain skipped combos, persist, and never pay twice or during a wreck', () => {
   const s = store(); const p = new PlayerProgress(s.storage);
-  assert.equal(p.collect(0, 0, 0, 1), 5);
-  assert.equal(p.collect(0, 0, 0, 4), 15);
-  assert.equal(p.collect(0, 0, 0, 4), 0);
-  assert.equal(p.collect(0, 0, 0, 2), 0);
+  assert.equal(p.collect(0, 0, 0, 5), 5);
+  assert.equal(p.collect(0, 0, 0, 20), 15, 'two flips pay a total of 20 coins');
+  assert.equal(p.collect(0, 0, 0, 45), 25, 'three flips pay a total of 45 coins');
+  assert.equal(p.collect(0, 0, 0, 80), 35, 'four flips pay a total of 80 coins');
+  assert.equal(p.collect(0, 0, 0, 80), 0);
+  assert.equal(p.collect(0, 0, 0, 20), 0);
   assert.equal(p.collect(200, 1, 1, NaN), 25);
-  assert.equal(p.collect(200, 1, 1, 5), 5);
-  assert.equal(new PlayerProgress(s.storage).coins, 50);
+  assert.equal(p.collect(200, 1, 1, 85), 5, 'a later single flip adds five coins');
+  assert.equal(new PlayerProgress(s.storage).coins, 110);
   p.finishRun(200);
   assert.equal(p.collect(200, 1, 1, 100), 0);
   p.resetRun();
-  assert.equal(p.collect(0, 0, 0, 1), 5);
+  assert.equal(p.collect(0, 0, 0, 5), 5);
   assert.equal(p.runCoins, 5);
-  assert.equal(new PlayerProgress(s.storage).coins, 55);
+  assert.equal(new PlayerProgress(s.storage).coins, 115);
 });
 
 test('record score persists before naming, a reload retains the pending form, and a name survives updates', () => {

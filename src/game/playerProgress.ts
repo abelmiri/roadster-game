@@ -102,11 +102,11 @@ export class PlayerProgress {
     return 'purchased';
   }
 
-  collect(distance: number, completedLoops: number, destroyedPolice: number, completedFlips = 0): number {
+  collect(distance: number, completedLoops: number, destroyedPolice: number, flipCoins = 0): number {
     if (this.finished) return 0;
     const milestones = Number.isFinite(distance) && distance >= 0 ? Math.floor(distance / 200) : NaN;
-    const counters = [milestones, completedLoops, destroyedPolice, completedFlips];
-    const rewards = [10, 5, 10, 5];
+    const counters = [milestones, completedLoops, destroyedPolice, flipCoins];
+    const rewards = [10, 5, 10, 1];
     let gained = 0;
     counters.forEach((count, index) => {
       if (!validCount(count) || count <= this.collected[index]) return;

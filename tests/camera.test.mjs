@@ -3,11 +3,65 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
-let ImpactCamera, VIEW_HALF_HEIGHT, CRASH_ZOOM, CAMERA_LOOK_AHEAD;
+let ImpactCamera, DrivingCamera, VIEW_HALF_HEIGHT, CRASH_ZOOM, CAMERA_LOOK_AHEAD;
 before(async()=>{
   const outdir=path.resolve('node_modules/.cache/roadster-camera-tests');
-  await build({entryPoints:['src/game/impactCamera.ts'],bundle:true,platform:'node',format:'esm',outdir,outExtension:{'.js':'.mjs'}});
+  await build({entryPoints:['src/game/impactCamera.ts','src/game/drivingCamera.ts'],bundle:true,platform:'node',format:'esm',outdir,outExtension:{'.js':'.mjs'}});
   ({ImpactCamera,VIEW_HALF_HEIGHT,CRASH_ZOOM,CAMERA_LOOK_AHEAD}=await import(pathToFileURL(path.join(outdir,'impactCamera.mjs')).href));
+  ({DrivingCamera}=await import(pathToFileURL(path.join(outdir,'drivingCamera.mjs')).href));
+});
+
+const driving = {speed:18,height:0,verticalSpeed:0,grounded:true,loopView:0,crashed:false};
+
+test('high speed smoothly widens the view and slowing down eases back with refresh-independent timing',()=>{
+  const camera=new DrivingCamera();
+  camera.update(driving,1);
+  assert.equal(camera.halfHeight,VIEW_HALF_HEIGHT);
+  camera.update({...driving,speed:34},1/60);
+  assert.ok(camera.halfHeight>VIEW_HALF_HEIGHT&&camera.halfHeight<VIEW_HALF_HEIGHT+1);
+  for(let i=0;i<180;i++)camera.update({...driving,speed:34},1/60);
+  assert.ok(camera.halfHeight>VIEW_HALF_HEIGHT+6.9);
+  const wide=camera.halfHeight;
+  camera.update(driving,1/60);
+  assert.ok(camera.halfHeight<wide&&camera.halfHeight>wide-.3);
+  for(let i=0;i<360;i++)camera.update(driving,1/60);
+  assert.ok(Math.abs(camera.halfHeight-VIEW_HALF_HEIGHT)<.001);
+  const slow=new DrivingCamera(),fast=new DrivingCamera();
+  for(let i=0;i<60;i++)slow.update({...driving,speed:30},1/30);
+  for(let i=0;i<240;i++)fast.update({...driving,speed:30},1/120);
+  assert.ok(Math.abs(slow.halfHeight-fast.halfHeight)<1e-9);
+});
+
+test('a tall jump anticipates ascent and keeps the complete car and road inside the smoothly tracked view',()=>{
+  const camera=new DrivingCamera();
+  const dt=1/120;
+  let centerY=0,maxHeight=0;
+  for(let i=0;i<440;i++) {
+    const time=i*dt;
+    const height=Math.max(0,38*time-11*time*time);
+    camera.update({...driving,height,verticalSpeed:38-22*time,grounded:height===0},dt);
+    centerY+=(camera.lift-centerY)*(1-Math.exp(-dt*4.2));
+    assert.ok(height+2.5<centerY+camera.halfHeight,`car cropped at t=${time}`);
+    assert.ok(centerY-camera.halfHeight<0,'the road should stay visible');
+    maxHeight=Math.max(maxHeight,camera.halfHeight);
+  }
+  assert.ok(maxHeight>VIEW_HALF_HEIGHT+10);
+});
+
+test('adaptive framing holds during pause and fatal crashes, resets on restart, and retains loop framing',()=>{
+  const camera=new DrivingCamera();
+  camera.update({...driving,speed:34,height:24,grounded:false},2);
+  const before={height:camera.halfHeight,lift:camera.lift};
+  camera.update(driving,0);
+  assert.deepEqual({height:camera.halfHeight,lift:camera.lift},before);
+  camera.update({...driving,crashed:true},10);
+  assert.deepEqual({height:camera.halfHeight,lift:camera.lift},before);
+  camera.update(driving,0);
+  assert.equal(camera.halfHeight,VIEW_HALF_HEIGHT);
+  assert.equal(camera.lift,0);
+  camera.update({...driving,speed:34,height:24,grounded:false,loopView:1},10);
+  assert.ok(Math.abs(camera.halfHeight-(VIEW_HALF_HEIGHT+1.7))<1e-9);
+  assert.equal(camera.lift,0);
 });
 const contact={serial:1,x:22,y:3,kind:'collision'};
 test('the ordinary view is 20% wider; collisions zoom 70% toward the car and contact, then ease back',()=>{

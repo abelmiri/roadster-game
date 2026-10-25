@@ -659,7 +659,7 @@ function crash(): void {
   // The final obstacle hit already played its impact sound before hit stop.
   if (physics.snapshot(1).health > 0) audio.play('crash');
   const snapshot = physics.snapshot(1);
-  awardCoins(player.collect(snapshot.distance, snapshot.loopCompletions, snapshot.policeDestroyed, snapshot.flipsCompleted));
+  awardCoins(player.collect(snapshot.distance, snapshot.loopCompletions, snapshot.policeDestroyed, snapshot.flipCoins));
   awardExperience(snapshot);
   experience.finishRun();
   const result = player.finishRun(physics.distance);
@@ -1091,7 +1091,7 @@ function renderFrame(now: number): void {
   const frozen = impactPause.active;
   const snapshot = physics.snapshot(frozen || holdInterpolation ? 1 : Math.min(1, accumulator / FIXED_STEP));
   const simulating = status === 'running' && !frozen;
-  awardCoins(player.collect(snapshot.distance, snapshot.loopCompletions, snapshot.policeDestroyed, snapshot.flipsCompleted));
+  awardCoins(player.collect(snapshot.distance, snapshot.loopCompletions, snapshot.policeDestroyed, snapshot.flipCoins));
   if (simulating) coinRewardTime = Math.max(0, coinRewardTime - playDelta);
   const gained = awardExperience(snapshot);
   if (!gained && simulating) rewardTime = Math.max(0, rewardTime - playDelta);
