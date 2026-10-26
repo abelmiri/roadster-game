@@ -276,6 +276,8 @@ export class PlayerProgress {
     this.flushScore();
   }
 
+  save(): void { this.persist(); }
+
   private credit(amount: number): number {
     const gained = Math.min(amount, Number.MAX_SAFE_INTEGER - this.coins);
     this.coins += gained;

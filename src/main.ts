@@ -21,6 +21,7 @@ import { formatNumber, formatDecimal, formatPercent, getLanguage, setLanguage, t
 import { TouchLayoutEditor } from './touchLayout';
 import { touchIcon } from './touchIcons';
 import { SHOP_STATES, shopBadge, shopStateIcon, type ShopState } from './shopState';
+import { ApiError, GameSync, clearSession, getTelegram, health, linkTelegram, logout, passkey, unlinkTelegram } from './backend';
 import './styles.css';
 import './hud.css';
 import './touchLayout.css';
@@ -30,6 +31,7 @@ import './mobile.css';
 import './customization.css';
 import './missions.css';
 import './shopStates.css';
+import './backend.css';
 
 type GameStatus = 'loading' | 'ready' | 'running' | 'paused' | 'crashed' | 'error';
 const carUpgradeNames: Record<CarUpgradeId, MessageKey> = { armor:'carArmor', 'boost-reserve':'carBoostReserve', 'boost-power':'carBoostPower' };
@@ -164,6 +166,7 @@ app.innerHTML = `
         <button id="menu-wallet-button" class="menu-coin-wallet" type="button" aria-haspopup="dialog" aria-controls="coin-dialog" aria-expanded="false"><span class="coin-symbol" aria-hidden="true">●</span><span data-i18n="coinBalance"></span><strong id="menu-coins"></strong><span class="coin-info-label" data-i18n="coinDetails"></span></button>
         <button id="menu-missions-button" class="menu-missions-button" type="button" aria-haspopup="dialog" aria-controls="missions-dialog" aria-expanded="false"><span data-i18n="missions"></span><strong id="menu-missions-progress"></strong><span aria-hidden="true">↗</span></button>
         <button id="primary-button" class="primary-button" type="button"><span id="primary-label"></span><span class="button-arrow" aria-hidden="true">↗</span></button>
+        <button id="account-button" class="account-button" type="button"></button>
         <div id="overlay-foot" class="overlay-foot"></div>
         <footer class="app-credits">
           <a href="https://github.com/abelmiri" target="_blank" rel="noopener noreferrer" dir="ltr">© 2026 abelmiri</a>
@@ -213,6 +216,18 @@ app.innerHTML = `
         <p id="record-name-error" class="record-name-error" role="alert" hidden data-i18n="recordNameRequired"></p>
         <button id="record-save" class="primary-button" type="submit" data-i18n="saveRecord"></button>
       </form>
+    </div>
+    <div id="account-dialog" class="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-title" hidden>
+      <div class="account-card">
+        <div class="account-heading"><h2 id="account-title"></h2><button id="account-close" type="button" aria-label="Close">×</button></div>
+        <p id="account-description"></p><p id="account-status" role="status"></p>
+        <div id="account-auth-actions" class="account-actions"><button id="account-register" type="button"></button><button id="account-login" type="button"></button></div>
+        <div id="account-signed-actions" hidden>
+          <form id="redeem-form"><label id="redeem-label" for="redeem-code"></label><div class="account-inline"><input id="redeem-code" autocomplete="off" spellcheck="false" maxlength="64" placeholder="RDST-…"/><button id="redeem-submit" type="submit"></button></div></form>
+          <div class="account-actions"><button id="account-refresh" type="button"></button><button id="telegram-link" type="button"></button><button id="telegram-unlink" type="button" hidden></button><button id="account-logout" type="button"></button></div>
+          <p id="telegram-status"></p><a id="telegram-url" href="#" target="_blank" rel="noopener noreferrer" hidden></a>
+        </div>
+      </div>
     </div>
     <div id="rotate-overlay" class="rotate-overlay"><div class="rotate-symbol" aria-hidden="true">▯</div><strong data-i18n="rotateTitle"></strong><p data-i18n="rotateDescription"></p></div>
     <div id="loading" class="loading"><span><span data-i18n="loading"></span><span class="loading-dots" aria-hidden="true">...</span></span></div>
@@ -270,9 +285,15 @@ const languageButton = element<HTMLButtonElement>('language-button');
 const audio = new GameAudio();
 let progressStorage: Storage | undefined;
 try { progressStorage = localStorage; } catch { /* Keep the game playable when browser storage is unavailable. */ }
-const experience = new ExperienceProgress(progressStorage);
-const player = new PlayerProgress(progressStorage);
-const loadout = new WeaponLoadout(experience.total, progressStorage, id => player.ownsWeapon(id));
+const sync = progressStorage ? new GameSync(progressStorage) : null;
+let syncReady = false;
+const gameStorage = progressStorage ? {
+  getItem: (key: string) => progressStorage.getItem(key),
+  setItem: (key: string, value: string) => { progressStorage.setItem(key, value); if (syncReady) sync?.changed(key); },
+} : undefined;
+let experience = new ExperienceProgress(gameStorage);
+let player = new PlayerProgress(gameStorage);
+let loadout = new WeaponLoadout(experience.total, progressStorage, id => player.ownsWeapon(id));
 const recordDialog = element('record-dialog');
 const recordName = element<HTMLInputElement>('record-name');
 const recordSave = element<HTMLButtonElement>('record-save');
@@ -363,6 +384,150 @@ const held = { jump: new Set<string>(), suction: new Set<string>(), boost: new S
   frontJet: new Set<string>(), rearJet: new Set<string>() };
 let aimDirection: AimDirection = 1;
 let best = player.record.distance;
+const accountDialog = element<HTMLDivElement>('account-dialog');
+accountDialog.hidden = true;
+const accountButton = element<HTMLButtonElement>('account-button');
+const accountStatus = element<HTMLParagraphElement>('account-status');
+let accountBusy = false;
+let startPending = false;
+const accountCopy = {
+  en: {
+    button: 'ACCOUNT & SYNC', title: 'ACCOUNT & SYNC', intro: 'Use a passkey to keep your coins, upgrades, XP and records across devices.',
+    register: 'CREATE ACCOUNT', login: 'SIGN IN', redeem: 'Redeem a coin code', submit: 'REDEEM', refresh: 'LOAD CLOUD SAVE',
+    telegram: 'CONNECT TELEGRAM', unlink: 'DISCONNECT TELEGRAM', logout: 'SIGN OUT', linked: 'Telegram connected.',
+    unlinked: 'Telegram is not connected.', saved: 'Progress synced.', loaded: 'Cloud progress loaded.',
+    redeemed: 'Code redeemed. Cloud progress loaded.', signedOut: 'Signed out.',
+    conflict: 'Cloud progress changed on another device. Choose “Load cloud save” to use it; your current local progress will be replaced.',
+    unavailable: 'Service unavailable. Try again later.', unsupported: 'This browser does not support passkeys.',
+    cancelled: 'Passkey was cancelled. Try again.', unauthorized: 'Session expired. Sign in again.',
+    invalid_code: 'Invalid code.', code_expired: 'Code expired.', code_exhausted: 'Code exhausted.',
+    code_already_redeemed: 'You already redeemed this code.', progress_required: 'A cloud save is needed first.',
+    busy: 'Working…', telegramLink: 'OPEN TELEGRAM LINK', needFinish: 'Finish the current run before changing accounts.',
+  },
+  fa: {
+    button: 'حساب و همگام‌سازی', title: 'حساب و همگام‌سازی', intro: 'با کلید عبور، سکه‌ها، ارتقاها، تجربه و رکورد را بین دستگاه‌ها نگه دارید.',
+    register: 'ساخت حساب', login: 'ورود', redeem: 'ثبت کد سکه', submit: 'ثبت کد', refresh: 'دریافت ذخیرهٔ ابری',
+    telegram: 'اتصال تلگرام', unlink: 'قطع اتصال تلگرام', logout: 'خروج', linked: 'تلگرام متصل است.',
+    unlinked: 'تلگرام متصل نیست.', saved: 'پیشرفت همگام شد.', loaded: 'پیشرفت ابری دریافت شد.',
+    redeemed: 'کد ثبت شد و پیشرفت ابری دریافت شد.', signedOut: 'از حساب خارج شدید.',
+    conflict: 'پیشرفت ابری در دستگاه دیگری تغییر کرده است. با «دریافت ذخیرهٔ ابری» آن را جایگزین پیشرفت محلی کنید.',
+    unavailable: 'سرویس در دسترس نیست. دوباره تلاش کنید.', unsupported: 'این مرورگر از کلید عبور پشتیبانی نمی‌کند.',
+    cancelled: 'کلید عبور لغو شد. دوباره تلاش کنید.', unauthorized: 'نشست منقضی شده است. دوباره وارد شوید.',
+    invalid_code: 'کد نامعتبر است.', code_expired: 'کد منقضی شده است.', code_exhausted: 'ظرفیت کد تمام شده است.',
+    code_already_redeemed: 'این کد را قبلاً ثبت کرده‌اید.', progress_required: 'ابتدا باید ذخیرهٔ ابری ساخته شود.',
+    busy: 'در حال انجام…', telegramLink: 'باز کردن لینک تلگرام', needFinish: 'پیش از تغییر حساب، دور فعلی را تمام کنید.',
+  },
+};
+type AccountCopy = keyof typeof accountCopy.en;
+const ac = (key: AccountCopy): string => accountCopy[getLanguage()][key];
+function showAccountMessage(message: string): void { accountStatus.textContent = message; }
+function accountError(error: unknown): void {
+  if (error instanceof ApiError && error.status === 401) { clearSession(); sync?.signOut(); }
+  const code = error instanceof ApiError ? error.code : error instanceof Error ? error.message : '';
+  const key = code === 'revision_conflict' ? 'conflict' : code === 'passkey_unsupported' ? 'unsupported'
+    : code === 'passkey_cancelled' || code === 'NotAllowedError' ? 'cancelled'
+    : code === 'unauthorized' ? 'unauthorized' : code;
+  showAccountMessage(key in accountCopy.en ? ac(key as AccountCopy) : ac('unavailable'));
+  updateAccountUi();
+}
+sync && (sync.onError = accountError);
+
+function updateAccountUi(): void {
+  const signed = Boolean(sync?.signedIn);
+  accountButton.textContent = `${ac('button')}${sync?.hasConflict ? ' !' : ''}`;
+  element('account-title').textContent = ac('title');
+  element('account-description').textContent = ac('intro');
+  for (const [id, key] of [
+    ['account-register', 'register'], ['account-login', 'login'], ['redeem-label', 'redeem'],
+    ['redeem-submit', 'submit'], ['account-refresh', 'refresh'], ['telegram-link', 'telegram'],
+    ['telegram-unlink', 'unlink'], ['account-logout', 'logout'],
+  ] as const) element(id).textContent = ac(key);
+  element('account-auth-actions').hidden = signed;
+  element('account-signed-actions').hidden = !signed;
+  accountDialog.dir = getLanguage() === 'fa' ? 'rtl' : 'ltr';
+  for (const id of ['account-close', 'account-register', 'account-login', 'redeem-submit',
+    'account-refresh', 'telegram-link', 'telegram-unlink', 'account-logout']) {
+    element<HTMLButtonElement>(id).disabled = accountBusy;
+  }
+  element<HTMLButtonElement>('account-refresh').disabled = accountBusy || !signed;
+}
+
+async function accountAction(action: () => Promise<void>): Promise<void> {
+  if (accountBusy) return;
+  accountBusy = true; showAccountMessage(ac('busy')); updateAccountUi();
+  try { await action(); } catch (error) { accountError(error); }
+  finally { accountBusy = false; updateAccountUi(); }
+}
+
+function openAccount(): void {
+  if (status === 'loading' || status === 'error' || dialogBlocked() || !recordDialog.hidden) return;
+  if (status === 'running' || status === 'paused') { showAccountMessage(ac('needFinish')); return; }
+  accountDialog.hidden = false;
+  updateAccountUi();
+  if (sync?.signedIn) void refreshTelegramStatus();
+  element<HTMLButtonElement>('account-close').focus();
+}
+function closeAccount(): void { accountDialog.hidden = true; accountButton.focus(); }
+async function refreshTelegramStatus(): Promise<void> {
+  if (!sync?.token) return;
+  try {
+    const state = await getTelegram(sync.token);
+    element('telegram-status').textContent = ac(state.linked ? 'linked' : 'unlinked');
+    element('telegram-unlink').hidden = !state.linked;
+    element('telegram-link').hidden = state.linked;
+  } catch (error) { accountError(error); }
+}
+accountButton.addEventListener('click', openAccount);
+element('account-close').addEventListener('click', closeAccount);
+for (const mode of ['register', 'login'] as const) element(`account-${mode}`).addEventListener('click', () => {
+  void accountAction(async () => {
+    if (!sync || !progressStorage) throw new Error('storage_unavailable');
+    await health();
+    await passkey(mode);
+    await sync.signedInNow();
+    location.reload();
+  });
+});
+element('account-logout').addEventListener('click', () => {
+  void accountAction(async () => {
+    const token = sync?.token;
+    if (token) { await sync?.flush(); await logout(token); }
+    sync?.signOut();
+    showAccountMessage(ac('signedOut'));
+  });
+});
+element('account-refresh').addEventListener('click', () => {
+  void accountAction(async () => { await sync?.refreshFromServer(); location.reload(); });
+});
+element<HTMLFormElement>('redeem-form').addEventListener('submit', event => {
+  event.preventDefault();
+  void accountAction(async () => {
+    const input = element<HTMLInputElement>('redeem-code');
+    const code = input.value.trim();
+    if (!code) return;
+    await sync?.redeemCode(code);
+    location.reload();
+  });
+});
+element('telegram-link').addEventListener('click', () => {
+  void accountAction(async () => {
+    if (!sync?.token) return;
+    const result = await linkTelegram(sync.token);
+    const url = new URL(result.url);
+    if (url.protocol !== 'https:' || url.hostname !== 't.me') throw new Error('invalid_telegram_url');
+    const anchor = element<HTMLAnchorElement>('telegram-url');
+    anchor.href = url.href; anchor.textContent = ac('telegramLink'); anchor.hidden = false;
+    await refreshTelegramStatus();
+  });
+});
+element('telegram-unlink').addEventListener('click', () => {
+  void accountAction(async () => {
+    if (!sync?.token) return;
+    await unlinkTelegram(sync.token);
+    await refreshTelegramStatus();
+    element('telegram-url').hidden = true;
+  });
+});
 
 const formatDistance = (meters: number): string => `${formatNumber(meters, 4)} <small>${t('meter')}</small>`;
 const districtKeys: MessageKey[] = ['districtMorning', 'districtDowntown', 'districtNight'];
@@ -830,12 +995,19 @@ function clearHeld(): void {
   document.querySelectorAll('.touch-button').forEach((button) => button.classList.remove('is-pressed'));
 }
 
-function start(): void {
+async function start(): Promise<void> {
+  if (startPending) return;
   if (dialogBlocked()) return;
-  if (touchLayout.editing || !armory.hidden || !recordDialog.hidden || !coinDialog.hidden) return;
+  if (touchLayout.editing || !armory.hidden || !recordDialog.hidden || !coinDialog.hidden || !accountDialog.hidden) return;
   if (status === 'loading' || status === 'error' || status === 'running') return;
   if (status === 'crashed' && performance.now() < restartAvailableAt) return;
   const resuming = status === 'paused';
+  if (!resuming && sync?.signedIn) {
+    startPending = true; primaryButton.disabled = true;
+    try { await sync.beginRun(); }
+    catch (error) { accountError(error); openAccount(); return; }
+    finally { startPending = false; primaryButton.disabled = false; }
+  }
   if (status === 'ready') { player.resetRun(); player.beginMissionRun(); refreshMissions(true); }
   if (status === 'crashed') {
     restartAvailableAt = 0;
@@ -881,6 +1053,7 @@ function saveRunScore(): void {
 
 function pause(): void {
   saveRunScore();
+  void sync?.flush().catch(accountError);
   if (status !== 'running') { audio.suspend(); return; }
   status = 'paused';
   jumpQueued = false;
@@ -907,6 +1080,7 @@ function crash(): void {
   updateMissions(snapshot, true);
   experience.finishRun();
   const result = player.finishRun(physics.distance);
+  void sync?.finishRun().catch(accountError);
   if (result.newRecord) {
     best = player.record.distance;
     recordBonus = result.bonus;
@@ -971,6 +1145,7 @@ element('record-form').addEventListener('submit', event => {
     return;
   }
   recordDialog.hidden = true;
+  void sync?.flush().catch(accountError);
   document.querySelector('.game-shell')?.classList.remove('is-naming-record');
   updateHud(physics?.snapshot(1));
   primaryButton.focus();
@@ -1111,6 +1286,7 @@ purchaseConfirm.addEventListener('click', () => {
   else if (quote.kind === 'vehicle') applySelectedVehicle();
   else visuals.setPaint(player.selectedPaint);
   refreshArmory(); updateHud(physics.snapshot(1)); closePurchase();
+  void sync?.flush().catch(accountError);
   void audio.unlock().then(() => audio.play('click'));
 });
 
@@ -1150,6 +1326,7 @@ for (let index = 0; index < 3; index++) {
     lastMissionRewards = [reward]; missionRewardTime = 4; missionNotice = 'missionRewardNotice';
     awardCoins(reward.reward); audio.play('record');
     refreshMissions(true); refreshArmory(); updateHud();
+    void sync?.flush().catch(accountError);
     element('mission-tab-active').focus();
   });
 }
@@ -1441,7 +1618,7 @@ window.addEventListener('keyup', (event) => {
   if (action === 'frontJet' || action === 'rearJet') syncAirJetButtons();
 });
 window.addEventListener('blur', pause);
-window.addEventListener('pagehide', () => { saveRunScore(); audio.suspend(); });
+window.addEventListener('pagehide', () => { saveRunScore(); void sync?.flush().catch(accountError); audio.suspend(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
 primaryButton.addEventListener('click', start);
 pauseButton.addEventListener('click', () => { if (status === 'running') pause(); else if (status === 'paused') start(); });
@@ -1449,6 +1626,7 @@ soundButton.addEventListener('click', toggleSound);
 languageButton.addEventListener('click', () => {
   setLanguage(getLanguage() === 'en' ? 'fa' : 'en');
   updateLanguage();
+  updateAccountUi();
   void audio.unlock().then(() => audio.play('click'));
   languageButton.blur();
 });
@@ -1586,6 +1764,24 @@ function renderFrame(now: number): void {
 
 async function boot(): Promise<void> {
   try {
+    if (sync && progressStorage) {
+      if (!progressStorage.getItem('roadster-progress')) player.save();
+      if (sync.signedIn) {
+        try {
+          await health();
+          const restored = await sync.initialize();
+          if (restored) {
+            player = new PlayerProgress(gameStorage);
+            experience = new ExperienceProgress(gameStorage);
+            loadout = new WeaponLoadout(experience.total, progressStorage, id => player.ownsWeapon(id));
+            best = player.record.distance;
+            refreshArmory();
+            refreshMissions(true);
+          }
+        } catch (error) { sync.markUnavailable(); accountError(error); }
+      }
+    }
+    syncReady = true;
     await RAPIER.init();
     physics = new GamePhysics(7, { id: loadout.selected, xp: experience.total, upgrades: player.weaponUpgrades, carUpgrades: player.carUpgrades, vehicle: player.selectedVehicle });
     visuals = new GameVisuals(sceneElement);
@@ -1608,4 +1804,5 @@ async function boot(): Promise<void> {
 setArmoryTab('weapons');
 setCoinTab('earn');
 updateLanguage();
+updateAccountUi();
 void boot();

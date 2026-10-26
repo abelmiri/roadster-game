@@ -17,6 +17,12 @@ npm run dev
 
 Open the URL Vite prints. Development mode shows a small translucent FPS counter at the top, refreshed twice per second. It is omitted from production. For a production bundle, run `npm run build`. Run the simulation checks with `npm test`.
 
+## Account and cloud save
+
+The **Account & Sync** button on the ready or game-over menu connects the game to [Roadster API](https://github.com/abelmiri/roadster-api). The default endpoint is `https://roadster-api.vercel.app`; set `VITE_ROADSTER_API_URL` before building to use another deployment. The client checks `/health` before Passkey registration or login. Production Passkeys require the game origin and RP ID configured on the API; localhost Passkeys are separate from production Passkeys.
+
+After signing in, the server save becomes the game's starting state. A new account uploads the existing local save. Progress and XP are sent with revision checks; each new run uses an idempotency key, and coin codes refresh the server save before the game reloads. A revision conflict stops further writes until the player chooses **Load cloud save** in the account panel. The account panel also provides Telegram linking and unlinking. Without sign-in, the game continues to save locally.
+
 ## Controls
 
 | Action | Keyboard | Landscape touch |
@@ -38,7 +44,7 @@ Mobile menus use roughly 35% smaller type and tighter card layouts so the ready,
 
 The car drives automatically, starting at 60 km/h (16.67 m/s) and building toward 18 m/s. Boost adds 9 m/s to the target speed, accelerates at 18 m/s², and reaches up to 27 m/s (97 km/h). It works on the road and in the air, produces white nozzle smoke, and recharges when released. An exhausted boost needs a button release before it can fire again. Your best distance is stored in this browser.
 
-Finishing a run with a new best score opens a medal dialog to record the driver's name. The score is saved immediately, and the name is shown below the best distance after submission. Reloading before naming restores the pending dialog without paying the record bonus again. The versioned `roadster-progress` save stores the record, name, coin balance, and purchased weapons under a stable key across app builds. Existing `roadster-best` scores are retained, and new records also update that legacy key. Browser data remains local to the same browser profile and site origin.
+Finishing a run with a new best score opens a medal dialog to record the driver's name. The score is saved immediately, and the name is shown below the best distance after submission. Reloading before naming restores the pending dialog without paying the record bonus again. The versioned `roadster-progress` save stores the record, name, coin balance, and purchased weapons under a stable key across app builds. Existing `roadster-best` scores are retained, and new records also update that legacy key. Browser data remains available to the same browser profile and site origin; signed-in players also sync it to the API.
 
 The same save also retains the last run's distance in its `score` field. Driving checkpoints it at most once per second, with immediate saves when pausing, leaving the page, or finishing a run. After reloading, the ready-screen score is labeled **Last run**; starting a new run resets only that distance and run counters. Saved records, coins, lifetime XP (`roadster-xp`), and mobile button positions, sizes, and visibility (`roadster-touch-layout`) remain intact. Older saves without a score field retain all existing progress and start with a zero last score.
 
