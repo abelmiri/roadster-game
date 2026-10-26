@@ -53,9 +53,13 @@ test('missions progress across the entire campaign without repeating a completed
   for (let run = 0; run < 200 && progress.completed.length < MISSIONS.length; run++) {
     progress.beginRun(8);
     assert.ok(progress.active.length <= 3);
-    const awarded = progress.update(stats, true, run);
-    for (const spec of awarded) { assert.equal(seen.has(spec.id), false); seen.add(spec.id); }
-    assert.deepEqual(progress.update(stats, true), [], 'a finished run paid again');
+    const ready = progress.update(stats, true, run);
+    for (const spec of ready) {
+      assert.equal(seen.has(spec.id), false); seen.add(spec.id);
+      assert.equal(progress.collect(spec.id), spec);
+      assert.equal(progress.collect(spec.id), null, 'a collected goal paid again');
+    }
+    assert.deepEqual(progress.update(stats, true), [], 'a finished run progressed again');
   }
   assert.equal(progress.completed.length, 100); assert.equal(seen.size, 100);
   progress.beginRun(8); assert.equal(progress.active.length, 0);
@@ -81,31 +85,80 @@ test('saved run attempts reset for the next run, best attempts remain, and lifet
   assert.equal(restored.totals.totalDistance, 1050, 'older snapshots duplicated lifetime distance');
 });
 
-test('mission completion, coin credit, points and archive are saved atomically and never paid again on reload', () => {
+test('completed goals wait for Collect across reloads and runs, then credit coins, points and history exactly once', () => {
   const storage = store({ coins: 100 }); const player = new PlayerProgress(storage);
   player.resetRun(); player.beginMissionRun();
+  assert.equal(player.collectMission('distance-250'), null, 'unfinished goal was collected');
+  assert.equal(player.collectMission('unknown'), null);
+  assert.equal(player.collectMission('roofHits-1'), null, 'unassigned goal was collected');
   const stats = { ...emptyMissionStats(), distance: 250, jumps: 5, boxesOpened: 1 };
-  const earned = player.collectMissions(stats, 1000);
-  assert.equal(earned.length, 3);
-  const reward = earned.reduce((sum, spec) => sum + spec.reward, 0);
-  assert.equal(player.coins, 100 + reward); assert.equal(player.runCoins, reward);
-  const commit = storage.writes.at(-1);
-  assert.equal(commit.coins, 100 + reward); assert.equal(commit.missions.completed.length, 3);
+  const ready = player.updateMissions(stats, 1000);
+  assert.equal(ready.length, 3);
+  assert.equal(player.coins, 100); assert.equal(player.runCoins, 0);
+  assert.equal(player.missions.score, 0); assert.equal(player.missions.completed.length, 0);
+  assert.equal(storage.writes.at(-1).missions.active.length, 3, 'finished goals were not saved immediately');
   const restored = new PlayerProgress(storage);
-  assert.equal(restored.missions.score, player.missions.score);
+  assert.deepEqual(restored.missions.active, player.missions.active);
+  assert.deepEqual(restored.updateMissions(stats, 2000), [], 'reload progressed an old run');
+  restored.beginMissionRun();
+  assert.deepEqual(restored.updateMissions(emptyMissionStats(), 3000), []);
+  assert.deepEqual(restored.missions.active, player.missions.active, 'a restart reset or replaced uncollected goals');
+  assert.equal(restored.coins, 100);
+  let reward = 0;
+  for (const spec of ready) {
+    assert.equal(restored.collectMission(spec.id)?.id, spec.id);
+    reward += spec.reward;
+    const commit = storage.writes.at(-1);
+    assert.equal(commit.coins, 100 + reward);
+    assert.equal(commit.missions.completed.at(-1).id, spec.id);
+    assert.equal(commit.missions.completed.at(-1).points, spec.points);
+    const writes = storage.writes.length;
+    assert.equal(restored.collectMission(spec.id), null);
+    assert.equal(new PlayerProgress(storage).collectMission(spec.id), null);
+    assert.equal(storage.writes.length, writes, 'double Collect wrote a duplicate reward');
+  }
+  assert.equal(restored.runCoins, reward);
   assert.equal(restored.missions.earnedCoins, reward);
   assert.equal(restored.missions.completed.length, 3);
-  assert.ok(restored.missions.active.every(item => !earned.some(spec => spec.id === item.id)));
-  assert.deepEqual(restored.collectMissions(stats, 2000), [], 'reload credited old actions before a new run');
+  assert.equal(restored.missions.active.length, 0, 'new goals inherited actions from the same run');
   assert.equal(restored.coins, 100 + reward);
   restored.beginMissionRun();
-  assert.deepEqual(restored.collectMissions(emptyMissionStats(), 3000), []);
+  assert.equal(restored.missions.active.length, 3);
+  assert.ok(restored.missions.active.every(item => !ready.some(spec => spec.id === item.id)));
+  assert.deepEqual(restored.updateMissions(emptyMissionStats(), 4000), []);
+});
+
+test('uncollected tiers keep their slot and family locked while other collected slots can refill', () => {
+  const progress = board(['obstaclesShot-5','jumps-5','forwardFlips-1']);
+  progress.update({ ...emptyMissionStats(), obstaclesShot: 7, jumps: 5 }, true, 1234);
+  assert.equal(progress.collect('jumps-5')?.id, 'jumps-5');
+  progress.beginRun(8);
+  assert.equal(progress.active.length, 3);
+  const pending = progress.active.find(item => item.id === 'obstaclesShot-5');
+  assert.equal(pending.progress, 5); assert.equal(pending.readyAt, 1234);
+  assert.equal(progress.active.some(item => item.id === 'obstaclesShot-10'), false);
+  progress.update({ ...emptyMissionStats(), obstaclesShot: 100 });
+  assert.equal(progress.collect('obstaclesShot-5')?.id, 'obstaclesShot-5');
+  assert.deepEqual(progress.completed.at(-1), { id: 'obstaclesShot-5', at: 1234, value: 7, coins: 80, points: 10 });
+});
+
+test('legacy paid history stays collected and a saved finished attempt can still be collected once', () => {
+  const storage = store({ coins: 145, missions: { version: 1,
+    completed: [{ id: 'boxesOpened-1', at: 10, coins: 50, points: 10 }],
+    active: [{ id: 'distance-250', progress: 250, best: 250 }] } });
+  const player = new PlayerProgress(storage);
+  assert.equal(player.collectMission('boxesOpened-1'), null);
+  player.beginMissionRun();
+  assert.equal(player.missions.active.find(item => item.id === 'distance-250').progress, 250);
+  assert.equal(player.collectMission('distance-250')?.reward, 50);
+  assert.equal(new PlayerProgress(storage).coins, 195);
+  assert.equal(new PlayerProgress(storage).collectMission('distance-250'), null);
 });
 
 test('progress checkpoints stay throttled, pause flushes the latest attempt, and corrupt records cannot duplicate IDs', () => {
   const storage = store({ coins: 0 }); const player = new PlayerProgress(storage); player.beginMissionRun();
   const writes = storage.writes.length;
-  for (let i = 0; i < 100; i++) player.collectMissions({ ...emptyMissionStats(), distance: i }, i * 10);
+  for (let i = 0; i < 100; i++) player.updateMissions({ ...emptyMissionStats(), distance: i }, i * 10);
   assert.ok(storage.writes.length - writes <= 2, 'mission progress wrote storage on every frame');
   player.flushScore();
   assert.equal(new PlayerProgress(storage).missions.active.find(item => item.id === 'distance-250').progress, 99);

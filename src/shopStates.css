@@ -58,14 +58,7 @@
   filter: none;
 }
 .garage-model[data-shop-state] small, .paint-swatch[data-shop-state] small { color: var(--shop-accent); }
-.weapon-card[data-shop-owned="true"] .weapon-price {
-  padding: 2px 6px;
-  border: 1px solid #6dbca6;
-  border-radius: 5px;
-  background: #1b4746;
-  color: #c0f5e3;
-}
-.weapon-card[data-shop-owned="true"] .weapon-price::before { content: '✓'; margin-inline-end: 4px; }
+.weapon-card > [hidden], .weapon-upgrades > .shop-badge[hidden] { display: none; }
 
 .shop-badge {
   display: flex;
@@ -99,7 +92,7 @@
   filter: none;
 }
 .shop-badge-label { min-width: 0; overflow-wrap: anywhere; }
-.weapon-card > .shop-badge { justify-content: flex-start; margin: 0 0 10px; padding-inline-end: 20px; }
+.weapon-card > .shop-badge { justify-content: flex-start; margin: 0; margin-bottom: 10px; margin-inline-end: 24px; padding-inline-end: 10px; }
 .weapon-card[data-shop-state] > .weapon-card-index {
   right: auto;
   left: auto;

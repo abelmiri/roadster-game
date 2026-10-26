@@ -102,23 +102,22 @@
   .armory-card > .armory-wallet { grid-column: 2; grid-row: 2; justify-self: end; margin: 0; min-height: 24px; padding: 4px 8px; gap: 6px; font-size: 8px; }
   .armory-wallet strong { font-size: 11px; }
   .armory-description, .armory-help, .armory-coin-help, .armory-upgrade-help, .armory-note { display: none; }
-  .weapon-grid { grid-template-columns: repeat(8,minmax(0,1fr)); gap: 4px; }
-  .weapon-card { padding: 5px; border-radius: 8px; }
-  .weapon-card > svg { height: 18px; margin-bottom: 2px; }
+  .weapon-grid { grid-template-columns: repeat(4,minmax(0,1fr)); gap: 16px 12px; }
+  .weapon-card { padding: 10px; gap: 5px; border-radius: 8px; }
+  .weapon-card > svg { height: 34px; margin-bottom: 6px; }
   .weapon-card-index { font-size: 6px; top: 5px; right: 6px; }
-  html[lang] .weapon-card strong { font-size: 7.5px; line-height: 1.4; }
+  html[lang] .weapon-card strong { font-size: 10px; line-height: 1.6; }
   .weapon-english, .weapon-power { display: none; }
-  html[lang] .weapon-stats { font-size: 6.5px; line-height: 1.45; }
-  html[lang] .weapon-unlock, html[lang] .weapon-price { font-size: 6.5px; line-height: 1.45; margin-top: 3px; }
+  html[lang] .weapon-stats { font-size: 8px; line-height: 1.7; }
+  html[lang] .weapon-unlock, html[lang] .weapon-price { font-size: 8px; line-height: 1.7; margin-top: 5px; }
   .weapon-card[data-shop-state=owned] .weapon-price, .weapon-card[data-shop-state=owned] .weapon-unlock,
   .weapon-card[data-shop-state=selected] .weapon-price, .weapon-card[data-shop-state=selected] .weapon-unlock { display: none; }
-  .weapon-upgrades { margin-top: 4px; padding: 4px; border-radius: 7px; }
-  html[lang] .weapon-level-row { font-size: 6.5px; gap: 3px; }
-  .weapon-upgrades .weapon-level-row > span:first-child { display: none; }
+  .weapon-upgrades { margin-top: 8px; padding: 8px; border-radius: 7px; }
+  html[lang] .weapon-level-row { font-size: 8px; gap: 6px; }
   .upgrade-steps { gap: 2px; }
   .upgrade-steps i { width: 6px; height: 3px; }
-  html[lang] .weapon-upgrade-preview { min-height: 0; margin: 4px 0; font-size: 6.5px; line-height: 1.4; }
-  html[lang] .weapon-upgrade-button { min-height: 29px; padding: 4px; font-size: 6.5px; }
+  html[lang] .weapon-upgrade-preview { min-height: 0; margin: 8px 0; font-size: 8px; line-height: 1.7; }
+  html[lang] .weapon-upgrade-button { min-height: 36px; padding: 6px; font-size: 8px; }
   .garage-vehicle { margin-bottom: 8px; border-radius: 10px; }
   .garage-car-preview svg { max-height: 66px; }
   .garage-vehicle h3 { font-size: 11px; }

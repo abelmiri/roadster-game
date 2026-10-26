@@ -195,7 +195,7 @@ app.innerHTML = `
       <div class="missions-card"><div class="missions-heading"><div><span class="eyebrow" data-i18n="missionEyebrow"></span><h2 id="missions-title" data-i18n="missionsTitle"></h2></div><button id="missions-close" class="armory-close" type="button" data-i18n="closeMissions"></button></div>
         <p class="missions-intro" data-i18n="missionsHelp"></p><div class="mission-summary"><strong id="missions-completed-count"></strong><strong id="missions-score"></strong><strong id="missions-coins"></strong></div>
         <div id="mission-tabs" class="armory-tabs" role="tablist">${['active','history','all'].map((tab,index)=>`<button id="mission-tab-${tab}" type="button" role="tab" aria-selected="${index===0}" aria-controls="mission-pane-${tab}" tabindex="${index===0?0:-1}" data-i18n="missionTab${tab[0].toUpperCase()+tab.slice(1)}"></button>`).join('')}</div>
-        <section id="mission-pane-active" role="tabpanel" aria-labelledby="mission-tab-active"><div class="mission-active-grid">${Array.from({length:3},(_,index)=>`<article id="active-mission-${index}" class="mission-active-card"><span id="mission-scope-${index}" class="mission-scope"></span><h3 id="mission-title-${index}"></h3><p id="mission-description-${index}"></p><div class="mission-progress"><strong id="mission-progress-${index}"></strong><span id="mission-reward-${index}"></span></div><div id="mission-meter-${index}" class="mission-meter" role="progressbar" aria-valuemin="0"><span id="mission-fill-${index}"></span></div><small id="mission-best-${index}"></small></article>`).join('')}</div><p id="mission-empty" class="mission-empty"></p><p class="mission-rules" data-i18n="missionRules"></p></section>
+        <section id="mission-pane-active" role="tabpanel" aria-labelledby="mission-tab-active"><div class="mission-active-grid">${Array.from({length:3},(_,index)=>`<article id="active-mission-${index}" class="mission-active-card"><span id="mission-scope-${index}" class="mission-scope"></span><h3 id="mission-title-${index}"></h3><p id="mission-description-${index}"></p><div class="mission-progress"><strong id="mission-progress-${index}"></strong><span id="mission-reward-${index}"></span></div><div id="mission-meter-${index}" class="mission-meter" role="progressbar" aria-valuemin="0"><span id="mission-fill-${index}"></span></div><small id="mission-best-${index}"></small><button id="mission-collect-${index}" class="mission-collect" type="button" hidden disabled data-i18n="missionCollect"></button></article>`).join('')}</div><p id="mission-empty" class="mission-empty"></p><p class="mission-rules" data-i18n="missionRules"></p></section>
         <section id="mission-pane-history" role="tabpanel" aria-labelledby="mission-tab-history" hidden><div id="mission-history" class="mission-list"></div><p id="mission-history-empty" class="mission-empty" data-i18n="missionHistoryEmpty"></p></section>
         <section id="mission-pane-all" role="tabpanel" aria-labelledby="mission-tab-all" hidden><div id="mission-catalog" class="mission-list"></div></section>
       </div>
@@ -313,6 +313,7 @@ let displayedMissionRevision = -1;
 let displayedMissionLanguage = '';
 let missionRewardTime = 0;
 let lastMissionRewards: readonly MissionSpec[] = [];
+let missionNotice: 'missionReadyNotice' | 'missionRewardNotice' = 'missionReadyNotice';
 const xpLevel = element('xp-level');
 const xpTotal = element('xp-total');
 const xpFill = element('xp-fill');
@@ -370,12 +371,15 @@ const dialogBlocked = (): boolean => !purchaseDialog.hidden || !missionsDialog.h
 const missionName = (spec: MissionSpec): string => `${spec.title[getLanguage()]} · ${formatNumber(spec.target)}`;
 const missionValue = (spec: MissionSpec, value: number): string => spec.unit === 'seconds' ? formatDecimal(Math.floor(value * 10 + 1e-6) / 10) : formatNumber(value);
 let displayedMissionHistory = -1;
+let displayedMissionAssignments = '';
 
 function refreshMissions(force = false): void {
   const progress = player.missions;
   const language = getLanguage();
   if (!force && displayedMissionRevision === progress.revision && displayedMissionLanguage === language) return;
-  const translateLists = force || displayedMissionLanguage !== language || displayedMissionHistory !== progress.completed.length;
+  const assignments = progress.active.map(active => `${active.id}:${active.progress >= missionSpec(active.id)!.target}`).join(',');
+  const translateLists = force || displayedMissionLanguage !== language || displayedMissionHistory !== progress.completed.length || displayedMissionAssignments !== assignments;
+  displayedMissionAssignments = assignments;
   displayedMissionRevision = progress.revision; displayedMissionLanguage = language;
   const completedText = t('missionCompletedCount', { count: formatNumber(progress.completed.length), total: formatNumber(MISSIONS.length) });
   textIfChanged(element('missions-completed-count'), completedText);
@@ -384,12 +388,18 @@ function refreshMissions(force = false): void {
   textIfChanged(element('missions-coins'), t('missionCoinsEarned', { coins: formatNumber(progress.earnedCoins) }));
   for (let index = 0; index < 3; index++) {
     const active = progress.active[index];
+    const collect = element<HTMLButtonElement>(`mission-collect-${index}`);
+    collect.hidden = collect.disabled = true;
     element(`active-mission-${index}`).hidden = !active;
     if (!active) continue;
     const spec = missionSpec(active.id)!;
+    const ready = active.progress >= spec.target;
+    element(`active-mission-${index}`).classList.toggle('is-ready', ready);
+    collect.hidden = collect.disabled = !ready;
+    collect.setAttribute('aria-label', `${t('missionCollect')} · ${missionName(spec)} · ${t('coinReward', { coins: formatNumber(spec.reward) })}`);
     textIfChanged(element(`mission-title-${index}`), missionName(spec));
     textIfChanged(element(`mission-description-${index}`), spec.description[language].replace('{target}', formatNumber(spec.target)));
-    textIfChanged(element(`mission-scope-${index}`), t(spec.cumulative ? 'missionLifetime' : 'missionSingleRun'));
+    textIfChanged(element(`mission-scope-${index}`), t(ready ? 'missionReady' : spec.cumulative ? 'missionLifetime' : 'missionSingleRun'));
     const value = `${missionValue(spec, active.progress)} / ${missionValue(spec, spec.target)}`;
     textIfChanged(element(`mission-progress-${index}`), value);
     textIfChanged(element(`mission-reward-${index}`), t('coinReward', { coins: formatNumber(spec.reward) }));
@@ -402,16 +412,18 @@ function refreshMissions(force = false): void {
   }
   element('mission-empty').hidden = progress.active.length === 3;
   textIfChanged(element('mission-empty'), t(progress.completed.length === MISSIONS.length ? 'missionCampaignComplete' : 'missionNextRun'));
-  const first = progress.active[0]; const spec = first ? missionSpec(first.id)! : null;
+  const first = progress.active.find(active => active.progress >= missionSpec(active.id)!.target) ?? progress.active[0];
+  const spec = first ? missionSpec(first.id)! : null;
   textIfChanged(element('mission-tracker-label'), spec ? missionName(spec) : t('missionNextRun'));
-  textIfChanged(element('mission-tracker-progress'), spec && first ? `${missionValue(spec, first.progress)} / ${missionValue(spec, spec.target)} · ${t('coinReward', { coins: formatNumber(spec.reward) })}` : completedText);
+  textIfChanged(element('mission-tracker-progress'), spec && first ? `${first.progress >= spec.target ? t('missionReady') : `${missionValue(spec, first.progress)} / ${missionValue(spec, spec.target)}`} · ${t('coinReward', { coins: formatNumber(spec.reward) })}` : completedText);
   if (translateLists) {
     displayedMissionHistory = progress.completed.length;
     const done = new Map(progress.completed.map(record => [record.id, record]));
-    const active = new Set(progress.active.map(record => record.id));
+    const active = new Map(progress.active.map(record => [record.id, record]));
     const render = (spec: MissionSpec): string => {
       const record = done.get(spec.id);
-      return `<article class="mission-list-item${record ? ' is-completed' : ''}"><span>${t(record ? 'missionDone' : active.has(spec.id) ? 'missionActive' : 'missionUpcoming')}</span><h3>${missionName(spec)}</h3><p>${spec.description[language].replace('{target}', formatNumber(spec.target))}</p><strong>${t('coinReward', { coins: formatNumber(record?.coins ?? spec.reward) })} · ${t('missionPoints', { points: formatNumber(record?.points ?? spec.points) })}</strong></article>`;
+      const ready = (active.get(spec.id)?.progress ?? 0) >= spec.target;
+      return `<article class="mission-list-item${record ? ' is-completed' : ready ? ' is-ready' : ''}"><span>${t(record ? 'missionDone' : ready ? 'missionReady' : active.has(spec.id) ? 'missionActive' : 'missionUpcoming')}</span><h3>${missionName(spec)}</h3><p>${spec.description[language].replace('{target}', formatNumber(spec.target))}</p><strong>${t('coinReward', { coins: formatNumber(record?.coins ?? spec.reward) })} · ${t('missionPoints', { points: formatNumber(record?.points ?? spec.points) })}</strong></article>`;
     };
     htmlIfChanged(element('mission-history'), [...progress.completed].reverse().map(record => render(missionSpec(record.id)!)).join(''));
     htmlIfChanged(element('mission-catalog'), MISSIONS.map(render).join(''));
@@ -464,6 +476,8 @@ function refreshArmory(): void {
       ammo: formatNumber(physics?.weaponAmmo(spec.id) ?? current.ammo), capacity: formatNumber(current.ammo) });
     element(`weapon-stats-${spec.id}`).textContent = `${combatStats} · ${t('turnTime', { ms: formatNumber(spec.turnSeconds * 1000) })}`;
     element(`weapon-price-${spec.id}`).textContent = owned ? t('weaponOwned') : t('weaponPrice', { coins: formatNumber(spec.price) });
+    element(`weapon-price-${spec.id}`).hidden = owned;
+    element(`weapon-unlock-${spec.id}`).hidden = selected;
     const requirement = element(`weapon-requirement-${spec.id}`);
     requirement.hidden = owned;
     requirement.textContent = t('weaponLevelRequired', { level: formatNumber(Math.floor(spec.xp / LEVEL_XP) + 1), current: formatNumber(experience.level) });
@@ -472,7 +486,7 @@ function refreshArmory(): void {
       : owned ? t(selected ? 'equipped' : 'equip')
       : player.coins >= spec.price ? t('buyWeapon', { coins: formatNumber(spec.price) })
       : t('needCoins', { coins: formatNumber(spec.price - player.coins) });
-    button.setAttribute('aria-label', `${weaponName(spec.id)} · ${shopState} · ${combatStats} · ${element(`weapon-price-${spec.id}`).textContent}${owned ? '' : ` · ${requirement.textContent}`} · ${element(`weapon-unlock-${spec.id}`).textContent}`);
+    button.setAttribute('aria-label', `${weaponName(spec.id)} · ${shopState} · ${combatStats}${owned ? '' : ` · ${element(`weapon-price-${spec.id}`).textContent} · ${requirement.textContent}`}${selected ? '' : ` · ${element(`weapon-unlock-${spec.id}`).textContent}`}`);
     button.title = `${shopState} · ${element(`weapon-unlock-${spec.id}`).textContent}`;
     element(`weapon-upgrades-${spec.id}`).hidden = !owned;
     element(`weapon-level-${spec.id}`).textContent = t(level > 0 ? 'shopUpgradeOwned' : 'weaponUpgradeLevel', { level: formatNumber(level), max: formatNumber(MAX_WEAPON_UPGRADE) });
@@ -482,6 +496,7 @@ function refreshArmory(): void {
     upgrade.disabled = !owned || !unlocked || cost === null || player.coins < cost;
     const upgradeState: ShopState = cost === null ? 'complete' : upgrade.disabled ? 'locked' : 'available';
     const upgradeStatus = showShopState(upgrade, `weapon-upgrade-shop-${spec.id}`, upgradeState, !unlocked, cost !== null && player.coins < cost);
+    element(`weapon-upgrade-shop-${spec.id}`).hidden = true;
     markShopState(element(`weapon-upgrades-${spec.id}`), cost === null ? 'complete' : level > 0 ? 'owned' : upgradeState);
     htmlIfChanged(element(`upgrade-icon-${spec.id}`), shopStateIcon(upgradeState));
     const action = cost === null ? t('weaponUpgradeMax') : t('weaponUpgradeBuy', { level: formatNumber(level + 1), coins: formatNumber(cost) });
@@ -626,7 +641,7 @@ function updateDistanceRewards(distance: number): void {
 function updateHud(snapshot?: GameSnapshot): void {
   refreshMissions();
   element('mission-toast').hidden = missionRewardTime <= 0;
-  if (lastMissionRewards.length) textIfChanged(element('mission-toast'), t('missionRewardNotice', {
+  if (lastMissionRewards.length) textIfChanged(element('mission-toast'), t(missionNotice, {
     name: lastMissionRewards.length === 1 ? missionName(lastMissionRewards[0]) : t('missionBatch', { count: formatNumber(lastMissionRewards.length) }),
     coins: formatNumber(lastMissionRewards.reduce((sum, spec) => sum + spec.reward, 0)),
   }));
@@ -889,7 +904,7 @@ function crash(): void {
   const snapshot = physics.snapshot(1);
   awardCoins(player.collect(snapshot.distance, snapshot.loopCompletions, snapshot.policeDestroyed, snapshot.flipCoins, snapshot.boxCoins));
   awardExperience(snapshot);
-  awardMissions(snapshot, true);
+  updateMissions(snapshot, true);
   experience.finishRun();
   const result = player.finishRun(physics.distance);
   if (result.newRecord) {
@@ -919,12 +934,11 @@ function awardExperience(snapshot: GameSnapshot): number {
   return gained;
 }
 
-function awardMissions(snapshot: GameSnapshot, finished = false): void {
+function updateMissions(snapshot: GameSnapshot, finished = false): void {
   if (!snapshot.missionStats) return;
-  const rewards = player.collectMissions(snapshot.missionStats, performance.now(), finished);
-  if (!rewards.length) return;
-  lastMissionRewards = rewards; missionRewardTime = 4;
-  awardCoins(rewards.reduce((sum, spec) => sum + spec.reward, 0));
+  const ready = player.updateMissions(snapshot.missionStats, performance.now(), finished);
+  if (!ready.length) return;
+  lastMissionRewards = ready; missionRewardTime = 4; missionNotice = 'missionReadyNotice';
   audio.play('record');
 }
 
@@ -1127,6 +1141,18 @@ function closeMissions(): void {
 }
 for (const button of missionButtons) button.addEventListener('click', () => openMissions(button));
 missionsClose.addEventListener('click', closeMissions);
+for (let index = 0; index < 3; index++) {
+  element(`mission-collect-${index}`).addEventListener('click', () => {
+    if (missionsDialog.hidden || missionTab !== 'active') return;
+    const active = player.missions.active[index];
+    const reward = active && player.collectMission(active.id);
+    if (!reward) return;
+    lastMissionRewards = [reward]; missionRewardTime = 4; missionNotice = 'missionRewardNotice';
+    awardCoins(reward.reward); audio.play('record');
+    refreshMissions(true); refreshArmory(); updateHud();
+    element('mission-tab-active').focus();
+  });
+}
 for (const [index, tab] of (['active','history','all'] as const).entries()) {
   element(`mission-tab-${tab}`).addEventListener('click', () => setMissionTab(tab, true));
   element(`mission-tab-${tab}`).addEventListener('keydown', event => {
@@ -1319,7 +1345,10 @@ window.addEventListener('keydown', (event) => {
   if (!missionsDialog.hidden) {
     if (event.code === 'Escape' || event.code === 'KeyJ') { event.preventDefault(); if (!event.repeat) closeMissions(); }
     if (event.code === 'Tab') {
-      const last = element(`mission-tab-${missionTab}`);
+      const collectButtons = [0, 1, 2].map(index => element<HTMLButtonElement>(`mission-collect-${index}`));
+      const last = missionTab === 'active'
+        ? collectButtons.filter(button => !button.hidden && !button.disabled).at(-1) ?? element('mission-tab-active')
+        : element(`mission-tab-${missionTab}`);
       if (event.shiftKey && document.activeElement === missionsClose) { event.preventDefault(); last.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); missionsClose.focus(); }
     }
@@ -1511,7 +1540,7 @@ function renderFrame(now: number): void {
   const frozen = impactPause.active;
   const snapshot = physics.snapshot(frozen || holdInterpolation ? 1 : Math.min(1, accumulator / FIXED_STEP));
   const simulating = status === 'running' && !frozen;
-  if (status === 'running') awardMissions(snapshot);
+  if (status === 'running') updateMissions(snapshot);
   if (simulating) missionRewardTime = Math.max(0, missionRewardTime - playDelta);
   if (status === 'running') player.trackScore(snapshot.distance, now);
   awardCoins(player.collect(snapshot.distance, snapshot.loopCompletions, snapshot.policeDestroyed, snapshot.flipCoins, snapshot.boxCoins));

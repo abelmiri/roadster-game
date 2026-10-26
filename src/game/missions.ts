@@ -47,13 +47,13 @@ export const MISSIONS: readonly MissionSpec[] = families.flatMap(family => famil
   weapons: family.weapons ? target : 1, cumulative: family.metric.startsWith('total'),
 })));
 const catalog = new Map(MISSIONS.map(mission => [mission.id, mission]));
-export interface ActiveMission { id: string; progress: number; best: number }
+export interface ActiveMission { id: string; progress: number; best: number; readyAt?: number; readyValue?: number }
 export interface CompletedMission { id: string; at: number; value: number; coins: number; points: number }
 const valid = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
 type MissionSave = { active?: unknown; completed?: unknown; seed?: unknown; draws?: unknown; totals?: unknown };
 
-/** A fixed catalog, persisted active IDs and completed history prevent rerolls
- * on reload. New slots open on the next run, never awarding old actions twice. */
+/** Finished goals hold their slots until collected, including across reloads
+ * and new runs. Collected slots refill on the next run. */
 export class MissionProgress {
   active: ActiveMission[] = [];
   completed: CompletedMission[] = [];
@@ -82,7 +82,9 @@ export class MissionProgress {
       const spec = record && catalog.get(record.id);
       if (!spec || completed.has(record.id) || this.active.some(item => item.id === record.id) || this.active.length >= 3) continue;
       const progress = valid(record.progress) ? Math.min(spec.target, record.progress) : 0;
-      this.active.push({ id: spec.id, progress, best: valid(record.best) ? Math.min(spec.target, record.best) : progress });
+      this.active.push({ id: spec.id, progress, best: valid(record.best) ? Math.max(progress, Math.min(spec.target, record.best)) : progress,
+        ...(progress >= spec.target ? { readyAt: valid(record.readyAt) ? record.readyAt : 0,
+          readyValue: valid(record.readyValue) ? Math.max(spec.target, record.readyValue) : spec.target } : {}) });
     }
     if (valid(save.seed)) this.seed = Math.floor(save.seed) % 1e9;
     if (valid(save.draws)) this.draws = Math.floor(save.draws);
@@ -112,7 +114,10 @@ export class MissionProgress {
 
   beginRun(weaponCount: number): void {
     this.running = true; this.previousDistance = this.previousBoxes = 0;
-    for (const active of this.active) if (!catalog.get(active.id)!.cumulative) active.progress = 0;
+    for (const active of this.active) {
+      const spec = catalog.get(active.id)!;
+      if (!spec.cumulative && active.progress < spec.target) active.progress = 0;
+    }
     this.fillSlots(weaponCount); this.revision++;
   }
 
@@ -127,23 +132,35 @@ export class MissionProgress {
     if (distanceGain || boxGain || finished) this.revision++;
     this.previousDistance = Math.max(this.previousDistance, distance); this.previousBoxes = Math.max(this.previousBoxes, boxes);
     if (finished) { this.totals.totalRuns++; this.running = false; }
-    const rewards: MissionSpec[] = [];
+    const ready: MissionSpec[] = [];
     for (const active of this.active) {
       const spec = catalog.get(active.id)!;
+      if (active.progress >= spec.target) continue;
       const value = spec.cumulative ? this.totals[spec.metric as keyof typeof this.totals] : read(spec.metric as keyof MissionStats);
       const progress = Math.min(spec.target, Math.max(active.progress, value));
       if (progress !== active.progress) { active.progress = progress; active.best = Math.max(active.best, progress); this.revision++; }
       if (value + 1e-7 >= spec.target) {
-        this.completed.push({ id: spec.id, at, value, coins: spec.reward, points: spec.points }); rewards.push(spec); this.revision++;
+        active.progress = active.best = spec.target;
+        active.readyAt = at; active.readyValue = value;
+        ready.push(spec); this.revision++;
       }
     }
-    if (rewards.length) this.active = this.active.filter(active => !rewards.some(spec => spec.id === active.id));
-    return rewards;
+    return ready;
+  }
+
+  collect(id: string): MissionSpec | null {
+    const active = this.active.find(item => item.id === id);
+    const spec = catalog.get(id);
+    if (!active || !spec || active.progress < spec.target || this.completed.some(item => item.id === id)) return null;
+    this.completed.push({ id, at: active.readyAt ?? 0, value: active.readyValue ?? spec.target, coins: spec.reward, points: spec.points });
+    this.active = this.active.filter(item => item.id !== id);
+    this.revision++;
+    return spec;
   }
 
   get score(): number { return this.completed.reduce((sum, record) => sum + record.points, 0); }
   get earnedCoins(): number { return this.completed.reduce((sum, record) => sum + record.coins, 0); }
-  save(): object { return { version: 1, active: this.active, completed: this.completed, totals: this.totals, seed: this.seed, draws: this.draws }; }
+  save(): object { return { version: 2, active: this.active, completed: this.completed, totals: this.totals, seed: this.seed, draws: this.draws }; }
 }
 
 export function missionSpec(id: string): MissionSpec | undefined { return catalog.get(id); }

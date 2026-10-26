@@ -346,7 +346,7 @@ test('unowned weapon cards show required player level before buying and update w
   assert.equal(p.ids.get('weapon-requirement-cannon').textContent,'Requires level 10 · Your level: 3');
 });
 
-test('mission board localizes all 100 goals, pauses gameplay, pays once and preserves history on reload', async () => {
+test('mission board localizes goals, pauses gameplay and collects saved rewards once through explicit buttons', async () => {
   const p = await page('fa-IR', { 'roadster-best': '20000' });
   await p.click('menu-missions-button');
   assert.equal(p.ids.get('missions-dialog').hidden, false);
@@ -359,38 +359,71 @@ test('mission board localizes all 100 goals, pauses gameplay, pays once and pres
   const steps = p.context.steps;
   assert.equal(p.ids.get('missions-dialog').hidden, false);
   assert.equal(p.ids.get('mission-progress-1').textContent, '۲ / ۵');
+  assert.equal(p.ids.get('mission-collect-1').hidden, true);
+  await p.click('mission-collect-1');
+  assert.equal(p.ids.get('coin-total').textContent, '۰');
   p.key('Space'); p.key('KeyG'); p.advance(2000);
   assert.equal(p.context.steps, steps, 'mission dialog did not pause driving');
   assert.equal(p.ids.get('armory').hidden, true);
   p.key('KeyJ');
   Object.assign(p.context.snapshot, { distance: 250, missionStats: { distance: 250, jumps: 5, boxesOpened: 1 } });
   p.advance(2017);
-  assert.match(p.ids.get('missions-completed-count').textContent, /۳ از ۱۰۰/);
-  assert.equal(p.ids.get('coin-total').textContent, '۱۴۵');
+  assert.match(p.ids.get('missions-completed-count').textContent, /۰ از ۱۰۰/);
+  assert.equal(p.ids.get('coin-total').textContent, '۱۰');
   assert.equal(p.ids.get('mission-toast').hidden, false);
+  assert.match(p.ids.get('mission-toast').textContent, /Collect/);
   for (let now = 2034; now < 2200; now += 17) p.advance(now);
-  assert.equal(p.ids.get('coin-total').textContent, '۱۴۵');
-  await p.click('missions-button'); await p.click('mission-tab-history');
-  assert.equal((p.ids.get('mission-history').innerHTML.match(/<article/g) ?? []).length, 3);
+  assert.equal(p.ids.get('coin-total').textContent, '۱۰');
+  await p.click('missions-button');
+  assert.equal(p.ids.get('mission-collect-0').hidden, false);
+  assert.match(p.ids.get('mission-collect-0').textContent, /دریافت جایزه/);
+  assert.match(p.ids.get('mission-catalog').innerHTML, /آمادهٔ دریافت جایزه/);
   const restored = await page('fa-IR', Object.fromEntries(p.storage));
   await restored.click('missions-button');
+  assert.equal(restored.ids.get('mission-collect-0').hidden, false);
+  assert.equal(restored.ids.get('coin-total').textContent, '۱۰');
+  assert.equal(restored.ids.get('mission-history-empty').hidden, false);
+  restored.key('Tab', 'keydown', { shiftKey:true });
+  assert.equal(restored.context.document.activeElement, restored.ids.get('mission-collect-2'));
+  restored.key('Tab');
+  assert.equal(restored.context.document.activeElement, restored.ids.get('missions-close'));
+  await restored.click('language-button');
+  assert.equal(restored.ids.get('mission-collect-0').textContent, 'Collect');
+  await restored.click('language-button');
+  for (let index = 0; index < 3; index++) await restored.click('mission-collect-0');
   assert.match(restored.ids.get('missions-completed-count').textContent, /۳ از ۱۰۰/);
   assert.match(restored.ids.get('missions-score').textContent, /۳۰/);
   assert.equal(restored.ids.get('coin-total').textContent, '۱۴۵');
   assert.equal(restored.ids.get('mission-history-empty').hidden, true);
+  await restored.click('mission-collect-0');
+  assert.equal(restored.ids.get('coin-total').textContent, '۱۴۵');
+  assert.equal(restored.ids.get('active-mission-0').hidden, true);
+  assert.equal(restored.ids.get('mission-collect-2').hidden, true);
+  restored.ids.get('missions-close').focus();
+  restored.key('Tab', 'keydown', { shiftKey:true });
+  assert.equal(restored.context.document.activeElement, restored.ids.get('mission-tab-active'));
+  assert.equal((restored.ids.get('mission-history').innerHTML.match(/<article/g) ?? []).length, 3);
+  const paid = await page('fa-IR', Object.fromEntries(restored.storage));
+  assert.equal(paid.ids.get('coin-total').textContent, '۱۴۵');
+  assert.match(paid.ids.get('missions-completed-count').textContent, /۳ از ۱۰۰/);
 });
 
-test('the final roof impact awards its mission before finishing the run and a restart cannot repeat it', async () => {
+test('the fatal roof mission waits for Collect and stays completed through restart', async () => {
   const save = JSON.parse(progressSave(0));
   save.missions = { active: ['roofHits-1','forwardFlips-1','backflips-1'].map(id => ({ id, progress:0,best:0 })) };
   const p = await page('en-US', { 'roadster-progress': JSON.stringify(save) });
   await p.click('primary-button');
   p.context.snapshot.missionStats = { roofHits: 1, distance: 0, boxesOpened: 0 };
   p.context.dead = p.context.snapshot.crashed = true; p.advance(17);
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins, 0);
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).missions.active[0].progress, 1);
+  p.advance(3018); await p.click('primary-button'); p.advance(3035);
+  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins, 0);
+  await p.click('missions-button');
+  assert.equal(p.ids.get('mission-collect-0').hidden, false);
+  await p.click('mission-collect-0');
   assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins, 35);
   assert.equal(JSON.parse(p.storage.get('roadster-progress')).missions.completed[0].id, 'roofHits-1');
-  p.advance(3018); await p.click('primary-button'); p.advance(3035);
-  assert.equal(JSON.parse(p.storage.get('roadster-progress')).coins, 35);
   assert.ok(JSON.parse(p.storage.get('roadster-progress')).missions.active.every(item => item.id !== 'roofHits-1'));
 });
 

@@ -32,9 +32,10 @@
 .weapon-slot { display: flex; flex-direction: column; min-width: 0; }
 .weapon-slot > .weapon-card { width: 100%; flex: 1; }
 .weapon-upgrades[hidden], .weapon-upgrade-preview[hidden] { display: none; }
-.weapon-upgrades { margin-top: 8px; padding: 12px 10px; border: 1px solid #a6f4df35; border-radius: 10px; background: #a6f4df08; }
-.weapon-level-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 10px; font-weight: 750; color: #b8e9d9; }
-.upgrade-steps { display: flex; gap: 3px; direction: ltr; }
+.weapon-upgrades { margin-top: 12px; padding: 16px 12px; border: 1px solid #a6f4df35; border-radius: 10px; background: #a6f4df08; }
+.weapon-level-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 10px; font-weight: 750; color: #b8e9d9; }
+.weapon-upgrades > .weapon-level-row { margin-bottom: 12px; }
+.upgrade-steps { display: flex; flex-shrink: 0; gap: 3px; direction: ltr; }
 .upgrade-steps i { width: 9px; height: 5px; border-radius: 2px; background: #617f8e66; }
 .upgrade-steps .is-filled { background: #a6f4df; }
 .weapon-upgrade-preview { min-height: 34px; margin: 8px 0; font-size: 10px; line-height: 1.7; color: #a8bec8; }

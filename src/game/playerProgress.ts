@@ -114,14 +114,18 @@ export class PlayerProgress {
 
   beginMissionRun(): void { this.missions.beginRun(this.owned.size); this.persist(); }
 
-  collectMissions(stats: MissionStats, now: number, finished = false): MissionSpec[] {
-    const rewards = this.missions.update(stats, finished);
-    const coins = rewards.reduce((sum, spec) => sum + spec.reward, 0);
-    // The completed IDs and wallet credit are committed in the same save.
-    if (coins) this.credit(coins);
-    else if (finished || this.missions.revision !== this.missionSavedRevision && now - this.missionSavedAt >= 1000) this.persist();
+  updateMissions(stats: MissionStats, now: number, finished = false): MissionSpec[] {
+    const ready = this.missions.update(stats, finished);
+    if (ready.length || finished || this.missions.revision !== this.missionSavedRevision && now - this.missionSavedAt >= 1000) this.persist();
     if (this.missions.revision === this.missionSavedRevision) this.missionSavedAt = now;
-    return rewards;
+    return ready;
+  }
+
+  collectMission(id: string): MissionSpec | null {
+    const reward = this.missions.collect(id);
+    // The collected ID, points and wallet credit are committed in the same save.
+    if (reward) this.credit(reward.reward);
+    return reward;
   }
 
   ownsWeapon(id: string): boolean { return this.owned.has(id as WeaponId); }

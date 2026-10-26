@@ -212,8 +212,8 @@ html[lang=fa] .overlay-description{font-weight:400}
 .armory-description,.armory-help,.armory-note{font-size:12px;line-height:1.8;color:#b6c9d4;margin:16px 0 0}
 .armory-help{margin:3px 0 20px;color:#e1bc79}
 .armory-note{font-size:11px;margin-top:17px;color:#90a9bb}
-.weapon-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
-.weapon-card{position:relative;display:flex;flex-direction:column;align-items:flex-start;min-width:0;border:1px solid #839eae3a;border-radius:12px;background:#ffffff04;color:#e0e9ed;padding:17px 14px 13px;text-align:start;cursor:pointer;transition:border-color .15s,background .15s}
+.weapon-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:28px 20px}
+.weapon-card{position:relative;display:flex;flex-direction:column;align-items:flex-start;min-width:0;gap:6px;border:1px solid #839eae3a;border-radius:12px;background:#ffffff04;color:#e0e9ed;padding:20px 16px 18px;text-align:start;cursor:pointer;transition:border-color .15s,background .15s}
 .weapon-card:not(:disabled):hover{background:#ffffff0c;border-color:#a4e9d885}
 .weapon-card.is-equipped{border-color:#a6f4df;background:#83d9bf12;box-shadow:inset 0 0 0 1px #a6f4df22}
 .weapon-card:disabled{cursor:default}
@@ -223,6 +223,7 @@ html[lang=fa] .overlay-description{font-weight:400}
 .weapon-card>svg{display:block;width:100%;height:66px;margin:0 0 13px}
 .weapon-card strong{font-size:13px;font-weight:700;line-height:1.6}
 .weapon-english{font-family:ui-sans-serif,system-ui,sans-serif;color:#809eaf;font-size:8px;letter-spacing:.045em;line-height:1.5}
+html[lang=en] .weapon-english{display:none}
 .weapon-power{display:flex;gap:4px;margin:12px 0 10px}
 .weapon-power i{width:7px;height:7px;border-radius:50%;border:1px solid #7593a66b}
 .weapon-power .is-filled{background:#eab85d;border-color:#eab85d}
