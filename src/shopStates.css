@@ -1,0 +1,185 @@
+/* Ownership, affordability and selection have separate visual states. */
+[data-shop-state="locked"], .is-shop-locked {
+  --shop-accent: #edc38d;
+  --shop-border: #a18b6c;
+  --shop-surface: repeating-linear-gradient(135deg,#c4a47708 0 7px,transparent 7px 15px),#172737;
+  --shop-badge-bg: #4b3825;
+  --shop-badge-border: #bd915b;
+  --shop-badge-text: #ffe0ae;
+}
+[data-shop-state="available"], .is-shop-available {
+  --shop-accent: #f4d78e;
+  --shop-border: #d4ad65;
+  --shop-surface: linear-gradient(145deg,#e7bd5812,#e7bd5803),#192a38;
+  --shop-badge-bg: #55442a;
+  --shop-badge-border: #d3ad64;
+  --shop-badge-text: #ffe9ac;
+}
+[data-shop-state="owned"], .is-shop-owned,
+[data-shop-state="complete"], .is-shop-complete {
+  --shop-accent: #9ce8d0;
+  --shop-border: #69bba4;
+  --shop-surface: linear-gradient(145deg,#6fd7b80d,transparent),#132d37;
+  --shop-badge-bg: #1b4746;
+  --shop-badge-border: #6dbca6;
+  --shop-badge-text: #c0f5e3;
+}
+[data-shop-state="selected"], .is-shop-selected {
+  --shop-accent: #bbffe8;
+  --shop-border: #a6f4df;
+  --shop-surface: linear-gradient(145deg,#a6f4df10,transparent),#1b4248;
+  --shop-badge-bg: #a6f4df;
+  --shop-badge-border: #c8ffed;
+  --shop-badge-text: #153d3e;
+}
+
+.weapon-card[data-shop-state], .garage-model[data-shop-state], .paint-swatch[data-shop-state],
+.weapon-upgrades[data-shop-state], .car-upgrade-card[data-shop-state] {
+  border-color: var(--shop-border);
+  background: var(--shop-surface);
+  color: #e6eff2;
+  opacity: 1;
+  box-shadow: none;
+}
+.weapon-card.is-shop-locked, .garage-model.is-shop-locked, .paint-swatch.is-shop-locked,
+.weapon-upgrades.is-shop-locked, .car-upgrade-card.is-shop-locked { border-style: dashed; }
+.weapon-card.is-shop-selected, .garage-model.is-shop-selected, .paint-swatch.is-shop-selected {
+  box-shadow: inset 0 0 0 1px #a6f4df,0 0 18px #81dac214;
+}
+.weapon-card[data-shop-state] strong, .weapon-card[data-shop-state] .weapon-english { opacity: 1; }
+.weapon-card.is-shop-locked strong { color: #c8d4dc; }
+.weapon-card.is-shop-locked > svg { opacity: .52; filter: saturate(.35); }
+.garage-model.is-shop-locked .garage-model-preview { opacity: .54; filter: saturate(.35); }
+.paint-swatch.is-shop-locked .paint-chip { opacity: .62; filter: saturate(.45); }
+.weapon-card:is(.is-shop-available,.is-shop-owned,.is-shop-selected,.is-shop-complete) > svg,
+.garage-model:is(.is-shop-available,.is-shop-owned,.is-shop-selected,.is-shop-complete) .garage-model-preview,
+.paint-swatch:is(.is-shop-available,.is-shop-owned,.is-shop-selected,.is-shop-complete) .paint-chip {
+  opacity: 1;
+  filter: none;
+}
+.garage-model[data-shop-state] small, .paint-swatch[data-shop-state] small { color: var(--shop-accent); }
+.weapon-card[data-shop-owned="true"] .weapon-price {
+  padding: 2px 6px;
+  border: 1px solid #6dbca6;
+  border-radius: 5px;
+  background: #1b4746;
+  color: #c0f5e3;
+}
+.weapon-card[data-shop-owned="true"] .weapon-price::before { content: '✓'; margin-inline-end: 4px; }
+
+.shop-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  gap: 5px;
+  min-width: 0;
+  min-height: 27px;
+  padding: 4px 7px;
+  border: 1px solid var(--shop-badge-border,#6dbca6);
+  border-radius: 7px;
+  background: var(--shop-badge-bg,#1b4746);
+  color: var(--shop-badge-text,#c0f5e3);
+  font-size: 9.5px;
+  font-weight: 800;
+  line-height: 1.45;
+  text-align: start;
+  white-space: normal;
+  letter-spacing: 0;
+}
+.shop-badge-icon, .shop-badge > svg, .shop-action-icon > svg {
+  display: block;
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  min-width: 15px;
+  max-width: none;
+  margin: 0;
+  opacity: 1;
+  filter: none;
+}
+.shop-badge-label { min-width: 0; overflow-wrap: anywhere; }
+.weapon-card > .shop-badge { justify-content: flex-start; margin: 0 0 10px; padding-inline-end: 20px; }
+.weapon-card[data-shop-state] > .weapon-card-index {
+  right: auto;
+  left: auto;
+  inset-inline-end: 12px;
+  top: 12px;
+  color: #c2d2d8;
+}
+.garage-model > .shop-badge { margin-bottom: 3px; }
+.paint-swatch > .shop-badge { min-height: 24px; padding: 3px 5px; gap: 4px; font-size: 8px; }
+.paint-swatch > .shop-badge .shop-badge-icon, .paint-swatch > .shop-badge > svg { width: 12px; height: 12px; min-width: 12px; }
+.weapon-upgrades > .shop-badge, .car-upgrade-card > .shop-badge { margin-bottom: 10px; }
+
+.weapon-upgrade-button[data-shop-state] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  line-height: 1.5;
+  white-space: normal;
+}
+.shop-action-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.weapon-upgrade-button > span:not(.shop-action-icon) { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.weapon-upgrade-button.is-shop-available { border-color: #f0cf8c; background: #f0cf8c; color: #352b1b; }
+.weapon-upgrade-button.is-shop-locked { border-color: #8d795d; border-style: dashed; background: #293642; color: #efd8b6; }
+.weapon-upgrade-button:is(.is-shop-owned,.is-shop-complete) { border-color: #70bca6; background: #1c4848; color: #c0f5e3; }
+.weapon-upgrade-button.is-shop-selected { border-color: #b9ffe9; background: #a6f4df; color: #153d3e; }
+
+.weapon-card[data-shop-state]:not(:disabled):hover,
+.garage-model[data-shop-state]:not(:disabled):hover,
+.paint-swatch[data-shop-state]:not(:disabled):hover {
+  border-color: var(--shop-accent);
+  background: var(--shop-surface);
+  box-shadow: inset 0 0 0 1px var(--shop-border);
+}
+.weapon-card[data-shop-state]:disabled:hover,
+.garage-model[data-shop-state]:disabled:hover,
+.paint-swatch[data-shop-state]:disabled:hover {
+  border-color: var(--shop-border);
+  background: var(--shop-surface);
+  box-shadow: none;
+}
+.weapon-card.is-shop-selected:disabled:hover, .garage-model.is-shop-selected:disabled:hover, .paint-swatch.is-shop-selected:disabled:hover {
+  box-shadow: inset 0 0 0 1px #a6f4df,0 0 18px #81dac214;
+}
+.weapon-upgrade-button.is-shop-available:not(:disabled):hover { border-color: #ffe7b3; background: #ffe2a3; }
+.weapon-upgrade-button.is-shop-locked:disabled:hover { border-color: #8d795d; background: #293642; }
+.weapon-upgrade-button:is(.is-shop-owned,.is-shop-complete):disabled:hover { border-color: #70bca6; background: #1c4848; }
+.weapon-card[data-shop-state]:focus-visible, .garage-model[data-shop-state]:focus-visible,
+.paint-swatch[data-shop-state]:focus-visible, .weapon-upgrade-button[data-shop-state]:focus-visible {
+  outline: 3px solid #ffe0a0;
+  outline-offset: 3px;
+}
+
+.shop-legend { display: flex; flex-wrap: wrap; gap: 7px 16px; margin: 10px 0 16px; color: #b6cbd6; font-size: 10px; line-height: 1.6; }
+.armory-card > .shop-legend { grid-column: 1 / -1; }
+.shop-legend-item { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.shop-legend-item > svg { display: block; flex: 0 0 auto; width: 14px; height: 14px; color: var(--shop-accent); }
+.coin-buy-symbol > .shop-badge-icon { width: 32px; height: 32px; margin: auto; }
+
+@media(max-width:900px), (pointer:coarse) and (orientation:landscape) {
+  .shop-badge { min-height: 23px; padding: 3px 5px; gap: 4px; font-size: 8px; border-radius: 5px; }
+  .shop-badge-icon, .shop-badge > svg, .shop-action-icon > svg { width: 12px; height: 12px; min-width: 12px; }
+  .weapon-card > .shop-badge { margin-bottom: 7px; padding-inline-end: 16px; }
+  .weapon-card[data-shop-state] > .weapon-card-index { inset-inline-end: 9px; top: 9px; }
+  .paint-swatch > .shop-badge { min-height: 21px; padding: 2px 3px; gap: 3px; font-size: 7px; }
+  .paint-swatch > .shop-badge .shop-badge-icon, .paint-swatch > .shop-badge > svg { width: 10px; height: 10px; min-width: 10px; }
+  .weapon-upgrades > .shop-badge, .car-upgrade-card > .shop-badge { margin-bottom: 7px; }
+  .shop-legend { gap: 5px 12px; margin: 7px 0 10px; font-size: 9px; }
+  .shop-legend-item > svg { width: 12px; height: 12px; }
+}
+@media(max-height:580px), (pointer:coarse) and (orientation:landscape) {
+  .weapon-card > .shop-badge, .weapon-upgrades > .shop-badge { min-height: 21px; padding: 2px 3px; gap: 3px; font-size: 6.5px; line-height: 1.4; }
+  .weapon-card > .shop-badge { margin-bottom: 5px; padding-inline-end: 12px; }
+  .weapon-card[data-shop-state] > .weapon-card-index { inset-inline-end: 7px; top: 8px; }
+  .weapon-card > .shop-badge .shop-badge-icon, .weapon-card > .shop-badge > svg,
+  .weapon-upgrades > .shop-badge .shop-badge-icon, .weapon-upgrades > .shop-badge > svg { width: 10px; height: 10px; min-width: 10px; }
+  .weapon-upgrade-button[data-shop-state] { gap: 3px; }
+  .weapon-upgrade-button[data-shop-state] .shop-action-icon > svg { width: 10px; height: 10px; min-width: 10px; }
+  .shop-legend { gap: 4px 10px; margin: 5px 0 7px; font-size: 8px; }
+  .shop-legend-item > svg { width: 11px; height: 11px; }
+}

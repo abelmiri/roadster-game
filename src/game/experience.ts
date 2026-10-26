@@ -4,7 +4,7 @@ export const LOOP_XP = 25;
 export const OBSTACLE_XP = 10;
 export const POLICE_XP = 20;
 export const LEVEL_XP = 100;
-export type RewardKind = 'loop' | 'obstacle' | 'police' | 'distance' | 'mixed';
+export type RewardKind = 'loop' | 'obstacle' | 'police' | 'distance' | 'box' | 'mixed';
 type ProgressStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
 /** Cumulative run counters retain every reward across skipped display frames. */
@@ -12,7 +12,7 @@ export class ExperienceProgress {
   total = 0;
   runXp = 0;
   lastRewardKind: RewardKind = 'loop';
-  private collected = [0, 0, 0];
+  private collected = [0, 0, 0, 0];
   private distanceXpCollected = 0;
   private finished = false;
 
@@ -23,11 +23,11 @@ export class ExperienceProgress {
     } catch { /* Progress still works for this session without storage. */ }
   }
 
-  collect(completedLoops: number, destroyedObstacles = 0, destroyedPolice = 0, distance = 0): number {
+  collect(completedLoops: number, destroyedObstacles = 0, destroyedPolice = 0, distance = 0, boxXp = 0): number {
     if (this.finished) return 0;
-    const counters = [completedLoops, destroyedObstacles, destroyedPolice];
-    const values = [LOOP_XP, OBSTACLE_XP, POLICE_XP];
-    const kinds: RewardKind[] = ['loop', 'obstacle', 'police'];
+    const counters = [completedLoops, destroyedObstacles, destroyedPolice, boxXp];
+    const values = [LOOP_XP, OBSTACLE_XP, POLICE_XP, 1];
+    const kinds: RewardKind[] = ['loop', 'obstacle', 'police', 'box'];
     const awarded: RewardKind[] = [];
     let gained = 0;
     counters.forEach((count, index) => {
@@ -52,7 +52,7 @@ export class ExperienceProgress {
 
   finishRun(): void { this.finished = true; }
   resetRun(): void {
-    this.collected = [0, 0, 0];
+    this.collected = [0, 0, 0, 0];
     this.distanceXpCollected = this.runXp = 0;
     this.finished = false;
     this.lastRewardKind = 'loop';

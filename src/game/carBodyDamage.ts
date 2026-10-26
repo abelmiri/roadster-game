@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { vehicleDamageStage } from './damage';
 import { profileY } from './roadsterModel';
+import { carPaintPalette } from './carPaint';
 
 interface Surface {
   object: THREE.Mesh | THREE.Line;
@@ -22,18 +23,28 @@ export class CarBodyDamage {
   private readonly paints = new Map<THREE.MeshLambertMaterial, THREE.Color>();
   private stage = -1;
 
-  constructor(body: THREE.Group) {
+  constructor(body: THREE.Group, roofLift = 0) {
+    const overlayY = (y: number): number => profileY(y) + Math.max(0, (y - .30) / .42) * roofLift;
+    const glassY = (x: number, y: number): number => {
+      let ceiling = Infinity;
+      const outline: [number, number][] | undefined = body.userData.upperProfile;
+      if (outline) for (let i = 1; i < outline.length; i++) {
+        const [ax, ay] = outline[i - 1]; const [bx, by] = outline[i];
+        if (bx > ax && x >= ax && x <= bx) { ceiling = ay + (by - ay) * (x - ax) / (bx - ax) - .04; break; }
+      }
+      return Math.min(overlayY(y), ceiling);
+    };
     const scratch = new THREE.LineBasicMaterial({ color: '#45515b', transparent: true, opacity: 0.76 });
     const fracture = new THREE.LineBasicMaterial({ color: '#80949f', transparent: true, opacity: 0.83 });
     const dent = new THREE.MeshLambertMaterial({ color: '#8e999e', flatShading: true, side: THREE.DoubleSide });
     const torn = new THREE.MeshLambertMaterial({ color: '#25303a', flatShading: true, side: THREE.DoubleSide });
     for (let i = 0; i < 4; i++) { const layer = new THREE.Group(); this.layers.push(layer); this.group.add(layer); }
     const line = (layer: number, points: number[][], glass = false): void => {
-      const geometry = new THREE.BufferGeometry().setFromPoints(points.map(([x, y]) => new THREE.Vector3(x, profileY(y), 0.546)));
+      const geometry = new THREE.BufferGeometry().setFromPoints(points.map(([x, y]) => new THREE.Vector3(x, glass ? glassY(x, y) : overlayY(y), 0.546)));
       this.layers[layer - 1].add(new THREE.Line(geometry, glass ? fracture : scratch));
     };
     const facet = (layer: number, points: number[][], dark = false): void => {
-      const shape = new THREE.Shape(points.map(([x, y]) => new THREE.Vector2(x, profileY(y))));
+      const shape = new THREE.Shape(points.map(([x, y]) => new THREE.Vector2(x, overlayY(y))));
       shape.closePath();
       const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape), dark ? torn : dent);
       mesh.position.z = 0.536;
@@ -81,6 +92,15 @@ export class CarBodyDamage {
       }
     });
     this.update(100);
+  }
+
+  setPaint(id: string): void {
+    const palette = carPaintPalette(id);
+    for (const [material, original] of this.paints) {
+      const facet = material.name.replace('paint-', '') as keyof typeof palette;
+      if (material.name.startsWith('paint-') && palette[facet]) original.set(palette[facet]);
+    }
+    this.stage = -1;
   }
 
   update(health: number): void {

@@ -1,0 +1,74 @@
+.garage-paints { margin: 0 0 22px; padding: 17px; border: 1px solid #a884d552; border-radius: 14px; background: linear-gradient(120deg,#a884d50b,#65e3d606); }
+.paint-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 5px 16px; margin-bottom: 12px; }
+.paint-heading h3 { margin: 0; font-size: 14px; color: #f1e4ff; }
+.paint-heading p { margin: 0; font-size: 11px; color: #b9c5d3; line-height: 1.8; }
+.paint-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(90px,1fr)); gap: 8px; }
+.paint-swatch { display: flex; flex-direction: column; align-items: center; gap: 7px; min-height: 106px; padding: 11px 5px; border: 1px solid #9aafc341; border-radius: 11px; background: #102131; color: #e2e9ef; font: inherit; font-size: 12px; cursor: pointer; }
+.paint-chip { width: 34px; height: 25px; border-radius: 7px; background: linear-gradient(155deg,#ffffff66,transparent 56%),var(--paint); border: 1px solid #ffffff55; box-shadow: 0 3px 9px #0005; }
+.paint-swatch small { color: #d0b6ef; font-size: 10px; }
+.paint-swatch:hover, .paint-swatch.is-selected { border-color: #cda8ff; background: #b885ef1c; }
+.paint-swatch.is-selected { box-shadow: inset 0 0 0 1px #cda8ff; }
+.paint-swatch:disabled { cursor: default; color: #9aabba; }
+.paint-feedback { min-height: 1.4em; margin: 9px 0 0; color: #cbf2e5; font-size: 11px; }
+.box-toast { position: absolute; z-index: 4; inset-inline-start: 50%; top: 280px; transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px); padding: 10px 18px; border: 1px solid #d19bff; border-radius: 12px; color: #f4dfff; background: #392047ed; box-shadow: 0 0 25px #b65bff2b; font-size: 13px; font-weight: 750; text-align: center; pointer-events: none; }
+.powerup-status { position: absolute; z-index: 4; left: 50%; top: 108px; transform: translateX(-50%); display: flex; gap: 8px; pointer-events: none; white-space: nowrap; }
+.powerup-status > span { padding: 4px 10px; border: 1px solid #8ae5ff80; border-radius: 20px; background: #15344de8; color: #abf4ff; font-size: 11px; font-weight: 750; font-variant-numeric: tabular-nums; }
+#unlimited-boost-status { border-color: #bd93f880; color: #e1c4ff; }
+.powerup-status > .is-expiring { border-color: #ffe3a5; color: #ffe3a5; }
+.box-toast[hidden], .powerup-status > span[hidden] { display: none; }
+html[lang=fa] .box-toast, html[lang=fa] .powerup-status { direction: rtl; }
+html[lang=fa] .box-toast { inset-inline-start: auto; left: 50%; }
+@media(max-width:900px), (pointer:coarse) and (orientation:landscape) {
+  .garage-paints { padding: 10px; margin-bottom: 10px; }
+  .paint-heading { margin-bottom: 8px; }
+  .paint-heading h3 { font-size: 12px; }
+  .paint-heading p { font-size: 10px; }
+  .paint-grid { grid-template-columns: repeat(7,minmax(0,1fr)); gap: 5px; }
+  .paint-swatch { padding: 7px 3px; min-height: 79px; font-size: 10px; gap: 5px; }
+  .paint-swatch small { font-size: 8px; }
+  .paint-chip { width: 28px; height: 20px; }
+  .paint-feedback { margin-top: 6px; font-size: 10px; }
+  .powerup-status { top: 148px; gap: 5px; }
+  .powerup-status > span { font-size: 9px; padding: 3px 7px; }
+  .box-toast { top: auto; bottom: 86px; padding: 6px 11px; font-size: 11px; }
+}
+@media(max-width:650px) { .paint-grid { grid-template-columns: repeat(5,minmax(0,1fr)); } }
+@media(max-height:330px) { .powerup-status { top: 115px; } .box-toast { bottom: 62px; } }
+@media(max-width:650px) and (orientation:portrait) { .box-toast, .powerup-status { visibility: hidden; } }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.garage-model-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 5px 16px; margin: 4px 0 12px; }
+.garage-model-heading h3 { margin: 0; color: #e5fbf2; font-size: 14px; }
+.garage-model-heading p { margin: 0; font-size: 11px; line-height: 1.8; color: #a7c7cf; }
+.garage-models { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; margin-bottom: 18px; }
+.garage-model { min-width: 0; padding: 8px 8px 12px; display: flex; flex-direction: column; align-items: center; gap: 4px; border: 1px solid #7eafba55; border-radius: 13px; background: radial-gradient(ellipse at 50% 70%,#56a9ae18,transparent 80%),#102337; color: #effff8; font: inherit; cursor: pointer; }
+.garage-model:hover { border-color: #b4e6dd; }
+.garage-model.is-selected { border-color: #a6f4df; box-shadow: inset 0 0 0 1px #a6f4df; background-color: #193a47; }
+.garage-model:focus-visible { outline: 3px solid #eacb87; outline-offset: 3px; }
+.garage-model-preview { display: block; width: 100%; }
+.garage-model-preview svg { display: block; width: 100%; max-height: 110px; }
+.garage-model strong { font-size: 15px; }
+.garage-model-english { font-size: 10px; letter-spacing: .08em; color: #8facba; }
+html[lang=en] .garage-model-english { display: none; }
+.garage-model small { margin-top: 5px; font-size: 10px; color: #a6f4df; }
+.garage-model.is-unowned small { color: #f3d18b; }
+.garage-model.is-unowned .garage-model-preview { opacity: .78; }
+.garage-model:disabled { cursor: default; border-color: #7eafba35; }
+.garage-shared-upgrades { margin: 0 0 12px; padding: 12px 15px; border-inline-start: 3px solid #a6f4df; border-radius: 8px; background: #a6f4df0c; color: #ccece1; font-size: 12px; line-height: 1.9; }
+.weapon-requirement { display: block; margin-top: 7px; color: #efbc84; font-size: 10px; line-height: 1.7; }
+.weapon-requirement.is-met { color: #a6e2ce; }
+.weapon-requirement[hidden] { display: none; }
+#garage-car-description { margin: 7px 14px; line-height: 1.8; }
+@media(max-width:900px), (pointer:coarse) and (orientation:landscape) {
+  .garage-model-heading { margin-bottom: 8px; }
+  .garage-model-heading h3 { font-size: 12px; }
+  .garage-model-heading p { font-size: 10px; }
+  .garage-models { gap: 7px; margin-bottom: 12px; }
+  .garage-model { padding: 4px 4px 9px; gap: 3px; }
+  .garage-model-preview svg { max-height: 80px; }
+  .garage-model strong { font-size: 12px; }
+  .garage-model small, .garage-model-english { font-size: 9px; }
+  .garage-shared-upgrades { padding: 8px 10px; font-size: 10px; }
+  .weapon-requirement { font-size: 9px; margin-top: 4px; }
+}
+@media(max-height:580px) { .weapon-requirement { font-size: 7px; line-height: 1.5; margin-top: 3px; } }
+@media(max-width:700px) { .garage-models { grid-template-columns: repeat(2,minmax(0,1fr)); } }

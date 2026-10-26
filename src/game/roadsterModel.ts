@@ -71,6 +71,7 @@ export function createRoadsterBody(): THREE.Group {
   const top = new THREE.MeshLambertMaterial({ color: '#ffffff', flatShading: true });
   const pale = new THREE.MeshLambertMaterial({ color: '#d3d8d9', flatShading: true });
   const shade = new THREE.MeshLambertMaterial({ color: '#b3bdc5', flatShading: true });
+  white.name = 'paint-base'; top.name = 'paint-top'; pale.name = 'paint-pale'; shade.name = 'paint-shade';
   const glass = new THREE.MeshBasicMaterial({ color: '#101c26' });
   const glassReflection = new THREE.MeshBasicMaterial({ color: '#354851' });
   const trim = new THREE.MeshLambertMaterial({ color: '#1b2832', flatShading: true });

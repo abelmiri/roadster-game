@@ -1,5 +1,10 @@
+import type { RandomBoxSpec } from './randomBox';
+
 export const CHUNK_LENGTH = 30;
 export const START_APRON_X = -64;
+export const BOX_UNLOCK_DISTANCE = 300;
+export const BOX_SPAWN_KEEP_CHANCE = .8;
+const BOX_UNLOCK_X = 7 + BOX_UNLOCK_DISTANCE;
 
 export type HazardKind = 'barrier' | 'drone' | 'pulse';
 
@@ -17,13 +22,14 @@ export interface TrackChunk {
   end: number;
   gap: { start: number; end: number } | null;
   hazards: HazardSpec[];
+  boxes: RandomBoxSpec[];
   seed: number;
 }
 
 export interface LoopSpec { id: number; entryX: number; radius: number }
 const loops: LoopSpec[] = [];
 
-export const RAMP_UNLOCK_DISTANCE = 1000;
+export const RAMP_UNLOCK_DISTANCE = 800;
 const RAMP_UNLOCK_X = 7 + RAMP_UNLOCK_DISTANCE;
 export const RAMP_MIN_SPACING = 400;
 export const RAMP_MAX_SPACING = 800;
@@ -228,7 +234,18 @@ export class TrackGenerator {
       });
     }
 
-    const chunk = { index, start, end: start + CHUNK_LENGTH, gap, hazards, seed };
+    const boxes: RandomBoxSpec[] = [];
+    if (!reserved && !gap && index >= 1 && index % 3 === 1) {
+      const x = start + 9 + hash(index + 1459) * 3;
+      // Keep the opening stretch clear, then thin the existing candidates
+      // deterministically so revisiting or streaming chunks cannot reroll loot.
+      if (x >= BOX_UNLOCK_X && hash(index + 1531) < BOX_SPAWN_KEEP_CHANCE) {
+        const airborne = hash(index + 1481) > .45;
+        boxes.push({ id: `box-${index}`, x, y: roadHeight(x) + (airborne ? 3.2 + hash(index + 1493) * .7 : .58),
+          airborne, phase: hash(index + 1511) * Math.PI * 2 });
+      }
+    }
+    const chunk = { index, start, end: start + CHUNK_LENGTH, gap, hazards, boxes, seed };
     this.cache.set(index, chunk);
     return chunk;
   }

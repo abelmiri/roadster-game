@@ -2,7 +2,10 @@ import * as THREE from 'three';
 import type { GamePhysics, GameSnapshot } from './physics';
 import { getDistrict, hash, roadHeight, loopsBetween, loopGeometry, rampsBetween, type LoopSpec, type HazardKind, type TrackChunk } from './track';
 import { sprungBodyPose } from './vehicle';
-import { createRoadsterBody, createRoadsterWheel } from './roadsterModel';
+import { createRoadsterWheel } from './roadsterModel';
+import { createVehicleBody } from './vehicleModels';
+import { carModel, type CarModelId } from './carModels';
+import { WEAPON_MOUNT } from './weapons';
 import { CarSmoke } from './smoke';
 import { CarBodyDamage } from './carBodyDamage';
 import { CarArmorVisual } from './carArmor';
@@ -18,6 +21,7 @@ import { BackdropBlur } from './backdropBlur';
 import { PoliceVisual } from './policeVisual';
 import { carVisibleDuringProtection } from './damage';
 import { CombatVisual, WeaponVisual } from './weaponVisual';
+import { MagneticShield, RandomBoxVisuals } from './powerVisuals';
 
 interface Theme {
   sky: string; haze: string; far: string; middle: string; near: string;
@@ -46,6 +50,16 @@ function disposeGroup(group: THREE.Object3D): void {
     if (child instanceof THREE.Mesh || child instanceof THREE.Line) child.geometry.dispose();
   });
   group.removeFromParent();
+}
+
+function disposeCarBody(group: THREE.Object3D): void {
+  const materials = new Set<THREE.Material>();
+  group.traverse(child => {
+    if (!(child instanceof THREE.Mesh || child instanceof THREE.Line)) return;
+    for (const material of Array.isArray(child.material) ? child.material : [child.material]) materials.add(material);
+  });
+  disposeGroup(group);
+  for (const material of materials) material.dispose();
 }
 
 export class GameVisuals {
@@ -80,8 +94,11 @@ export class GameVisuals {
   private readonly hazeColor = new THREE.Color(THEMES[0].haze);
   private aspect = 1;
   private themeDistance = -1;
-  private readonly carGroup = createRoadsterBody();
-  private readonly bodyDamage = new CarBodyDamage(this.carGroup);
+  private readonly carGroup = new THREE.Group();
+  private carBody = createVehicleBody('roadster');
+  private bodyDamage = new CarBodyDamage(this.carBody);
+  private vehicle: CarModelId = 'roadster';
+  private paint = 'white';
   private readonly armor = new CarArmorVisual();
   private readonly wheelGroups: [THREE.Group, THREE.Group];
   private readonly fanGlow: THREE.Mesh;
@@ -96,6 +113,8 @@ export class GameVisuals {
   private readonly drivingCamera = new DrivingCamera();
   private readonly weapon = new WeaponVisual();
   private readonly combat = new CombatVisual();
+  private readonly shield = new MagneticShield();
+  private readonly randomBoxes = new RandomBoxVisuals();
   private readonly loops = new Map<number, THREE.Group>();
   private viewHeight = VIEW_HALF_HEIGHT;
   private sun!: THREE.Mesh;
@@ -126,11 +145,12 @@ export class GameVisuals {
     this.createSky();
     this.backdrop.add(this.city.group);
     this.createCityMotion();
-    this.carGroup.add(this.weapon.group, this.armor.attached);
+    this.carBody.position.z = 0;
+    this.carGroup.add(this.carBody, this.weapon.group, this.armor.attached, this.shield.group);
     this.worldGroup.add(this.armor.debris);
     this.wheelGroups = [createRoadsterWheel(), createRoadsterWheel()];
     this.worldGroup.add(this.carGroup, ...this.wheelGroups, this.smoke.mesh, this.debris.mesh, this.sparks.mesh,
-      this.police.group, this.policeWreck.group, this.policeSmoke.mesh, this.combat.group, this.depot.group);
+      this.police.group, this.policeWreck.group, this.policeSmoke.mesh, this.combat.group, this.depot.group, this.randomBoxes.group);
     this.fanGlow = box(1.8, 0.07, 0.55, new THREE.MeshBasicMaterial({ color: '#58f4dd', transparent: true, opacity: 0.8 }));
     this.fanGlow.position.set(0, -0.48, 0.08);
     this.fanGlow.visible = false;
@@ -429,19 +449,39 @@ export class GameVisuals {
     this.stars.position.set(this.cameraX, this.cameraY, 0);
   }
 
+  setPaint(id: string): void { this.paint = id; this.bodyDamage.setPaint(id); }
+
+  setVehicle(id: CarModelId): void {
+    if (id === this.vehicle) return;
+    this.bodyDamage.dispose();
+    disposeCarBody(this.carBody);
+    const model = carModel(id);
+    this.vehicle = model.id;
+    this.carBody = createVehicleBody(model.id);
+    this.carBody.position.z = 0;
+    this.bodyDamage = new CarBodyDamage(this.carBody, model.roofLift);
+    this.bodyDamage.setPaint(this.paint);
+    this.carGroup.add(this.carBody);
+    this.weapon.group.position.y = WEAPON_MOUNT.y + model.roofLift;
+    this.armor.setRoofLift(model.roofLift);
+  }
+
   render(snapshot: GameSnapshot, physics: GamePhysics, delta: number, running = true, impactFrozen = false, wallDelta = delta): void {
     const sceneDelta = impactFrozen ? 0 : delta;
     this.elapsed += sceneDelta;
     if (running) this.policeTime += delta;
     this.syncChunks(physics);
     this.syncLoops(snapshot.car.x);
+    this.randomBoxes.update(physics.randomBoxStates, sceneDelta, running && !impactFrozen,
+      snapshot.boxRewardEvents, snapshot.boxRewardSerial);
     this.updateTheme(snapshot.distance);
     const body = sprungBodyPose(snapshot.car, snapshot.suspensionOffset, snapshot.suspensionPitch);
     this.carGroup.position.set(body.x, body.y, 1.15);
     this.carGroup.rotation.z = body.angle;
     this.bodyDamage.update(snapshot.wrecked ? 0 : snapshot.hullHealth);
     this.armor.update(snapshot, delta, running, physics.generator);
-    const carVisible = carVisibleDuringProtection(snapshot.invincibilityRemaining, impactFrozen || !running || snapshot.crashed);
+    this.shield.update(snapshot.shieldRemaining, sceneDelta, running && !impactFrozen, snapshot.crashed);
+    const carVisible = snapshot.shieldRemaining > 0 || carVisibleDuringProtection(snapshot.invincibilityRemaining, impactFrozen || !running || snapshot.crashed);
     this.carGroup.visible = carVisible;
     snapshot.wheels.forEach((pose, index) => {
       const wheel = this.wheelGroups[index];
@@ -527,6 +567,7 @@ export class GameVisuals {
     window.removeEventListener('resize', this.resize);
     for (const view of this.chunks.values()) disposeGroup(view.group);
     this.bodyDamage.dispose();
+    disposeCarBody(this.carBody);
     this.armor.dispose();
     this.smoke.dispose();
     this.debris.dispose();
@@ -539,6 +580,7 @@ export class GameVisuals {
     this.policeSmoke.dispose();
     this.weapon.dispose();
     this.combat.dispose();
+    this.shield.dispose(); this.randomBoxes.dispose();
     this.blur.dispose();
     this.groundMat.dispose();
     this.renderer.dispose();

@@ -1,6 +1,10 @@
 import { canEquip, WEAPONS, MAX_WEAPON_UPGRADE, weaponUpgradeCost, type WeaponId, type WeaponUpgrades } from './weapons';
 import { CAR_UPGRADE_IDS, MAX_CAR_UPGRADE, carUpgradeCost, carUpgradeRequiredLevel, type CarUpgradeId, type CarUpgrades } from './carUpgrades';
 import { DISTANCE_COIN_REWARDS } from './coinRewards';
+import { CAR_PAINT_PRICE, isCarPaint, type CarPaintId } from './carPaint';
+import { MissionProgress, type MissionSpec } from './missions';
+import type { MissionStats } from './missionStats';
+import { CAR_MODELS, CAR_MODEL_PRICE, isCarModel, type CarModelId } from './carModels';
 
 type ProgressStorage = Pick<Storage, 'getItem' | 'setItem'>;
 type RecordEntry = { distance: number; name: string; needsName: boolean };
@@ -12,6 +16,7 @@ const cleanName = (value: string): string => value.replace(/[\u0000-\u001f\u007f
 
 /** A stable, versioned save keeps purchases and their coin debit in one storage write. */
 export class PlayerProgress {
+  readonly missions = new MissionProgress();
   coins = 0;
   runCoins = 0;
   score = 0;
@@ -20,12 +25,18 @@ export class PlayerProgress {
   private readonly owned = new Set<WeaponId>(['machine-gun']);
   private readonly upgrades: WeaponUpgrades = {};
   private readonly vehicleUpgrades: CarUpgrades = {};
-  private collected = [0, 0, 0, 0];
+  private readonly paints = new Set<CarPaintId>(['white']);
+  private readonly vehicles = new Set<CarModelId>(['roadster']);
+  private readonly vehiclePaints: Partial<Record<CarModelId, CarPaintId>> = {};
+  private vehicle: CarModelId = 'roadster';
+  private collected = [0, 0, 0, 0, 0];
   private finished = false;
   private distanceRewardsCollected = 0;
   private runScore = 0;
   private savedScore = 0;
   private scoreSavedAt = -Infinity;
+  private missionSavedAt = -Infinity;
+  private missionSavedRevision = 0;
 
   constructor(private readonly storage?: ProgressStorage) {
     try {
@@ -50,6 +61,28 @@ export class PlayerProgress {
           const level = saved.carUpgrades?.[id];
           if (validCount(level) && level <= MAX_CAR_UPGRADE) this.vehicleUpgrades[id] = level;
         }
+        if (Array.isArray(saved.ownedPaints)) for (const id of saved.ownedPaints) {
+          if (isCarPaint(id)) this.paints.add(id);
+        }
+        const legacyVehicle: CarModelId = isCarModel(saved.selectedVehicle) ? saved.selectedVehicle : 'roadster';
+        if (Array.isArray(saved.ownedVehicles)) {
+          for (const id of saved.ownedVehicles) if (isCarModel(id)) this.vehicles.add(id);
+        } else if (saved.ownedVehicles === undefined) {
+          // Keep a car already in use before ownership was introduced.
+          this.vehicles.add(legacyVehicle);
+        }
+        if (this.ownsVehicle(legacyVehicle)) this.vehicle = legacyVehicle;
+        if (saved.vehiclePaints && typeof saved.vehiclePaints === 'object' && !Array.isArray(saved.vehiclePaints)) {
+          for (const { id } of CAR_MODELS) {
+            const paint = saved.vehiclePaints[id];
+            if (this.ownsVehicle(id) && isCarPaint(paint) && this.paints.has(paint)) this.vehiclePaints[id] = paint;
+          }
+        } else if (saved.vehiclePaints === undefined && this.ownsVehicle(legacyVehicle) &&
+            isCarPaint(saved.selectedPaint) && this.paints.has(saved.selectedPaint)) {
+          // Old saves had one global color: keep it on the car it belonged to.
+          this.vehiclePaints[legacyVehicle] = saved.selectedPaint;
+        }
+        this.missions.restore(saved.missions);
       }
     } catch { /* Recover any older best score independently of a damaged save. */ }
     try {
@@ -59,6 +92,7 @@ export class PlayerProgress {
       }
     } catch { /* The session remains playable without browser storage. */ }
     this.savedScore = this.score;
+    this.missions.fillSlots(this.owned.size);
   }
 
   /** Save the last run's distance without synchronously writing every frame. */
@@ -75,7 +109,19 @@ export class PlayerProgress {
   }
 
   flushScore(): void {
-    if (this.score !== this.savedScore) this.persist();
+    if (this.score !== this.savedScore || this.missions.revision !== this.missionSavedRevision) this.persist();
+  }
+
+  beginMissionRun(): void { this.missions.beginRun(this.owned.size); this.persist(); }
+
+  collectMissions(stats: MissionStats, now: number, finished = false): MissionSpec[] {
+    const rewards = this.missions.update(stats, finished);
+    const coins = rewards.reduce((sum, spec) => sum + spec.reward, 0);
+    // The completed IDs and wallet credit are committed in the same save.
+    if (coins) this.credit(coins);
+    else if (finished || this.missions.revision !== this.missionSavedRevision && now - this.missionSavedAt >= 1000) this.persist();
+    if (this.missions.revision === this.missionSavedRevision) this.missionSavedAt = now;
+    return rewards;
   }
 
   ownsWeapon(id: string): boolean { return this.owned.has(id as WeaponId); }
@@ -83,6 +129,47 @@ export class PlayerProgress {
   get weaponUpgrades(): WeaponUpgrades { return { ...this.upgrades }; }
   get carUpgrades(): CarUpgrades { return { ...this.vehicleUpgrades }; }
   carLevel(id: CarUpgradeId): number { return this.vehicleUpgrades[id] ?? 0; }
+  get selectedPaint(): CarPaintId { return this.paintForVehicle(this.vehicle); }
+  get selectedVehicle(): CarModelId { return this.vehicle; }
+  ownsVehicle(id: string): boolean { return this.vehicles.has(id as CarModelId); }
+  paintForVehicle(id: string): CarPaintId { return isCarModel(id) ? this.vehiclePaints[id] ?? 'white' : 'white'; }
+
+  purchaseVehicle(id: string): PurchaseResult {
+    if (!isCarModel(id)) return 'unknown';
+    if (this.ownsVehicle(id)) return 'owned';
+    if (this.coins < CAR_MODEL_PRICE) return 'insufficient-coins';
+    this.coins -= CAR_MODEL_PRICE;
+    this.vehicles.add(id);
+    this.vehicle = id;
+    this.persist();
+    return 'purchased';
+  }
+
+  selectVehicle(id: string): boolean {
+    if (!isCarModel(id) || !this.ownsVehicle(id)) return false;
+    this.vehicle = id;
+    this.persist();
+    return true;
+  }
+  ownsPaint(id: string): boolean { return this.paints.has(id as CarPaintId); }
+
+  purchasePaint(id: string): PurchaseResult {
+    if (!isCarPaint(id)) return 'unknown';
+    if (this.paints.has(id)) return 'owned';
+    if (this.coins < CAR_PAINT_PRICE) return 'insufficient-coins';
+    this.coins -= CAR_PAINT_PRICE;
+    this.paints.add(id);
+    this.vehiclePaints[this.vehicle] = id;
+    this.persist();
+    return 'purchased';
+  }
+
+  selectPaint(id: string): boolean {
+    if (!isCarPaint(id) || !this.paints.has(id)) return false;
+    this.vehiclePaints[this.vehicle] = id;
+    this.persist();
+    return true;
+  }
 
   upgradeCar(id: string, playerLevel = 1): UpgradeResult {
     if (!CAR_UPGRADE_IDS.includes(id as CarUpgradeId)) return 'unknown';
@@ -125,11 +212,11 @@ export class PlayerProgress {
     return 'purchased';
   }
 
-  collect(distance: number, completedLoops: number, destroyedPolice: number, flipCoins = 0): number {
+  collect(distance: number, completedLoops: number, destroyedPolice: number, flipCoins = 0, boxCoins = 0): number {
     if (this.finished) return 0;
     const milestones = Number.isFinite(distance) && distance >= 0 ? Math.floor(distance / 200) : NaN;
-    const counters = [milestones, completedLoops, destroyedPolice, flipCoins];
-    const rewards = [10, 5, 10, 1];
+    const counters = [milestones, completedLoops, destroyedPolice, flipCoins, boxCoins];
+    const rewards = [10, 5, 10, 1, 1];
     let gained = 0;
     counters.forEach((count, index) => {
       if (!validCount(count) || count <= this.collected[index]) return;
@@ -176,7 +263,7 @@ export class PlayerProgress {
   }
 
   resetRun(): void {
-    this.collected = [0, 0, 0, 0];
+    this.collected = [0, 0, 0, 0, 0];
     this.finished = false;
     this.distanceRewardsCollected = 0;
     this.runCoins = 0;
@@ -198,8 +285,12 @@ export class PlayerProgress {
       this.storage?.setItem(STORAGE_KEY, JSON.stringify({ version: 1, coins: this.coins,
         score: this.score,
         ownedWeapons: [...this.owned], weaponUpgrades: this.upgrades, carUpgrades: this.vehicleUpgrades,
+        ownedPaints: [...this.paints], selectedPaint: this.selectedPaint,
+        selectedVehicle: this.vehicle, ownedVehicles: [...this.vehicles], vehiclePaints: this.vehiclePaints,
+        missions: this.missions.save(),
         record: this.record, playerName: this.playerName }));
       this.savedScore = this.score;
+      this.missionSavedRevision = this.missions.revision;
     } catch { /* Keep progress for this session when persistence is unavailable. */ }
   }
 }

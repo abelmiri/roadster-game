@@ -63,7 +63,7 @@ export class WeaponLoadout {
   private canSelect(id: string, xp: number): boolean { return canEquip(id, xp) && this.ownsWeapon(id); }
 }
 
-export interface CombatTarget { id: string; kind: 'hazard' | 'police'; x: number; y: number; radius: number; health: number }
+export interface CombatTarget { id: string; kind: 'hazard' | 'police' | 'box'; x: number; y: number; radius: number; health: number }
 export interface WeaponPose { x: number; y: number; angle: number; vx: number; vy: number }
 export interface Projectile {
   id: number; weapon: WeaponId; upgradeLevel: number; x: number; y: number; previousX: number; previousY: number;
@@ -73,7 +73,7 @@ export interface Projectile {
 export interface CombatEffect { id: number; x: number; y: number; age: number; size: number; destroyed: boolean; color: string }
 export interface WeaponImpact {
   x: number; y: number; directionX: number; directionY: number;
-  surface: 'hazard' | 'police' | 'terrain'; destroyed: boolean;
+  surface: 'hazard' | 'police' | 'box' | 'terrain'; destroyed: boolean;
 }
 export interface WeaponSnapshot {
   id: WeaponId; level: number; ammo: number; capacity: number; yaw: number; pitch: number;
@@ -102,6 +102,7 @@ function intersection(x: number, y: number, dx: number, dy: number, target: Comb
 /** Fixed-step combat has no rigid bodies, so recoil cannot destabilize driving. */
 export class VehicleWeapon {
   id: WeaponId;
+  mountLift = 0;
   private readonly ammunition = new Map(WEAPONS.map(spec => [spec.id, spec.ammo]));
   private readonly upgrades = new Map<WeaponId, number>();
   private yaw = 0;
@@ -137,6 +138,8 @@ export class VehicleWeapon {
   }
   ammoFor(id: WeaponId): number { return this.ammunition.get(id) ?? 0; }
   get destructionSerial(): number { return this.destroySerial; }
+  get activeId(): WeaponId { return this.id; }
+  get shotsFired(): number { return this.shotSerial; }
 
   step(dt: number, controls: { fire?: boolean; aim?: AimDirection }, pose: WeaponPose,
     targets: CombatTarget[], onDamage: (target: CombatTarget, damage: number) => void,
@@ -157,15 +160,25 @@ export class VehicleWeapon {
     // A small automatic elevation correction makes roof-mounted shots useful
     // against road barriers and drones, while the player controls front/back.
     const c = Math.cos(pose.angle); const s = Math.sin(pose.angle);
-    const mountX = pose.x + WEAPON_MOUNT.x * c - (WEAPON_MOUNT.y + WEAPON_MOUNT.pivotY) * s;
-    const mountY = pose.y + WEAPON_MOUNT.x * s + (WEAPON_MOUNT.y + WEAPON_MOUNT.pivotY) * c;
+    const mountHeight = WEAPON_MOUNT.y + WEAPON_MOUNT.pivotY + this.mountLift;
+    const mountX = pose.x + WEAPON_MOUNT.x * c - mountHeight * s;
+    const mountY = pose.y + WEAPON_MOUNT.x * s + mountHeight * c;
     const aimed = targets.filter(target => {
       const dx = target.x - mountX; const dy = target.y - mountY;
       const forward = (dx * c + dy * s) * this.direction;
-      return target.health > 0 && forward > 2 && forward < spec.range && Math.abs(-dx * s + dy * c) < forward * .5 + .5;
+      const elevationRange = target.kind === 'box' ? .9 : .5;
+      return target.health > 0 && forward > 2 && forward < spec.range && Math.abs(-dx * s + dy * c) < forward * elevationRange + .5;
     }).sort((a, b) => Math.hypot(a.x - mountX, a.y - mountY) - Math.hypot(b.x - mountX, b.y - mountY))[0];
-    const desiredPitch = aimed ? clamp(Math.atan2(-(aimed.x - mountX) * s + (aimed.y - mountY) * c,
-      Math.abs((aimed.x - mountX) * c + (aimed.y - mountY) * s)), -.45, .45) : 0;
+    let aimX = aimed ? aimed.x - mountX : 0;
+    let aimY = aimed ? aimed.y - mountY : 0;
+    // Floating boxes remain reachable on downhill waves: compensate for the
+    // car's inherited projectile velocity and allow a steeper barrel elevation.
+    if (aimed?.kind === 'box' && spec.speed > 0) {
+      const flight = Math.hypot(aimX, aimY) / (spec.speed + Math.max(0, pose.vx * this.direction));
+      aimX -= pose.vx * flight; aimY -= pose.vy * flight;
+    }
+    const pitchLimit = aimed?.kind === 'box' ? .8 : .45;
+    const desiredPitch = aimed ? clamp(Math.atan2(-aimX * s + aimY * c, Math.abs(aimX * c + aimY * s)), -pitchLimit, pitchLimit) : 0;
     this.pitch += (desiredPitch - this.pitch) * (1 - Math.exp(-dt * 18));
 
     if (controls.fire && this.yaw === destination && this.cooldown <= 1e-9 && this.ammoFor(this.id) > 0 && this.projectiles.length < 64) {
@@ -263,10 +276,14 @@ export class VehicleWeapon {
       victim.health = remaining <= 1e-9 ? 0 : remaining;
       onDamage(victim, dealt);
       this.hitSerial++;
-      if (victim.health === 0) this.destroySerial++;
+      // Loot crates open or launch away; only actual destruction triggers
+      // explosion visuals, sound and the game's explosion slow motion.
+      const exploded = victim.health === 0 && victim.kind !== 'box';
+      if (exploded) this.destroySerial++;
       this.reportImpact(victim === target ? x : victim.x, victim === target ? y : victim.y,
-        vx, vy, victim.kind, victim.health === 0, onImpact);
-      this.effect(victim.x, victim.y, victim.health === 0 ? Math.max(.9, spec.splash) : .35, victim.health === 0, spec.color);
+        vx, vy, victim.kind, exploded, onImpact);
+      this.effect(victim.x, victim.y, victim.kind === 'box' ? .22 : exploded ? Math.max(.9, spec.splash) : .35, exploded,
+        victim.kind === 'box' ? '#cb7dff' : spec.color);
     }
   }
 

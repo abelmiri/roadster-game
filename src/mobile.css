@@ -110,7 +110,8 @@
   .weapon-english, .weapon-power { display: none; }
   html[lang] .weapon-stats { font-size: 6.5px; line-height: 1.45; }
   html[lang] .weapon-unlock, html[lang] .weapon-price { font-size: 6.5px; line-height: 1.45; margin-top: 3px; }
-  .weapon-card:not(.is-locked) .weapon-price, .weapon-card:not(.is-locked) .weapon-unlock { display: none; }
+  .weapon-card[data-shop-state=owned] .weapon-price, .weapon-card[data-shop-state=owned] .weapon-unlock,
+  .weapon-card[data-shop-state=selected] .weapon-price, .weapon-card[data-shop-state=selected] .weapon-unlock { display: none; }
   .weapon-upgrades { margin-top: 4px; padding: 4px; border-radius: 7px; }
   html[lang] .weapon-level-row { font-size: 6.5px; gap: 3px; }
   .weapon-upgrades .weapon-level-row > span:first-child { display: none; }

@@ -17,6 +17,9 @@ let CAR_BODY_CLEARANCE;
 let CAR_ARCH_RADIUS;
 let loopsBetween;
 let rampsBetween;
+let RAMP_UNLOCK_DISTANCE;
+let RAMP_MIN_SPACING;
+let RAMP_MAX_SPACING;
 let RAMP_APPROACH;
 let RAMP_LANDING;
 let loopGeometry;
@@ -35,7 +38,8 @@ before(async () => {
   });
   await RAPIER.init();
   ({ GamePhysics, FIXED_STEP } = await import(pathToFileURL(path.join(outdir, 'physics.mjs')).href));
-  ({ TrackGenerator, roadHeight, roadSlope, loopsBetween, loopGeometry, rampsBetween, RAMP_APPROACH, RAMP_LANDING } = await import(pathToFileURL(path.join(outdir, 'track.mjs')).href));
+  ({ TrackGenerator, roadHeight, roadSlope, loopsBetween, loopGeometry, rampsBetween, RAMP_UNLOCK_DISTANCE,
+    RAMP_MIN_SPACING, RAMP_MAX_SPACING, RAMP_APPROACH, RAMP_LANDING } = await import(pathToFileURL(path.join(outdir, 'track.mjs')).href));
   ({ CAR_WHEEL_RADIUS, CAR_WHEEL_OFFSET, CAR_AXLE_Y, CAR_BODY_CLEARANCE, CAR_ARCH_RADIUS, sprungBodyPose } =
     await import(pathToFileURL(path.join(outdir, 'vehicle.mjs')).href));
 });
@@ -115,13 +119,13 @@ test('automatic driving follows ordinary contours without bouncing or reversing'
   } finally { game.dispose(); }
 });
 
-test('ramps begin after 1000m, stream deterministically, and reserve a continuous approach and landing', () => {
+test('ramps begin after their configured unlock, stream deterministically, and reserve a continuous approach and landing', () => {
   const track = new TrackGenerator();
-  assert.deepEqual(rampsBetween(-64, 1007), []);
+  assert.deepEqual(rampsBetween(-64, 7 + RAMP_UNLOCK_DISTANCE), []);
   const ramps = rampsBetween(0, 10000);
   assert.ok(ramps.length > 5);
   for (const ramp of ramps) {
-    assert.ok(ramp.start - 7 > 1000);
+    assert.ok(ramp.start - 7 > RAMP_UNLOCK_DISTANCE);
     assert.deepEqual(rampsBetween(ramp.start + 1, ramp.end), [ramp]);
     assert.equal(loopsBetween(ramp.start - RAMP_APPROACH - 20, ramp.end + RAMP_LANDING + 20).length, 0);
     for (let x = ramp.start - RAMP_APPROACH; x <= ramp.end + RAMP_LANDING; x += .5) {
@@ -141,13 +145,14 @@ test('ramps begin after 1000m, stream deterministically, and reserve a continuou
 });
 
 test('every actual ramp is randomly spaced 400–800m after the unlock and previous ramp, including distant streamed sections', async () => {
-  assert.deepEqual(rampsBetween(0, 1406), []);
+  const unlockX = 7 + RAMP_UNLOCK_DISTANCE;
+  assert.deepEqual(rampsBetween(0, unlockX + RAMP_MIN_SPACING - 1), []);
   const ramps = rampsBetween(0, 100000);
   const spacings = new Set();
-  let previous = 1007;
+  let previous = unlockX;
   for (const [index, ramp] of ramps.entries()) {
     const spacing = ramp.start - previous;
-    assert.ok(spacing >= 400 && spacing <= 800, `ramp ${ramp.id}: spacing=${spacing}`);
+    assert.ok(spacing >= RAMP_MIN_SPACING && spacing <= RAMP_MAX_SPACING, `ramp ${ramp.id}: spacing=${spacing}`);
     assert.equal(ramp.id, index, 'loop conflicts must not skip scheduled ramps');
     spacings.add(spacing);
     previous = ramp.start;
@@ -240,17 +245,27 @@ test('a fresh ramp booster makes a higher and longer jump than an already spent 
   for(const spent of [false,true]) {
     const game=new GamePhysics(ramp.start-10);
     if(spent)game.usedRampBoosters.add(ramp.id);
-    let height=0,airTime=0,longestFlight=0;
+    let height=0,airTime=0,launched=false,landed=false;
     try {
       for(let i=0;i<1000&&!game.crashed&&game.car.translation().x<ramp.end+100;i++) {
-        game.step({...idle,boost:true});
+        // Keep player boost out of the comparison: only the pad may add thrust.
+        game.step(idle);
         const state=game.snapshot(1);
+        // The ordinary approach can briefly lift a tire. Measure the actual
+        // ramp launch and stop at its landing before later road crests.
+        if(!launched&&!state.grounded&&state.car.x>=ramp.takeoffX) launched=true;
+        if(!launched) continue;
+        if(state.grounded) {landed=true;break;}
         height=Math.max(height,state.car.y-roadHeight(state.car.x));
-        airTime=state.grounded?0:airTime+FIXED_STEP;
-        longestFlight=Math.max(longestFlight,airTime);
+        airTime+=FIXED_STEP;
       }
       assert.equal(game.crashed,false);
-      jumps.push({height,longestFlight});
+      assert.equal(launched,true,'the car must take off from the ramp');
+      assert.equal(landed,true,'the measured ramp flight must land');
+      assert.equal(game.snapshot(1).rampBoostSerial,spent?0:1);
+      assert.equal(game.snapshot(1).jumpSerial,0,'the ramp launch must not use the jump action');
+      assert.equal(game.snapshot(1).boost,1,'the comparison must not spend player boost');
+      jumps.push({height,longestFlight:airTime});
     } finally {game.dispose();}
   }
   assert.ok(jumps[0].height>jumps[1].height+4);
@@ -414,6 +429,26 @@ test('fast downward landings cannot tunnel through the road between physics step
   }
 });
 
+test('a first jump has enough vertical lift for a higher tap and held apex', () => {
+  const heights = [];
+  for (const held of [false, true]) {
+    const game = new GamePhysics(-60);
+    try {
+      const startY = game.car.translation().y;
+      let height = 0;
+      for (let i = 0; i < 180; i++) {
+        game.step({ ...idle, jumpPressed: i === 0, jumpHeld: held && i < 22 });
+        height = Math.max(height, game.car.translation().y - startY);
+      }
+      assert.equal(game.crashed, false);
+      assert.equal(game.snapshot(1).jumpSerial, 1);
+      heights.push(height);
+    } finally { game.dispose(); }
+  }
+  assert.ok(heights[0] > 2.6 && heights[0] < 3.2, `tap apex=${heights[0]}`);
+  assert.ok(heights[1] > heights[0] + 1, `tap=${heights[0]}, held=${heights[1]}`);
+});
+
 test('holding jump gains height, a second press works, and a third press is ignored', () => {
   function jumpSequence(hold, second, third) {
     const game = new GamePhysics();
@@ -534,6 +569,38 @@ test('an early barrier costs one health segment, while a timed jump clears it wi
   assert.equal(collision.health, 75);
   const paths = Array.from({ length: 9 }, (_, i) => runChallenge(7, 95, barrier.x - (i + 3)));
   assert.ok(paths.some((path) => !path.crashed && path.x >= 95 && path.health === 100), 'barrier has no reachable jump');
+});
+
+test('one uphill jump clears a barrier on the next road wave without damage', () => {
+  const track = new TrackGenerator();
+  // The second fixture reaches a higher wave. Both previously lost health
+  // because the speed cap clipped their uphill takeoff impulse.
+  for (const [index, distances, held] of [[2, [17, 18, 19, 20], false], [12, [20, 21, 22], true]]) {
+    const barrier = track.chunk(index).hazards[0];
+    for (const distance of distances) {
+      const jumpAt = barrier.x - distance;
+      assert.ok(roadSlope(jumpAt) > 0.18, 'fixture must take off uphill');
+      const game = new GamePhysics(jumpAt - 3);
+      let jumpStep = -Infinity;
+      try {
+        for (let i = 0; i < 600 && !game.crashed && game.car.translation().x < barrier.x + 4; i++) {
+          const jumpPressed = jumpStep === -Infinity && game.car.translation().x >= jumpAt;
+          if (jumpPressed) {
+            assert.equal(game.snapshot(1).grounded, true);
+            assert.ok(game.car.linvel().y > 3, 'fixture must retain upward driving momentum');
+            jumpStep = i;
+          }
+          game.step({ ...idle, jumpPressed, jumpHeld: held && i - jumpStep < 22 });
+        }
+        const state = game.snapshot(1);
+        const label = `chunk=${index}, distance=${distance}, held=${held}`;
+        assert.equal(state.crashed, false, label);
+        assert.equal(state.health, 100, label);
+        assert.equal(state.jumpSerial, 1, 'a double jump must not be needed');
+        assert.ok(state.car.x >= barrier.x + 4, label);
+      } finally { game.dispose(); }
+    }
+  }
 });
 
 test('an uphill gap requires a jump and remains reachable at the higher starting speed', () => {
@@ -1243,6 +1310,8 @@ test('rear fire stops a real patrol; its disabled wreck cannot damage the player
   let sawNonfatalSparks=false;
   try {
     for(let i=0;i<480&&!game.crashed&&!game.snapshot(1).police.disabled;i++) {
+      // Isolate patrol hits from the new shootable reward boxes along the road.
+      for (const box of game.randomBoxStates) game.boxRewards.opened.add(box.id);
       game.step({...idle,suction:true,fire:true,aim:-1});
       const current=game.snapshot(1);
       if(current.police.health>0&&current.police.health<12&&current.sparkEvents.some(event=>event.kind==='projectile'))sawNonfatalSparks=true;

@@ -1,6 +1,6 @@
 import RAPIER from '@dimforge/rapier2d-compat';
 import type { Collider, EventQueue, RigidBody, World } from '@dimforge/rapier2d-compat';
-import { CHUNK_LENGTH, START_APRON_X, TrackGenerator, roadHeight, roadSlope, sampleRoad, loopsBetween, loopGeometry, rampAt, RAMP_BOOSTER_LENGTH, type LoopSpec, type HazardSpec, type TrackChunk } from './track';
+import { CHUNK_LENGTH, START_APRON_X, BOX_UNLOCK_DISTANCE, TrackGenerator, roadHeight, roadSlope, sampleRoad, loopsBetween, loopGeometry, rampAt, RAMP_BOOSTER_LENGTH, type LoopSpec, type HazardSpec, type TrackChunk } from './track';
 import { CAR_AXLE_Y, CAR_BODY_CLEARANCE, CAR_WHEEL_OFFSET, CAR_WHEEL_RADIUS, sprungBodyPose } from './vehicle';
 import { VehicleSuspension } from './suspension';
 import { WheelContactPhysics, ROAD_GRAVITY, type ContactBody } from './wheelContact';
@@ -12,6 +12,9 @@ import type { BreakEvent } from './obstacleDebris';
 import type { SparkEvent } from './impactSparks';
 import { VehicleWeapon, type AimDirection, type CombatTarget, type WeaponId, type WeaponSnapshot, type WeaponImpact, type WeaponUpgrades } from './weapons';
 import { CAR_UPGRADE_IDS, carUpgradeLevel, carUpgradeStats, type CarUpgrades } from './carUpgrades';
+import { RandomBoxRewards, type RandomBoxSpec, type BoxRewardEvent } from './randomBox';
+import { RunMissionTracker, type MissionStats } from './missionStats';
+import { carModel, type CarModelId } from './carModels';
 
 export const FIXED_STEP = 1 / 120;
 export const START_SPEED = 60 / 3.6;
@@ -78,6 +81,13 @@ export interface GameSnapshot {
   health: number;
   impactSerial: number;
   invincibilityRemaining: number;
+  shieldRemaining: number;
+  unlimitedBoostRemaining: number;
+  boxCoins: number;
+  boxXp: number;
+  boxRewardSerial: number;
+  boxRewardEvents: readonly BoxRewardEvent[];
+  missionStats: MissionStats;
 }
 
 interface ActiveHazard {
@@ -141,6 +151,8 @@ export class GamePhysics {
   private previousSuspensionOffset = 0;
   private previousSuspensionPitch = 0;
   private readonly damage = new VehicleDamage();
+  private readonly boxRewards = new RandomBoxRewards();
+  private readonly runMissions = new RunMissionTracker();
   private jumpSerial = 0;
   private landingSerial = 0;
   private landingImpact = 0;
@@ -171,12 +183,13 @@ export class GamePhysics {
   private readonly carUpgrades: CarUpgrades = {};
   private carStats = carUpgradeStats();
 
-  constructor(private readonly startX = 7, loadout?: { id: WeaponId; xp: number; upgrades?: WeaponUpgrades; carUpgrades?: CarUpgrades }) {
+  constructor(private readonly startX = 7, loadout?: { id: WeaponId; xp: number; upgrades?: WeaponUpgrades; carUpgrades?: CarUpgrades; vehicle?: CarModelId }) {
     this.furthestX = startX;
     this.pursuit = new PolicePursuit(startX);
     this.weapon = new VehicleWeapon('machine-gun', loadout?.upgrades);
     if (loadout) this.weapon.equip(loadout.id, loadout.xp);
     this.upgradeCar(loadout?.carUpgrades ?? {});
+    this.selectVehicle(loadout?.vehicle ?? 'roadster');
     this.previousPoliceX = this.currentPoliceX = this.pursuit.x;
     this.world = new RAPIER.World({ x: 0, y: -GRAVITY });
     this.world.timestep = FIXED_STEP;
@@ -382,15 +395,16 @@ export class GamePhysics {
   }
 
   private driveSpeed(speed: number, controls: Controls): number {
-    if (!controls.boost) this.boostExhausted = false;
-    this.boostOn = controls.boost && !this.boostExhausted && this.charge > 0.01;
+    const unlimited = this.boxRewards.boostRemaining > 0;
+    if (!controls.boost || unlimited) this.boostExhausted = false;
+    this.boostOn = controls.boost && (unlimited || !this.boostExhausted && this.charge > 0.01);
     const stats = this.carStats;
     this.rampBoostSpeed = Math.max(0, this.rampBoostSpeed - 5 * FIXED_STEP);
     this.rampBoostTime = Math.max(0, this.rampBoostTime - FIXED_STEP);
     const target = Math.max(this.rampBoostSpeed, START_SPEED + Math.min(18 - START_SPEED, Math.max(0, this.distance) / 160) + (this.boostOn ? 9 * stats.boostPower : 0));
     const acceleration = this.boostOn ? 18 * stats.boostPower : this.isGrounded ? 7 : 3;
-    this.charge = clamp(this.charge + FIXED_STEP * (this.boostOn ? -0.48 : 0.19) / stats.boostCapacity, 0, 1);
-    if (this.boostOn && this.charge <= 0.01) this.boostExhausted = true;
+    if (!unlimited) this.charge = clamp(this.charge + FIXED_STEP * (this.boostOn ? -0.48 : 0.19) / stats.boostCapacity, 0, 1);
+    if (!unlimited && this.boostOn && this.charge <= 0.01) this.boostExhausted = true;
     return clamp(speed + clamp(target - speed, -5 * FIXED_STEP, acceleration * FIXED_STEP), 6, Math.max(this.rampBoostSpeed, 18 + 9 * stats.boostPower));
   }
 
@@ -508,6 +522,7 @@ export class GamePhysics {
   equipWeapon(id: string, xp: number): boolean { return this.weapon.equip(id, xp); }
   upgradeWeapon(id: WeaponId, level: number): void { this.weapon.setUpgradeLevel(id, level); }
   weaponAmmo(id: WeaponId): number { return this.weapon.ammoFor(id); }
+  selectVehicle(id: string): void { this.weapon.mountLift = carModel(id).roofLift; }
   upgradeCar(upgrades: CarUpgrades): void {
     const previousCapacity = this.carStats.boostCapacity;
     for (const id of CAR_UPGRADE_IDS) this.carUpgrades[id] = Math.max(this.carUpgrades[id] ?? 0, carUpgradeLevel(upgrades[id]));
@@ -526,6 +541,8 @@ export class GamePhysics {
       active.set(hazard.spec.id, hazard);
       targets.push({ id: hazard.spec.id, kind: 'hazard', x: hazard.x, y: hazard.y, radius: .65, health: hazard.health });
     }
+    const boxes = new Map(this.randomBoxStates.map(box => [box.id, box]));
+    for (const box of boxes.values()) targets.push({ id: box.id, kind: 'box', x: box.x, y: box.y, radius: .58, health: 1 });
     if (!this.pursuit.disabled && this.pursuit.visibility > .5) {
       targets.push({ id: 'police', kind: 'police', x: this.pursuit.x,
         y: (this.roadSupport(this.pursuit.x)?.y ?? roadHeight(this.pursuit.x) + CAR_BODY_CLEARANCE) + .20,
@@ -549,6 +566,9 @@ export class GamePhysics {
           this.addBreakEvent({ hazardId: 'police', kind: 'police', x: target.x, y: target.y,
             speed: this.car.linvel().x, source: 'weapon' });
         }
+      } else if (target.kind === 'box') {
+        const box = boxes.get(target.id);
+        if (box && target.health === 0 && !this.crashed) this.boxRewards.open(box);
       } else {
         const hazard = active.get(target.id);
         if (!hazard || hazard.health <= 0) return;
@@ -556,6 +576,7 @@ export class GamePhysics {
         else hazard.health = target.health;
       }
     }, x => this.generator.hasRoad(x) ? roadHeight(x) : -Infinity, impact => this.emitWeaponSparks(impact));
+    this.runMissions.recordWeapon(this.weapon.activeId, this.weapon.ammoFor(this.weapon.activeId), this.weapon.shotsFired);
   }
 
   private breakHazard(hazard: ActiveHazard, source: BreakEvent['source'], speed: number): void {
@@ -565,7 +586,14 @@ export class GamePhysics {
     hazard.collider.setEnabled(false);
     this.hazardColliders.delete(hazard.collider.handle);
     this.destroyedHazards.add(hazard.spec.id);
-    if (source === 'weapon') this.obstaclesDestroyed++;
+    if (source === 'weapon') {
+      this.obstaclesDestroyed++; this.runMissions.stats.obstaclesShot++;
+      if (hazard.spec.kind === 'drone') this.runMissions.stats.dronesShot++;
+      if (hazard.spec.kind === 'pulse') this.runMissions.stats.pulsesShot++;
+    } else {
+      this.runMissions.stats.hazardsRammed++;
+      if (hazard.spec.kind === 'drone') this.runMissions.stats.dronesRammed++;
+    }
     this.addBreakEvent({ hazardId: hazard.spec.id, kind: hazard.spec.kind,
       x: hazard.x, y: hazard.y, speed, source });
   }
@@ -602,6 +630,7 @@ export class GamePhysics {
   }
 
   private registerImpact(source: 'road' | 'police'): boolean {
+    if (this.boxRewards.shieldRemaining > 0) return false;
     const rearImpact = source === 'police' && this.pursuit.x < this.car.translation().x;
     if (!this.damage.hit(rearImpact ? 3 : 0)) return false;
     if (this.activeLoop) this.suspension.land(4.5, 0, 0);
@@ -614,9 +643,19 @@ export class GamePhysics {
 
   step(controls: Controls): void {
     if (this.crashed) return;
+    this.stepDriving(controls);
+    this.runMissions.step({ distance: this.distance, speed: this.activeLoop?.speed ?? this.car.linvel().x,
+      grounded: this.isGrounded, loop: this.activeLoop !== null, crashed: this.crashed,
+      boost: this.boostOn, impacts: this.damage.impactSerial, loops: this.loopCompletions,
+      police: this.policeDestroyed, boxes: this.boxRewards.serial, ramps: this.rampBoostSerial }, FIXED_STEP);
+  }
+
+  private stepDriving(controls: Controls): void {
+    if (this.crashed) return;
     this.jumpJetActive = false;
     this.frontJetActive = this.rearJetActive = false;
     this.damage.step(FIXED_STEP);
+    this.boxRewards.step(FIXED_STEP);
     this.previousPoliceX = this.currentPoliceX;
     this.previousSuspensionOffset = this.suspension.offset;
     this.previousSuspensionPitch = this.suspension.pitch;
@@ -637,6 +676,7 @@ export class GamePhysics {
 
     const support = this.roadSupport(before.x);
     if (support && before.y < support.y + 0.3 && Math.abs(before.angle) > 1.65) {
+      this.runMissions.stats.roofHits = 1;
       this.crashed = true;
       this.beginWreck();
       this.current = this.readPoses();
@@ -649,9 +689,16 @@ export class GamePhysics {
       const firstJump = this.jumpCount === 0 && (this.isGrounded || this.groundGrace > 0);
       const secondJump = this.jumpCount === 1 && !this.isGrounded;
       if (firstJump || secondJump) {
-        before.vy = firstJump ? clamp(Math.max(0, before.vy) + 9.4, 9.4, 12) : 9.2;
+        // Add lift vertically while retaining the climb's upward momentum.
+        // Capping total speed here used to consume jump power on uphill waves.
+        // An early double jump must add lift instead of braking that ascent.
+        before.vy = firstJump
+          ? Math.max(0, before.vy) + 11.2
+          : Math.max(9.2, before.vy + 1.8);
         this.roadContact.beginJump(before, controls.jumpHeld);
         this.jumpCount = firstJump ? 1 : 2;
+        if (firstJump) this.runMissions.stats.jumps++;
+        else this.runMissions.stats.doubleJumps++;
         this.jumpSerial++;
         this.groundGrace = 0;
         this.jumpLock = 0.16;
@@ -709,6 +756,7 @@ export class GamePhysics {
     this.car.setAngvel(body.omega, true);
     if (body.y < roadHeight(body.x) - 5.5 || body.y < -8) this.crashed = true;
     if (this.generator.hasRoad(body.x) && body.y - roadHeight(body.x) < CAR_BODY_CLEARANCE && Math.abs(body.angle) > 1.65) {
+      this.runMissions.stats.roofHits = 1;
       this.crashed = true;
     }
     this.furthestX = Math.max(this.furthestX, body.x);
@@ -723,6 +771,8 @@ export class GamePhysics {
       // partial turns cancel when reversed, and each full turn pays once.
       this.airborneRotation += angleDelta(before.angle, body.angle);
       while (Math.abs(this.airborneRotation) >= Math.PI * 2) {
+        if (this.airborneRotation > 0) this.runMissions.stats.backflips++;
+        else this.runMissions.stats.forwardFlips++;
         this.flipsCompleted++;
         this.airborneFlips++;
         // Top up this jump to 5 × n² coins: 5, 20, 45, 80, ... .
@@ -743,6 +793,7 @@ export class GamePhysics {
   /** Hand the sensors over to Rapier once the run ends. The tire solver no
    * longer positions the wheels, and no driving or stabilization is applied. */
   private beginWreck(): void {
+    this.boxRewards.shieldRemaining = this.boxRewards.boostRemaining = 0;
     if (this.wrecked) return;
     this.wrecked = true;
     this.activeLoop = null;
@@ -832,6 +883,16 @@ export class GamePhysics {
     return this.hazardView;
   }
 
+  get randomBoxStates(): RandomBoxSpec[] {
+    if (this.distance < BOX_UNLOCK_DISTANCE) return [];
+    const boxes: RandomBoxSpec[] = [];
+    for (const chunk of this.chunks.values()) for (const box of chunk.spec.boxes) {
+      if (!this.boxRewards.opened.has(box.id)) boxes.push(box.airborne
+        ? { ...box, y: box.y + Math.sin(this.time * 1.5 + box.phase) * .045 } : box);
+    }
+    return boxes;
+  }
+
   snapshot(alpha: number): GameSnapshot {
     const pose = (index: number): BodyPose => ({
       x: lerp(this.previous[index].x, this.current[index].x, alpha),
@@ -873,9 +934,14 @@ export class GamePhysics {
       obstaclesDestroyed: this.obstaclesDestroyed, policeDestroyed: this.policeDestroyed,
       breakSerial: this.breakSerial, breakEvents: this.breakEvents,
       sparkSerial: this.sparkSerial, sparkEvents: this.sparkEvents,
-      runXp: this.loopCompletions * LOOP_XP + this.obstaclesDestroyed * OBSTACLE_XP + this.policeDestroyed * POLICE_XP,
+      runXp: this.loopCompletions * LOOP_XP + this.obstaclesDestroyed * OBSTACLE_XP + this.policeDestroyed * POLICE_XP + this.boxRewards.xp,
       health: this.damage.health, impactSerial: this.damage.impactSerial,
       invincibilityRemaining: this.damage.invincibilityRemaining,
+      shieldRemaining: this.boxRewards.shieldRemaining,
+      unlimitedBoostRemaining: this.boxRewards.boostRemaining,
+      boxCoins: this.boxRewards.coins, boxXp: this.boxRewards.xp,
+      boxRewardSerial: this.boxRewards.serial, boxRewardEvents: this.boxRewards.events,
+      missionStats: { ...this.runMissions.stats },
     };
   }
 

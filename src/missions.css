@@ -1,0 +1,85 @@
+.missions-dialog, .purchase-dialog { position: absolute; inset: 0; z-index: 22; display: grid; place-items: center; padding: 24px; background: #081424c9; backdrop-filter: blur(12px); }
+.purchase-dialog { z-index: 25; }
+.missions-dialog[hidden], .purchase-dialog[hidden], .mission-active-card[hidden], .mission-toast[hidden], .mission-empty[hidden], .purchase-before[hidden], .purchase-after[hidden], .purchase-error[hidden], #mission-pane-active[hidden], #mission-pane-history[hidden], #mission-pane-all[hidden] { display: none; }
+.missions-card, .purchase-card { width: min(930px,100%); max-height: calc(100dvh - 48px); overflow: auto; overscroll-behavior: contain; border: 1px solid #8eacbd66; border-radius: 20px; background: linear-gradient(145deg,#20374b,#101f30); padding: 26px; box-shadow: 0 24px 90px #0007; scrollbar-width: thin; }
+.missions-heading { display: flex; justify-content: space-between; align-items: center; gap: 15px; }
+.missions-heading h2 { margin: 8px 0 0; font-size: 28px; color: #f1faf3; }
+.missions-intro, .mission-rules { color: #b5cbd5; font-size: 12px; line-height: 1.9; }
+.mission-rules { margin: 15px 0 0; padding: 10px 13px; border-radius: 10px; background: #a6f4df08; }
+.mission-summary { display: flex; flex-wrap: wrap; gap: 8px; }
+.mission-summary strong { padding: 7px 10px; border-radius: 8px; background: #0d2233; color: #eacb86; font-size: 12px; font-variant-numeric: tabular-nums; }
+.mission-active-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.mission-active-card { padding: 16px; border: 1px solid #b6e9d74a; border-radius: 13px; background: #102536; min-width: 0; }
+.mission-scope { color: #9bdccf; font-size: 10px; }
+.mission-active-card h3 { color: #f0f7eb; font-size: 15px; line-height: 1.6; margin: 9px 0; }
+.mission-active-card p { color: #bad0d9; font-size: 12px; line-height: 1.9; min-height: 68px; margin: 0 0 14px; }
+.mission-progress { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px; font-size: 11px; }
+.mission-progress strong { direction: ltr; font-variant-numeric: tabular-nums; color: #e8fff4; }
+.mission-progress > span { color: #ffe3a1; }
+.mission-meter { height: 5px; margin: 10px 0; background: #7997a335; border-radius: 8px; overflow: hidden; }
+.mission-meter > span { display: block; width: 100%; height: 100%; transform-origin: left; background: linear-gradient(90deg,#64c7be,#b1f3cd); }
+.mission-active-card > small { color: #8eafbd; font-size: 10px; }
+.mission-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }
+.mission-list-item { border: 1px solid #728f9e40; border-radius: 10px; background: #0e2233; padding: 13px; }
+.mission-list-item > span { color: #93a8b8; font-size: 10px; }
+.mission-list-item.is-completed { border-color: #a6f4df60; }
+.mission-list-item.is-completed > span { color: #a6f4df; }
+.mission-list-item h3 { color: #e4eee8; font-size: 13px; line-height: 1.6; margin: 5px 0; }
+.mission-list-item p { color: #a7c0ce; font-size: 11px; line-height: 1.8; margin: 4px 0 9px; }
+.mission-list-item strong { color: #e9cb8a; font-size: 11px; }
+.mission-empty { padding: 18px; color: #bcdad2; font-size: 13px; line-height: 1.9; text-align: center; }
+.menu-missions-button { display: flex; align-items: center; gap: 11px; width: fit-content; max-width: 100%; border: 1px solid #8ac9b857; border-radius: 9px; background: #143346a1; color: #d0f7e7; padding: 9px 13px; margin: -5px 0 16px; font: inherit; font-size: 12px; cursor: pointer; }
+.menu-missions-button strong { color: #afc9ce; font-size: 10px; font-weight: 500; }
+.mission-tracker { position: absolute; z-index: 4; inset-inline-start: var(--hud-edge,40px); bottom: 96px; display: flex; flex-direction: column; align-items: flex-start; width: 210px; gap: 6px; padding: 10px 13px; border: 1px solid #a6f4df36; border-radius: 10px; background: #102b3dcc; color: #c5e9dc; font: inherit; cursor: pointer; text-align: start; }
+.mission-tracker > span { color: #9ebebf; font-size: 10px; }
+.mission-tracker strong { font-size: 11px; line-height: 1.5; }
+.mission-tracker small { color: #e4d09c; font-size: 10px; }
+.mission-toast { position: absolute; z-index: 5; left: 50%; bottom: 155px; transform: translateX(-50%); max-width: calc(100% - 36px); width: max-content; padding: 10px 18px; border: 1px solid #edc66f99; border-radius: 12px; background: #273c35ed; color: #fff0be; box-shadow: 0 0 25px #edc66f18; font-size: 13px; line-height: 1.7; font-weight: 750; text-align: center; pointer-events: none; }
+.purchase-card { width: min(490px,100%); }
+.purchase-card h2 { color: #f0faf5; margin: 9px 0 10px; font-size: 25px; }
+.purchase-card h3 { color: #cbf6e7; margin: 8px 0; font-size: 17px; }
+.purchase-preview { text-align: center; padding: 6px 12px; border-radius: 12px; background: #0b2233; }
+.purchase-preview svg { display: block; width: 100%; height: 105px; }
+#purchase-details, .purchase-before, .purchase-after { font-size: 12px; line-height: 1.8; color: #b4cad5; margin: 7px 0; white-space: pre-line; }
+.purchase-after { color: #c9f1df; }
+.purchase-costs { margin: 16px 0; padding-top: 10px; border-top: 1px solid #9cb6c240; }
+.purchase-costs > div { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; font-size: 12px; color: #adc3cc; }
+.purchase-costs dd { margin: 0; color: #ffe1a0; font-weight: 750; font-variant-numeric: tabular-nums; }
+.purchase-costs > div:last-child dd { color: #b4ebda; }
+.purchase-actions { display: flex; gap: 10px; }
+.purchase-actions button { flex: 1; min-height: 44px; padding: 8px 13px; border: 1px solid #8ca9b665; border-radius: 9px; background: #ffffff08; color: #c5d9df; font: inherit; font-size: 13px; cursor: pointer; }
+#purchase-confirm { background: #a6f4df; color: #142c3b; border-color: #a6f4df; font-weight: 800; }
+#purchase-confirm:disabled { background: #405c63; border-color: #6d8b95; color: #a6b7bf; cursor: default; }
+.purchase-error { color: #ffc0ab; font-size: 12px; line-height: 1.8; }
+html[lang=fa] .missions-card, html[lang=fa] .purchase-card, html[lang=fa] .mission-toast { direction: rtl; }
+@media(max-width:900px), (pointer:coarse) and (orientation:landscape) {
+  .mission-tracker { display: none; }
+  .missions-dialog, .purchase-dialog { padding: 12px; }
+  .missions-card, .purchase-card { padding: 16px; max-height: calc(100dvh - 24px); border-radius: 14px; }
+  .missions-heading h2 { font-size: 21px; margin: 3px 0; }
+  .missions-heading .eyebrow { display: none; }
+  .missions-intro, .mission-rules { font-size: 10px; line-height: 1.7; margin: 8px 0; }
+  .mission-summary strong { font-size: 10px; padding: 5px 8px; }
+  .mission-active-grid { gap: 8px; }
+  .mission-active-card { padding: 10px; }
+  .mission-active-card h3 { font-size: 12px; margin: 5px 0; }
+  .mission-active-card p { font-size: 10px; min-height: 46px; margin-bottom: 7px; line-height: 1.7; }
+  .mission-progress { font-size: 10px; }
+  .mission-toast { bottom: 125px; font-size: 11px; padding: 7px 12px; }
+  .menu-missions-button { padding: 6px 9px; margin: 0 0 10px; font-size: 10px; }
+  .menu-missions-button strong { font-size: 9px; }
+  #mission-tabs { margin: 10px 0; padding-bottom: 6px; }
+  #mission-tabs button { min-height: 30px; min-width: 80px; padding: 5px 10px; font-size: 10px; }
+}
+@media(max-height:580px) {
+  .purchase-card { padding: 14px 18px; }
+  .purchase-card .eyebrow, .purchase-preview { display: none; }
+  .purchase-card h2 { font-size: 21px; margin: 0 0 7px; }
+  .purchase-card h3 { font-size: 14px; margin: 5px 0; }
+  #purchase-details, .purchase-before, .purchase-after { font-size: 11px; margin: 4px 0; }
+  .purchase-costs { margin: 9px 0; padding-top: 5px; }
+  .purchase-costs > div { font-size: 11px; padding: 3px 0; }
+  .purchase-actions button { min-height: 36px; font-size: 12px; }
+}
+@media(max-width:560px) { .mission-active-grid, .mission-list { grid-template-columns: 1fr; } }
+@media(max-width:650px) and (orientation:portrait) { .missions-dialog, .purchase-dialog, .mission-toast { visibility: hidden; } }

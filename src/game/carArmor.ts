@@ -46,6 +46,8 @@ export class CarArmorVisual {
     for (const part of [...this.parts,...this.loose.map(part=>part.mesh)]) part.visible=false;
   }
 
+  setRoofLift(lift: number): void { this.parts[2].position.y = ARMOR_PARTS[2].center[1] + lift; }
+
   update(snapshot: ArmorSnapshot, delta: number, running = true, road?: { hasRoad(x:number):boolean }): void {
     const mask = snapshot.wrecked ? 0 : snapshot.armorMask;
     const reset = snapshot.distance < this.previousDistance-1 || snapshot.impactSerial < this.previousImpact || (this.wasWrecked && !snapshot.wrecked);
@@ -60,7 +62,7 @@ export class CarArmorVisual {
       this.parts[index].visible=Boolean(mask & (1<<index));
       const piece=this.loose[index];
       if (lost & (1<<index)) {
-        const [x,y]=ARMOR_PARTS[index].center;
+        const { x, y } = this.parts[index].position;
         const c=Math.cos(body.angle); const s=Math.sin(body.angle);
         piece.mesh.position.set(body.x+x*c-y*s,body.y+x*s+y*c,1.15+ARMOR_PARTS[index].z);
         piece.mesh.rotation.set(0,0,body.angle);
