@@ -177,6 +177,8 @@ test('car collision throws a jointed ragdoll without costing health', () => {
     assert.ok(moved?.hitAge > 0);
     assert.ok(moved.bodies.torso.translation().x > spec.x + 2);
     assert.equal(game.snapshot(1).health, 100);
+    assert.ok(game.snapshot(1).ragdollGroundEvents.length > 0,
+      'a thrown ragdoll landing should emit a ground effect');
   } finally { game.dispose(); }
 });
 
@@ -187,14 +189,43 @@ test('launched ragdoll parts collide with a floor and a solid obstacle', () => {
   world.createCollider(RAPIER.ColliderDesc.cuboid(.3, 5).setTranslation(4, 4));
   const actor = new Ragdoll(world, { id: 0, siteId: 0, x: 0, y: 0, outfit: 0 });
   try {
-    assert.equal(actor.launch(12), true);
-    assert.equal(actor.launch(12), false, 'one collision must not relaunch the ragdoll');
+    const sideImpact = { x: -2, y: 1, vx: 12, vy: 0, angle: 0 };
+    assert.equal(actor.launch(sideImpact), true);
+    assert.equal(actor.launch(sideImpact), false, 'one collision must not relaunch the ragdoll');
     for (let step = 0; step < 240; step++) { actor.beforeStep(FIXED_STEP); world.step(); }
     const positions = Object.values(actor.snapshot(1).parts);
     assert.ok(positions.every(part => part.x < 4.8), 'a limb passed through the obstacle');
     assert.ok(positions.every(part => part.y > -.6), 'a limb fell through the floor');
     assert.ok(positions.some(part => Math.abs(part.angle) > .2), 'the ragdoll never tumbled');
   } finally { actor.dispose(); world.free(); }
+});
+
+test('side impacts lift ragdolls while overhead hits slam them into the ground', () => {
+  const simulate = impact => {
+    const world = new RAPIER.World({ x: 0, y: -20 });
+    world.timestep = FIXED_STEP;
+    world.createCollider(RAPIER.ColliderDesc.cuboid(25, .25).setTranslation(0, -.25));
+    const actor = new Ragdoll(world, { id: 0, siteId: 0, x: 0, y: 0, outfit: 0 });
+    const surface = { hasRoad: () => true, height: () => 0 };
+    try {
+      actor.launch(impact);
+      const launchVy = actor.bodies.torso.linvel().y;
+      const impacts = [];
+      for (let step = 0; step < 240; step++) {
+        actor.beforeStep(FIXED_STEP);
+        world.step();
+        const ground = actor.groundImpact(surface);
+        if (ground) impacts.push(ground);
+      }
+      return { launchVy, impacts };
+    } finally { actor.dispose(); world.free(); }
+  };
+  const side = simulate({ x: -2, y: 1, vx: 20, vy: 0, angle: .1 });
+  const overhead = simulate({ x: 0, y: 3, vx: 20, vy: -8, angle: -.4 });
+  assert.ok(side.launchVy > 4, `side launch vy=${side.launchVy}`);
+  assert.ok(overhead.launchVy < -9, `overhead launch vy=${overhead.launchVy}`);
+  assert.ok(side.impacts.length > 0, 'the lifted ragdoll never landed');
+  assert.ok(overhead.impacts.some(event => event.hard), 'the overhead slam was not classified as hard');
 });
 
 test('obstacles have wider average spacing and added road contours remain smooth', () => {

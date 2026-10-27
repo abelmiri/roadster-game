@@ -15,7 +15,7 @@ import { CAR_UPGRADE_IDS, carUpgradeLevel, carUpgradeStats, type CarUpgrades } f
 import { RandomBoxRewards, type RandomBoxSpec, type BoxRewardEvent } from './randomBox';
 import { RunMissionTracker, type MissionStats } from './missionStats';
 import { carModel, type CarModelId } from './carModels';
-import { Ragdoll, type RagdollSnapshot } from './ragdoll';
+import { Ragdoll, type RagdollImpact, type RagdollGroundEvent, type RagdollSnapshot } from './ragdoll';
 
 export const FIXED_STEP = 1 / 120;
 export const START_SPEED = 60 / 3.6;
@@ -94,6 +94,8 @@ export interface GameSnapshot {
   boxRewardSerial: number;
   boxRewardEvents: readonly BoxRewardEvent[];
   ragdolls: readonly RagdollSnapshot[];
+  ragdollGroundSerial: number;
+  ragdollGroundEvents: readonly RagdollGroundEvent[];
   missionStats: MissionStats;
 }
 
@@ -132,6 +134,8 @@ export class GamePhysics {
   private readonly ragdollColliders = new Map<number, Ragdoll>();
   private readonly hitRagdolls = new Set<number>();
   ragdollHitSerial = 0;
+  private ragdollGroundSerial = 0;
+  private readonly ragdollGroundEvents: RagdollGroundEvent[] = [];
   private previous: [BodyPose, BodyPose, BodyPose];
   private current: [BodyPose, BodyPose, BodyPose];
   private time = 0;
@@ -403,12 +407,24 @@ export class GamePhysics {
     }
   }
 
-  private launchRagdoll(first: number, second: number, carSpeed: number): void {
+  private launchRagdoll(first: number, second: number, impact: RagdollImpact): void {
     const actor = this.carColliders.has(first) ? this.ragdollColliders.get(second)
       : this.carColliders.has(second) ? this.ragdollColliders.get(first) : undefined;
-    if (actor?.launch(carSpeed)) {
+    if (actor?.launch(impact)) {
       this.hitRagdolls.add(actor.spec.id);
       this.ragdollHitSerial++;
+    }
+  }
+
+  private collectRagdollGroundImpacts(): void {
+    for (const event of this.ragdollGroundEvents) event.age += FIXED_STEP;
+    while (this.ragdollGroundEvents.length && this.ragdollGroundEvents[0].age > 1.6) {
+      this.ragdollGroundEvents.shift();
+    }
+    const surface = { hasRoad: (x: number): boolean => this.generator.hasRoad(x), height: roadHeight };
+    for (const actor of this.ragdolls.values()) {
+      const impact = actor.groundImpact(surface);
+      if (impact) this.ragdollGroundEvents.push({ serial: ++this.ragdollGroundSerial, ...impact, age: 0 });
     }
   }
 
@@ -505,8 +521,12 @@ export class GamePhysics {
     this.updateHazards();
     this.world.step(this.events);
     this.events.drainCollisionEvents((first, second, started) => {
-      if (started) this.launchRagdoll(first, second, active.speed);
+      if (started) this.launchRagdoll(first, second, {
+        x: p.x, y: p.y, vx: active.speed * Math.cos(this.car.rotation()),
+        vy: active.speed * Math.sin(this.car.rotation()), angle: this.car.rotation(),
+      });
     });
+    this.collectRagdollGroundImpacts();
     this.car.setTranslation({ x: geometry.x + radius * Math.cos(theta), y: geometry.y + radius * Math.sin(theta) }, true);
     this.car.setRotation(angle, true);
     this.car.setLinvel({ x: active.speed * Math.cos(angle), y: active.speed * Math.sin(angle) }, true);
@@ -788,7 +808,7 @@ export class GamePhysics {
     this.world.step(this.events);
     this.events.drainCollisionEvents((first, second, started) => {
       if (!started) return;
-      this.launchRagdoll(first, second, body.vx);
+      this.launchRagdoll(first, second, body);
       const hazard = this.carColliders.has(first) ? this.hazardColliders.get(second)
         : this.carColliders.has(second) ? this.hazardColliders.get(first) : undefined;
       if (hazard && hazard.health > 0) {
@@ -797,6 +817,7 @@ export class GamePhysics {
         this.breakHazard(hazard, 'ram', body.vx);
       }
     });
+    this.collectRagdollGroundImpacts();
     this.car.setLinvel({ x: body.vx, y: body.vy }, true);
     this.car.setAngvel(body.omega, true);
     if (body.y < roadHeight(body.x) - 5.5 || body.y < -8) this.crashed = true;
@@ -896,7 +917,9 @@ export class GamePhysics {
     this.world.step(this.events);
     this.events.drainCollisionEvents((first, second, started) => {
       if (!started) return;
-      this.launchRagdoll(first, second, velocityBefore.x);
+      const carPosition = this.car.translation();
+      this.launchRagdoll(first, second, { ...carPosition, vx: velocityBefore.x,
+        vy: velocityBefore.y, angle: this.car.rotation() });
       const partHandle = this.carColliders.has(first) ? first : this.carColliders.has(second) ? second : undefined;
       if (partHandle === undefined) return;
       const other = partHandle === first ? second : first;
@@ -908,6 +931,7 @@ export class GamePhysics {
       this.emitSparks(hazard ? (p.x + hazard.x) * 0.5 : p.x, hazard ? hazard.y : p.y - 0.25,
         velocityBefore.x, velocityBefore.y);
     });
+    this.collectRagdollGroundImpacts();
     const p = this.car.translation();
     const v = this.car.linvel();
     this.weapon.step(FIXED_STEP, {}, { ...p, angle: this.car.rotation(), vx: v.x, vy: v.y }, [], () => {}, roadHeight);
@@ -989,6 +1013,8 @@ export class GamePhysics {
       boxCoins: this.boxRewards.coins, boxXp: this.boxRewards.xp,
       boxRewardSerial: this.boxRewards.serial, boxRewardEvents: this.boxRewards.events,
       ragdolls: Array.from(this.ragdolls.values(), actor => actor.snapshot(alpha)),
+      ragdollGroundSerial: this.ragdollGroundSerial,
+      ragdollGroundEvents: this.ragdollGroundEvents,
       missionStats: { ...this.runMissions.stats },
     };
   }

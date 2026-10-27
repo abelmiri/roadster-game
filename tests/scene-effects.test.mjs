@@ -8,9 +8,10 @@ import { Matrix4, Vector3, MeshLambertMaterial } from 'three';
 let CityBuildings, ObstacleDebris, CarBodyDamage, createRoadsterBody;
 let CarArmorVisual, carGarageIcon;
 let RagdollVisuals;
+let RagdollGroundEffects;
 before(async () => {
   const outdir = path.resolve('node_modules/.cache/roadster-scene-tests');
-  await build({ entryPoints: ['src/game/cityBuildings.ts', 'src/game/obstacleDebris.ts', 'src/game/carBodyDamage.ts', 'src/game/roadsterModel.ts', 'src/game/carArmor.ts', 'src/game/carGarageIcon.ts', 'src/game/ragdollVisuals.ts'], bundle: true,
+  await build({ entryPoints: ['src/game/cityBuildings.ts', 'src/game/obstacleDebris.ts', 'src/game/carBodyDamage.ts', 'src/game/roadsterModel.ts', 'src/game/carArmor.ts', 'src/game/carGarageIcon.ts', 'src/game/ragdollVisuals.ts', 'src/game/ragdollGroundEffects.ts'], bundle: true,
     platform: 'node', format: 'esm', outdir, outExtension: { '.js': '.mjs' }, external: ['three'] });
   ({ CityBuildings } = await import(pathToFileURL(path.join(outdir, 'cityBuildings.mjs')).href));
   ({ ObstacleDebris } = await import(pathToFileURL(path.join(outdir, 'obstacleDebris.mjs')).href));
@@ -19,6 +20,26 @@ before(async () => {
   ({ CarArmorVisual } = await import(pathToFileURL(path.join(outdir, 'carArmor.mjs')).href));
   ({ carGarageIcon } = await import(pathToFileURL(path.join(outdir, 'carGarageIcon.mjs')).href));
   ({ RagdollVisuals } = await import(pathToFileURL(path.join(outdir, 'ragdollVisuals.mjs')).href));
+  ({ RagdollGroundEffects } = await import(pathToFileURL(path.join(outdir, 'ragdollGroundEffects.mjs')).href));
+});
+
+test('ragdoll ground contacts kick up dust and hard landings scatter red droplets', () => {
+  const effects = new RagdollGroundEffects();
+  const soft = { serial: 1, x: 10, y: 0, speed: 5, hard: false, age: 0 };
+  const hard = { serial: 2, x: 12, y: 0, speed: 13, hard: true, age: 0 };
+  try {
+    effects.update([soft], 1, 0, false);
+    assert.ok(effects.dustCount > 0);
+    assert.equal(effects.dropCount, 0);
+    const frozen = effects.dust.instanceMatrix.version;
+    effects.update([soft], 1, .5, false);
+    assert.equal(effects.dust.instanceMatrix.version, frozen);
+    effects.update([soft, hard], 2, 0, false);
+    assert.ok(effects.dropCount > 0);
+    effects.update([], 0, 0, false);
+    assert.equal(effects.dustCount, 0);
+    assert.equal(effects.dropCount, 0);
+  } finally { effects.dispose(); }
 });
 
 test('ragdoll pieces follow physics poses and show a brief collision flash', () => {
