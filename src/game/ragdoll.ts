@@ -3,7 +3,10 @@ import type { Collider, RigidBody, World } from '@dimforge/rapier2d-compat';
 import type { BodyPose } from './physics';
 import type { RagdollSpec } from './track';
 
-export const RAGDOLL_PARTS = ['torso', 'head', 'leftArm', 'rightArm', 'leftLeg', 'rightLeg'] as const;
+export const RAGDOLL_PARTS = [
+  'torso', 'head', 'leftUpperArm', 'leftForearm', 'rightUpperArm', 'rightForearm',
+  'leftThigh', 'leftShin', 'rightThigh', 'rightShin',
+] as const;
 export type RagdollPartName = typeof RAGDOLL_PARTS[number];
 export interface RagdollSnapshot {
   id: number;
@@ -15,16 +18,30 @@ export interface RagdollSnapshot {
 export interface RagdollImpact { x: number; y: number; vx: number; vy: number; angle: number }
 export interface RagdollGroundEvent { serial: number; x: number; y: number; speed: number; hard: boolean; age: number }
 
-const partShapes: Record<RagdollPartName, { x: number; y: number; halfHeight: number; radius: number }> = {
-  torso: { x: 0, y: 1.15, halfHeight: .36, radius: .19 },
-  head: { x: 0, y: 1.93, halfHeight: 0, radius: .21 },
-  leftArm: { x: -.36, y: 1.25, halfHeight: .27, radius: .10 },
-  rightArm: { x: .36, y: 1.25, halfHeight: .27, radius: .10 },
-  leftLeg: { x: -.17, y: .42, halfHeight: .32, radius: .11 },
-  rightLeg: { x: .17, y: .42, halfHeight: .32, radius: .11 },
+const partShapes: Record<RagdollPartName, { halfHeight: number; radius: number }> = {
+  torso: { halfHeight: .34, radius: .19 },
+  head: { halfHeight: 0, radius: .21 },
+  leftUpperArm: { halfHeight: .14, radius: .09 },
+  leftForearm: { halfHeight: .13, radius: .085 },
+  rightUpperArm: { halfHeight: .14, radius: .09 },
+  rightForearm: { halfHeight: .13, radius: .085 },
+  leftThigh: { halfHeight: .13, radius: .105 },
+  leftShin: { halfHeight: .14, radius: .105 },
+  rightThigh: { halfHeight: .13, radius: .105 },
+  rightShin: { halfHeight: .14, radius: .105 },
 };
 
-/** A standing mannequin becomes six jointed, solid rigid bodies on impact. */
+const at = (pose: BodyPose, x: number, y: number): { x: number; y: number } => ({
+  x: pose.x + x * Math.cos(pose.angle) - y * Math.sin(pose.angle),
+  y: pose.y + x * Math.sin(pose.angle) + y * Math.cos(pose.angle),
+});
+const below = (point: { x: number; y: number }, angle: number, length: number): BodyPose => ({
+  x: point.x + Math.sin(angle) * length,
+  y: point.y - Math.cos(angle) * length,
+  angle,
+});
+
+/** A standing mannequin becomes ten jointed, solid rigid bodies on impact. */
 export class Ragdoll {
   readonly bodies: Record<RagdollPartName, RigidBody>;
   readonly colliders: Collider[] = [];
@@ -33,13 +50,17 @@ export class Ragdoll {
   private previous: Record<RagdollPartName, BodyPose>;
   private readonly downwardSpeed = {} as Record<RagdollPartName, number>;
   private groundImpactCooldown = 0;
+  private idleTime: number;
 
   constructor(private readonly world: World, readonly spec: RagdollSpec) {
+    this.idleTime = spec.siteId * .83 + spec.memberIndex * 1.17;
     const bodies = {} as Record<RagdollPartName, RigidBody>;
+    const standing = this.standingPose();
     for (const name of RAGDOLL_PARTS) {
       const part = partShapes[name];
+      const pose = standing[name];
       const body = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased()
-        .setTranslation(spec.x + part.x, spec.y + part.y).setCcdEnabled(true));
+        .setTranslation(pose.x, pose.y).setRotation(pose.angle).setCcdEnabled(true));
       const shape = part.halfHeight
         ? RAPIER.ColliderDesc.capsule(part.halfHeight, part.radius)
         : RAPIER.ColliderDesc.ball(part.radius);
@@ -48,16 +69,59 @@ export class Ragdoll {
       bodies[name] = body;
     }
     this.bodies = bodies;
-    const join = (name: RagdollPartName, torsoAnchor: { x: number; y: number }, partAnchor: { x: number; y: number }): void => {
-      const joint = world.createImpulseJoint(RAPIER.JointData.revolute(torsoAnchor, partAnchor), bodies.torso, bodies[name], true);
+    const join = (parent: RagdollPartName, child: RagdollPartName,
+      parentAnchor: { x: number; y: number }, childAnchor: { x: number; y: number }): void => {
+      const joint = world.createImpulseJoint(RAPIER.JointData.revolute(parentAnchor, childAnchor), bodies[parent], bodies[child], true);
       joint.setContactsEnabled(false);
     };
-    join('head', { x: 0, y: .57 }, { x: 0, y: -.21 });
-    join('leftArm', { x: -.25, y: .33 }, { x: .11, y: .23 });
-    join('rightArm', { x: .25, y: .33 }, { x: -.11, y: .23 });
-    join('leftLeg', { x: -.15, y: -.45 }, { x: .02, y: .28 });
-    join('rightLeg', { x: .15, y: -.45 }, { x: -.02, y: .28 });
+    join('torso', 'head', { x: 0, y: .53 }, { x: 0, y: -.21 });
+    for (const side of ['left', 'right'] as const) {
+      const direction = side === 'left' ? -1 : 1;
+      const upper = `${side}UpperArm` as RagdollPartName;
+      const forearm = `${side}Forearm` as RagdollPartName;
+      const thigh = `${side}Thigh` as RagdollPartName;
+      const shin = `${side}Shin` as RagdollPartName;
+      join('torso', upper, { x: direction * .24, y: .30 }, { x: 0, y: .17 });
+      join(upper, forearm, { x: 0, y: -.17 }, { x: 0, y: .16 });
+      join('torso', thigh, { x: direction * .15, y: -.34 }, { x: 0, y: .17 });
+      join(thigh, shin, { x: 0, y: -.17 }, { x: 0, y: .17 });
+    }
     this.previous = this.poses();
+  }
+
+  private standingPose(): Record<RagdollPartName, BodyPose> {
+    const { x, y, id, siteId, memberIndex, groupSize } = this.spec;
+    const middle = (groupSize - 1) / 2;
+    const toward = groupSize === 1 ? (id % 2 ? 1 : -1)
+      : memberIndex < middle ? 1 : memberIndex > middle ? -1 : siteId % 2 ? 1 : -1;
+    const sway = Math.sin(this.idleTime * .85 + memberIndex * .37);
+    const angle = toward * .045 + sway * .025 + (id % 3 - 1) * .012;
+    const torso: BodyPose = { x: x + toward * .02 + sway * .016,
+      y: y + 1.12 + Math.sin(this.idleTime * 1.1) * .006, angle };
+    const neck = at(torso, 0, .53);
+    const headAngle = angle + toward * .06 + Math.sin(this.idleTime * .68) * .025;
+    const result = { torso, head: { x: neck.x - Math.sin(headAngle) * .21,
+      y: neck.y + Math.cos(headAngle) * .21, angle: headAngle } } as Record<RagdollPartName, BodyPose>;
+    const gesturing = groupSize > 1 && (siteId + memberIndex) % 2 === 0;
+    for (const side of ['left', 'right'] as const) {
+      const direction = side === 'left' ? -1 : 1;
+      const towardNeighbor = gesturing && direction === toward;
+      const upperAngle = towardNeighbor ? direction * (.72 + .05 * sway)
+        : angle + direction * (.18 + .025 * sway);
+      const forearmAngle = towardNeighbor ? direction * (1.55 + .10 * sway)
+        : angle + direction * (.26 + .07 * Math.sin(this.idleTime + direction));
+      const upper = below(at(torso, direction * .24, .30), upperAngle, .17);
+      const forearm = below(at(upper, 0, -.17), forearmAngle, .16);
+      const thighAngle = angle + direction * (.095 + memberIndex * .012);
+      const shinAngle = angle + direction * .045 - thighAngle * .22;
+      const thigh = below(at(torso, direction * .15, -.34), thighAngle, .17);
+      const shin = below(at(thigh, 0, -.17), shinAngle, .17);
+      result[`${side}UpperArm`] = upper;
+      result[`${side}Forearm`] = forearm;
+      result[`${side}Thigh`] = thigh;
+      result[`${side}Shin`] = shin;
+    }
+    return result;
   }
 
   private poses(): Record<RagdollPartName, BodyPose> {
@@ -74,6 +138,13 @@ export class Ragdoll {
     if (this.hit) {
       this.hitAge += dt;
       this.groundImpactCooldown = Math.max(0, this.groundImpactCooldown - dt);
+    } else {
+      this.idleTime += dt;
+      const standing = this.standingPose();
+      for (const name of RAGDOLL_PARTS) {
+        this.bodies[name].setNextKinematicTranslation(standing[name]);
+        this.bodies[name].setNextKinematicRotation(standing[name].angle);
+      }
     }
     for (const name of RAGDOLL_PARTS) this.downwardSpeed[name] = -this.bodies[name].linvel().y;
   }

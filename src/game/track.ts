@@ -29,7 +29,10 @@ export interface TrackChunk {
 
 export interface LoopSpec { id: number; entryX: number; radius: number }
 const loops: LoopSpec[] = [];
-export interface RagdollSpec { id: number; siteId: number; x: number; y: number; outfit: number }
+export interface RagdollSpec {
+  id: number; siteId: number; memberIndex: number; groupSize: number;
+  x: number; y: number; outfit: number;
+}
 export const RAGDOLL_MIN_SPACING = 300;
 export const RAGDOLL_MAX_SPACING = 500;
 export const RAGDOLL_OUTFIT_COUNT = 4;
@@ -282,9 +285,9 @@ function ensureRagdolls(end: number): void {
       if (placed) break;
     }
     ragdollSites.push(center);
-    for (const x of memberXs(center, size)) {
+    for (const [memberIndex, x] of memberXs(center, size).entries()) {
       const id = ragdollSpawns.length;
-      ragdollSpawns.push({ id, siteId, x, y: roadHeight(x),
+      ragdollSpawns.push({ id, siteId, memberIndex, groupSize: size, x, y: roadHeight(x),
         outfit: Math.floor(hash(id + 6291) * RAGDOLL_OUTFIT_COUNT) });
     }
     ragdollPlacementTrack.trim(Math.floor(center / CHUNK_LENGTH) - 5);

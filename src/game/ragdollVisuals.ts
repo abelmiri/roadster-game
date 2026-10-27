@@ -12,14 +12,17 @@ interface RagdollView {
 export class RagdollVisuals {
   readonly group = new THREE.Group();
   private readonly views = new Map<number, RagdollView>();
-  private readonly torso = new THREE.CapsuleGeometry(.19, .72, 5, 10);
+  private readonly torso = new THREE.CapsuleGeometry(.19, .68, 5, 10);
   private readonly head = new THREE.SphereGeometry(.21, 12, 8);
-  private readonly arm = new THREE.CapsuleGeometry(.10, .54, 5, 8);
-  private readonly leg = new THREE.CapsuleGeometry(.11, .64, 5, 8);
+  private readonly upperArm = new THREE.CapsuleGeometry(.09, .28, 5, 8);
+  private readonly forearm = new THREE.CapsuleGeometry(.085, .26, 5, 8);
+  private readonly thigh = new THREE.CapsuleGeometry(.105, .26, 5, 8);
+  private readonly shin = new THREE.CapsuleGeometry(.105, .28, 5, 8);
   private readonly shirts = ['#e1aa62', '#4f9fc1', '#b45c76', '#8fb65a']
     .map(color => new THREE.MeshStandardMaterial({ color, roughness: .86 }));
   private readonly skin = new THREE.MeshStandardMaterial({ color: '#f3c9a8', roughness: .9 });
   private readonly pants = new THREE.MeshStandardMaterial({ color: '#526a85', roughness: .93 });
+  private readonly lowerPants = new THREE.MeshStandardMaterial({ color: '#40566f', roughness: .93 });
 
   private create(id: number, outfit: number): RagdollView {
     const group = new THREE.Group();
@@ -27,9 +30,11 @@ export class RagdollVisuals {
     const parts = {} as Record<RagdollPartName, THREE.Mesh>;
     for (const name of RAGDOLL_PARTS) {
       const geometry = name === 'torso' ? this.torso : name === 'head' ? this.head
-        : name.endsWith('Arm') ? this.arm : this.leg;
-      const material = name === 'torso' ? this.shirts[outfit % RAGDOLL_OUTFIT_COUNT]
-        : name.endsWith('Leg') ? this.pants : this.skin;
+        : name.endsWith('UpperArm') ? this.upperArm : name.endsWith('Forearm') ? this.forearm
+          : name.endsWith('Thigh') ? this.thigh : this.shin;
+      const material = name === 'torso' || name.endsWith('UpperArm')
+        ? this.shirts[outfit % RAGDOLL_OUTFIT_COUNT]
+        : name.endsWith('Thigh') ? this.pants : name.endsWith('Shin') ? this.lowerPants : this.skin;
       const mesh = new THREE.Mesh(geometry, material);
       mesh.name = name;
       mesh.position.z = 1.22;
@@ -78,8 +83,8 @@ export class RagdollVisuals {
 
   dispose(): void {
     this.update([]);
-    for (const geometry of [this.torso, this.head, this.arm, this.leg]) geometry.dispose();
-    for (const material of [...this.shirts, this.skin, this.pants]) material.dispose();
+    for (const geometry of [this.torso, this.head, this.upperArm, this.forearm, this.thigh, this.shin]) geometry.dispose();
+    for (const material of [...this.shirts, this.skin, this.pants, this.lowerPants]) material.dispose();
     this.group.removeFromParent();
   }
 }

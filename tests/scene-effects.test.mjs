@@ -44,13 +44,22 @@ test('ragdoll ground contacts kick up dust and hard landings scatter red droplet
 
 test('ragdoll pieces follow physics poses and show a brief collision flash', () => {
   const visuals = new RagdollVisuals();
-  const names = ['torso', 'head', 'leftArm', 'rightArm', 'leftLeg', 'rightLeg'];
+  const names = ['torso', 'head', 'leftUpperArm', 'leftForearm', 'rightUpperArm', 'rightForearm',
+    'leftThigh', 'leftShin', 'rightThigh', 'rightShin'];
   const parts = Object.fromEntries(names.map((name, index) => [name, { x: 30 + index, y: 2 + index, angle: index * .1 }]));
   try {
     visuals.update([{ id: 3, outfit: 0, hit: false, hitAge: 0, parts }]);
     const group = visuals.group.getObjectByName('ragdoll-3');
     assert.ok(group);
     assert.equal(group.getObjectByName('head').position.x, 31);
+    assert.notEqual(group.getObjectByName('leftUpperArm').geometry,
+      group.getObjectByName('leftForearm').geometry);
+    assert.notEqual(group.getObjectByName('leftThigh').geometry,
+      group.getObjectByName('leftShin').geometry);
+    assert.equal(group.getObjectByName('leftUpperArm').material,
+      group.getObjectByName('torso').material);
+    assert.equal(group.getObjectByName('leftForearm').material,
+      group.getObjectByName('head').material);
     assert.equal(group.children.at(-1).visible, false);
     visuals.update([{ id: 3, outfit: 0, hit: true, hitAge: .1, parts }]);
     assert.equal(group.children.at(-1).visible, true);
@@ -63,7 +72,8 @@ test('ragdoll pieces follow physics poses and show a brief collision flash', () 
 
 test('ragdoll outfits render with four distinct shirt colors', () => {
   const visuals = new RagdollVisuals();
-  const parts = Object.fromEntries(['torso', 'head', 'leftArm', 'rightArm', 'leftLeg', 'rightLeg']
+  const parts = Object.fromEntries(['torso', 'head', 'leftUpperArm', 'leftForearm', 'rightUpperArm', 'rightForearm',
+    'leftThigh', 'leftShin', 'rightThigh', 'rightShin']
     .map(name => [name, { x: 0, y: 1, angle: 0 }]));
   try {
     visuals.update([0, 1, 2, 3].map(outfit => ({ id: outfit, outfit, hit: false, hitAge: 0, parts })));

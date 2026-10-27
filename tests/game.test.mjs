@@ -126,6 +126,7 @@ test('ragdoll spawns vary within 300–500 meters and stay on clear road', () =>
   const groupSizes = new Set();
   const outfits = new Set();
   for (const members of sites.values()) {
+    assert.ok(members.every((member, index) => member.memberIndex === index && member.groupSize === members.length));
     const center = (members[0].x + members.at(-1).x) / 2;
     const spacing = center - previous;
     assert.ok(spacing >= 300 && spacing <= 500, `site ${members[0].siteId}: ${spacing}m spacing`);
@@ -172,7 +173,9 @@ test('car collision throws a jointed ragdoll without costing health', () => {
     assert.equal(game.snapshot(1).impactSerial, 0);
     assert.ok(actor.bodies.torso.linvel().x > 5, 'the collision did not throw the ragdoll');
     assert.equal(game.snapshot(1).ragdolls[0].parts.head.x, actor.bodies.head.translation().x);
-    for (let step = 0; step < 90 && !game.crashed; step++) { disableHazards(); game.step(idle); }
+    for (let step = 0; step < 180 && !game.crashed && !game.snapshot(1).ragdollGroundEvents.length; step++) {
+      disableHazards(); game.step(idle);
+    }
     const moved = game.ragdolls.get(spec.id);
     assert.ok(moved?.hitAge > 0);
     assert.ok(moved.bodies.torso.translation().x > spec.x + 2);
@@ -182,12 +185,51 @@ test('car collision throws a jointed ragdoll without costing health', () => {
   } finally { game.dispose(); }
 });
 
+test('grouped ragdolls keep distinct, gently animated standing poses with joined elbows and knees', () => {
+  const spawns = ragdollsBetween(0, 3000);
+  const spec = spawns.find(person => person.groupSize > 1);
+  assert.ok(spec);
+  const members = spawns.filter(person => person.siteId === spec.siteId);
+  const world = new RAPIER.World({ x: 0, y: -20 });
+  world.timestep = FIXED_STEP;
+  const actors = members.map(person => new Ragdoll(world, person));
+  const jointPoint = (pose, x, y) => ({ x: pose.x + x * Math.cos(pose.angle) - y * Math.sin(pose.angle),
+    y: pose.y + x * Math.sin(pose.angle) + y * Math.cos(pose.angle) });
+  try {
+    const first = actors.map(actor => actor.snapshot(1));
+    const armAngles = first.map(state => state.parts[`${state.id === members[0].id ? 'right' : 'left'}UpperArm`].angle);
+    assert.ok(new Set(armAngles.map(angle => angle.toFixed(3))).size > 1);
+    for (let step = 0; step < 120; step++) {
+      for (const actor of actors) actor.beforeStep(FIXED_STEP);
+      world.step();
+    }
+    let movedHeads = 0;
+    for (const [index, actor] of actors.entries()) {
+      const state = actor.snapshot(1);
+      assert.equal(state.hit, false);
+      assert.ok(Math.abs(state.parts.torso.x - members[index].x) < .1);
+      if (Math.abs(state.parts.head.angle - first[index].parts.head.angle) > .003) movedHeads++;
+      for (const side of ['left', 'right']) {
+        for (const [upper, lower, span] of [['UpperArm', 'Forearm', .17], ['Thigh', 'Shin', .17]]) {
+          const a = jointPoint(state.parts[`${side}${upper}`], 0, -span);
+          const b = jointPoint(state.parts[`${side}${lower}`], 0, upper === 'UpperArm' ? .16 : .17);
+          assert.ok(Math.hypot(a.x - b.x, a.y - b.y) < .02, `${side} ${upper}/${lower} standing joint is disconnected`);
+        }
+      }
+    }
+    assert.ok(movedHeads > 0, 'the group stayed completely rigid while idle');
+  } finally {
+    for (const actor of actors) actor.dispose();
+    world.free();
+  }
+});
+
 test('launched ragdoll parts collide with a floor and a solid obstacle', () => {
   const world = new RAPIER.World({ x: 0, y: -20 });
   world.timestep = FIXED_STEP;
   world.createCollider(RAPIER.ColliderDesc.cuboid(20, .25).setTranslation(0, -.25));
   world.createCollider(RAPIER.ColliderDesc.cuboid(.3, 5).setTranslation(4, 4));
-  const actor = new Ragdoll(world, { id: 0, siteId: 0, x: 0, y: 0, outfit: 0 });
+  const actor = new Ragdoll(world, { id: 0, siteId: 0, memberIndex: 0, groupSize: 1, x: 0, y: 0, outfit: 0 });
   try {
     const sideImpact = { x: -2, y: 1, vx: 12, vy: 0, angle: 0 };
     assert.equal(actor.launch(sideImpact), true);
@@ -197,6 +239,14 @@ test('launched ragdoll parts collide with a floor and a solid obstacle', () => {
     assert.ok(positions.every(part => part.x < 4.8), 'a limb passed through the obstacle');
     assert.ok(positions.every(part => part.y > -.6), 'a limb fell through the floor');
     assert.ok(positions.some(part => Math.abs(part.angle) > .2), 'the ragdoll never tumbled');
+    assert.equal(positions.length, 10, 'arms and legs should each contain two physical segments');
+    for (const side of ['left', 'right']) {
+      for (const [upper, lower] of [['UpperArm', 'Forearm'], ['Thigh', 'Shin']]) {
+        const a = actor.bodies[`${side}${upper}`].translation();
+        const b = actor.bodies[`${side}${lower}`].translation();
+        assert.ok(Math.hypot(a.x - b.x, a.y - b.y) < .75, `${side} ${upper}/${lower} separated`);
+      }
+    }
   } finally { actor.dispose(); world.free(); }
 });
 
@@ -205,7 +255,7 @@ test('side impacts lift ragdolls while overhead hits slam them into the ground',
     const world = new RAPIER.World({ x: 0, y: -20 });
     world.timestep = FIXED_STEP;
     world.createCollider(RAPIER.ColliderDesc.cuboid(25, .25).setTranslation(0, -.25));
-    const actor = new Ragdoll(world, { id: 0, siteId: 0, x: 0, y: 0, outfit: 0 });
+    const actor = new Ragdoll(world, { id: 0, siteId: 0, memberIndex: 0, groupSize: 1, x: 0, y: 0, outfit: 0 });
     const surface = { hasRoad: () => true, height: () => 0 };
     try {
       actor.launch(impact);
