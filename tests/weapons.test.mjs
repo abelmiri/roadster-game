@@ -74,6 +74,20 @@ test('ammo is finite, cadence is fixed-step, and switching never refills a weapo
     assert.ok(weapon.snapshot().projectiles.length<=64);
   }
 });
+test('an ammo pickup refills the selected weapon to its upgraded capacity only',()=>{
+  const weapon=new VehicleWeapon('machine-gun');
+  weapon.setUpgradeLevel('twin-gun',2);
+  advance(weapon,.5,{fire:true});
+  const machineAmmo=weapon.ammoFor('machine-gun');
+  assert.equal(weapon.equip('twin-gun',200),true);
+  advance(weapon,.5,{fire:true});
+  const missing=weapon.snapshot().capacity-weapon.snapshot().ammo;
+  assert.ok(missing>0);
+  assert.equal(weapon.refillActive(),missing);
+  assert.equal(weapon.snapshot().ammo,weapon.snapshot().capacity);
+  assert.equal(weapon.ammoFor('machine-gun'),machineAmmo);
+  assert.equal(weapon.refillActive(),0);
+});
 test('swept bullets hit small targets between frames, and front/back fire damages only its path',()=>{
   for(const direction of [1,-1]){
     const weapon=new VehicleWeapon();

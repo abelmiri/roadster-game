@@ -7,6 +7,8 @@ import { build } from 'esbuild';
 
 let GamePhysics;
 let FIXED_STEP;
+let START_SPEED;
+let cruiseSpeedForDistance;
 let TrackGenerator;
 let roadHeight;
 let roadSlope;
@@ -37,7 +39,7 @@ before(async () => {
     external: ['@dimforge/rapier2d-compat'],
   });
   await RAPIER.init();
-  ({ GamePhysics, FIXED_STEP } = await import(pathToFileURL(path.join(outdir, 'physics.mjs')).href));
+  ({ GamePhysics, FIXED_STEP, START_SPEED, cruiseSpeedForDistance } = await import(pathToFileURL(path.join(outdir, 'physics.mjs')).href));
   ({ TrackGenerator, roadHeight, roadSlope, loopsBetween, loopGeometry, rampsBetween, RAMP_UNLOCK_DISTANCE,
     RAMP_MIN_SPACING, RAMP_MAX_SPACING, RAMP_APPROACH, RAMP_LANDING } = await import(pathToFileURL(path.join(outdir, 'track.mjs')).href));
   ({ CAR_WHEEL_RADIUS, CAR_WHEEL_OFFSET, CAR_AXLE_Y, CAR_BODY_CLEARANCE, CAR_ARCH_RADIUS, sprungBodyPose } =
@@ -45,6 +47,14 @@ before(async () => {
 });
 
 const idle = { jumpPressed: false, jumpHeld: false, suction: false, boost: false };
+
+test('cruise speed rises smoothly by 10 km/h every 500 meters', () => {
+  for (const [distance, kilometersPerHour] of [[0, 60], [250, 65], [500, 70], [750, 75], [1000, 80], [2000, 100]]) {
+    assert.ok(Math.abs(cruiseSpeedForDistance(distance) * 3.6 - kilometersPerHour) < 1e-9);
+  }
+  assert.equal(cruiseSpeedForDistance(-100), START_SPEED);
+  assert.ok(cruiseSpeedForDistance(501) > cruiseSpeedForDistance(500), 'speed must not jump at a milestone');
+});
 
 function stepFor(game, seconds, controls = idle) {
   for (let i = 0; i < Math.round(seconds / FIXED_STEP) && !game.crashed; i++) game.step(controls);
@@ -97,6 +107,35 @@ test('track chunks are deterministic, continuous, and leave a run-up to each gap
       assert.equal(hazard.y, roadHeight(hazard.x));
     }
   }
+});
+
+test('obstacles have wider average spacing and added road contours remain smooth', () => {
+  const track = new TrackGenerator();
+  const hazards = Array.from({ length: 1000 }, (_, index) => track.chunk(index).hazards).flat();
+  const averageSpacing = (hazards.at(-1).x - hazards[0].x) / (hazards.length - 1);
+  assert.ok(averageSpacing >= 88 && averageSpacing <= 93, `average obstacle spacing=${averageSpacing}`);
+  const oldHeight = x => 1.15 + .72 * Math.sin(x * .105) + .92 * Math.sin(x * .30);
+  assert.ok(Math.abs(roadHeight(650) - oldHeight(650)) > .25, 'later road needs more relief');
+  for (const x of [450, 500, 600, 650]) {
+    const epsilon = .0001;
+    const measuredSlope = (roadHeight(x + epsilon) - roadHeight(x - epsilon)) / (2 * epsilon);
+    assert.ok(Math.abs(measuredSlope - roadSlope(x)) < .001, `road slope is discontinuous at ${x}`);
+  }
+});
+
+test('broad low-slope road sections blend smoothly into the rolling terrain', () => {
+  for (const center of [760, 1060, 1360, 1660]) {
+    for (let x = center - 25; x <= center + 25; x += 5) {
+      assert.ok(Math.abs(roadSlope(x)) < .013, `flat section at ${x} is too steep`);
+    }
+    for (const x of [center - 45, center - 29, center + 29, center + 45]) {
+      const epsilon = .0001;
+      const measuredSlope = (roadHeight(x + epsilon) - roadHeight(x - epsilon)) / (2 * epsilon);
+      assert.ok(Math.abs(measuredSlope - roadSlope(x)) < .001, `road join is not smooth at ${x}`);
+    }
+  }
+  assert.ok(Array.from({ length: 81 }, (_, index) => Math.abs(roadSlope(820 + index))).some(slope => slope > .15),
+    'rolling hills should remain between flatter sections');
 });
 
 test('automatic driving follows ordinary contours without bouncing or reversing', () => {
@@ -381,7 +420,8 @@ test('late-speed jump landings cannot catapult or reverse the car', () => {
       disableHazards();
       const state = game.snapshot(1);
       // A real normal impulse can remove forward speed on an uphill landing.
-      assert.ok(state.speed >= 8 && state.speed <= 23, `late speed=${state.speed}`);
+      assert.ok(state.speed >= 8 && state.speed <= cruiseSpeedForDistance(game.distance) + 1,
+        `late speed=${state.speed}`);
       assert.ok(state.speed - previousSpeed < 1.5 && previousSpeed - state.speed < previousSpeed * 0.35,
         `late landing speed changed from ${previousSpeed} to ${state.speed}`);
       if (waitingForLanding && !state.grounded) airborne = true;
@@ -908,12 +948,12 @@ test('holding suction completes full loops at early and late speeds, awards once
       assert.equal(game.snapshot(1).frontJetActive, false);
       assert.equal(game.snapshot(1).rearJetActive, false);
       assert.equal(game.snapshot(1).runXp, 25);
-      stepFor(game, .7, { ...idle, suction: true });
+      stepFor(game, 1.2, { ...idle, suction: true });
       assert.equal(game.crashed, false);
       assert.equal(game.snapshot(1).loop, null);
       assert.equal(game.snapshot(1).runXp, 25);
       assert.ok(game.snapshot(1).car.x > spec.entryX + 5);
-      assert.equal(game.snapshot(1).grounded, true);
+      assert.equal(game.snapshot(1).grounded, true, `loop ${index} did not settle after exit`);
     } finally { game.dispose(); }
   }
 });
@@ -990,7 +1030,9 @@ test('releasing suction near loop exits lands safely instead of falling through 
                 assert.ok(wheel.y - roadHeight(wheel.x) >= CAR_WHEEL_RADIUS - .025,
                   `tire tunneled through the exit road: ${label}`);
               }
-              assert.ok(after.speed >= 6 - .0001 && after.speed <= 28, `bad exit velocity=${after.speed}: ${label}`);
+              const speedLimit = cruiseSpeedForDistance(game.distance) + (boosted ? 9 : 0) + 2;
+              assert.ok(after.speed >= 6 - .0001 && after.speed <= speedLimit,
+                `bad exit velocity=${after.speed}: ${label}`);
               assert.ok(Math.abs(after.car.angle) < 1.4, `exit retained full-turn rotation: ${label}`);
             }
             // The ordinary road can form another crest after the tangent

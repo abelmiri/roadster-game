@@ -137,6 +137,12 @@ export class VehicleWeapon {
     return true;
   }
   ammoFor(id: WeaponId): number { return this.ammunition.get(id) ?? 0; }
+  refillActive(): number {
+    const capacity = weaponSpec(this.id, this.upgrades.get(this.id) ?? 0).ammo;
+    const added = capacity - this.ammoFor(this.id);
+    this.ammunition.set(this.id, capacity);
+    return added;
+  }
   get destructionSerial(): number { return this.destroySerial; }
   get activeId(): WeaponId { return this.id; }
   get shotsFired(): number { return this.shotSerial; }

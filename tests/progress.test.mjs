@@ -219,28 +219,32 @@ test('invalid combat counters are ignored independently of valid rewards', () =>
   assert.equal(progress.total,55);
 });
 
-test('all six distance goals award their exact XP once, persist, and contribute to run XP and levels', () => {
+test('all distance goals through 50 km award multiplied XP once, persist, and contribute to levels', () => {
   const values = new Map();
   const storage = {getItem:key=>values.get(key), setItem:(key,value)=>values.set(key,value)};
   const progress = new ExperienceProgress(storage);
   let total = 0;
-  for(const [distance,xp] of [[1500,150],[3000,300],[4500,600],[6000,1000],[7500,1500],[10000,2000]]) {
-    assert.equal(progress.collect(0,0,0,distance-.01), 0);
-    assert.equal(progress.collect(0,0,0,distance), xp);
-    assert.equal(progress.lastRewardKind, 'distance');
-    total += xp;
-    assert.equal(progress.runXp, total);
-    assert.equal(progress.total, total);
-    assert.equal(values.get('roadster-xp'), String(total));
-    assert.equal(progress.collect(0,0,0,distance), 0);
-    assert.equal(progress.collect(0,0,0,distance-1), 0);
+  for(let interval=0;interval<5;interval++) {
+    for(const [distance,xp] of [[1500,150],[3000,300],[4500,600],[6000,1000],[7500,1500],[10000,2000]]) {
+      const goal=interval*10000+distance;
+      const reward=xp*(interval+1);
+      assert.equal(progress.collect(0,0,0,goal-.01), 0);
+      assert.equal(progress.collect(0,0,0,goal), reward);
+      assert.equal(progress.lastRewardKind, 'distance');
+      total += reward;
+      assert.equal(progress.runXp, total);
+      assert.equal(progress.total, total);
+      assert.equal(values.get('roadster-xp'), String(total));
+      assert.equal(progress.collect(0,0,0,goal), 0);
+      assert.equal(progress.collect(0,0,0,goal-1), 0);
+    }
   }
-  assert.equal(progress.total, 5550);
-  assert.equal(progress.level, 56);
+  assert.equal(progress.total, 83250);
+  assert.equal(progress.level, 833);
   assert.equal(progress.levelProgress, 50);
-  assert.equal(progress.collect(0,0,0,20000), 0);
+  assert.equal(progress.collect(0,0,0,60000), 0);
   const restored = new ExperienceProgress(storage);
-  assert.equal(restored.total, 5550);
+  assert.equal(restored.total, 83250);
   assert.equal(restored.runXp, 0);
 });
 

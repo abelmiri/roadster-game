@@ -54,6 +54,33 @@ test('four armor plates absorb one accepted hit each before the hull takes damag
   assert.equal(new VehicleDamage(4).armorMask,15,'a new run restores all purchased plates');
 });
 
+test('a health pickup restores one 25-point unit without exceeding hull or armor capacity', () => {
+  const damage = new VehicleDamage(2);
+  damage.hit(); damage.step(1.5);
+  assert.equal(damage.health, 125);
+  assert.equal(damage.restoreUnit(), 25);
+  assert.equal(damage.armorMask, 3);
+  assert.equal(damage.health, 150);
+  assert.equal(damage.restoreUnit(), 0);
+
+  damage.hit(); damage.step(1.5);
+  damage.hit(); damage.step(1.5);
+  damage.hit(); damage.step(1.5);
+  assert.equal(damage.hullHealth, 75);
+  assert.equal(damage.health, 75);
+  assert.equal(damage.restoreUnit(), 25);
+  assert.equal(damage.hullHealth, 100);
+  assert.equal(damage.restoreUnit(), 25);
+  assert.equal(damage.health, 125);
+  assert.equal(damage.restoreUnit(), 25);
+  assert.equal(damage.health, damage.maxHealth);
+  assert.equal(damage.impactSerial, 4, 'repair is not another collision');
+
+  const wreck = new VehicleDamage();
+  for (let i = 0; i < 4; i++) { wreck.hit(); wreck.step(1.5); }
+  assert.equal(wreck.restoreUnit(), 0, 'a destroyed car cannot be revived by a late pickup');
+});
+
 test('new armor preserves damaged hull health, cannot restore lost plates, and protects the impacted rear', () => {
   const damage=new VehicleDamage(); damage.hullHealth=50;
   damage.upgradeArmor(1);

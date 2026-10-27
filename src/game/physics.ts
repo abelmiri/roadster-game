@@ -18,8 +18,13 @@ import { carModel, type CarModelId } from './carModels';
 
 export const FIXED_STEP = 1 / 120;
 export const START_SPEED = 60 / 3.6;
+export const SPEED_GAIN_PER_500M = 10 / 3.6;
 export const JUMP_THRUST_DURATION = 0.19;
 export const RAMP_BOOST_SPEED = 7;
+
+export function cruiseSpeedForDistance(distance: number): number {
+  return START_SPEED + Math.max(0, distance) / 500 * SPEED_GAIN_PER_500M;
+}
 
 export interface Controls {
   jumpPressed: boolean;
@@ -401,11 +406,13 @@ export class GamePhysics {
     const stats = this.carStats;
     this.rampBoostSpeed = Math.max(0, this.rampBoostSpeed - 5 * FIXED_STEP);
     this.rampBoostTime = Math.max(0, this.rampBoostTime - FIXED_STEP);
-    const target = Math.max(this.rampBoostSpeed, START_SPEED + Math.min(18 - START_SPEED, Math.max(0, this.distance) / 160) + (this.boostOn ? 9 * stats.boostPower : 0));
+    const cruiseSpeed = cruiseSpeedForDistance(this.distance);
+    const target = Math.max(this.rampBoostSpeed, cruiseSpeed + (this.boostOn ? 9 * stats.boostPower : 0));
     const acceleration = this.boostOn ? 18 * stats.boostPower : this.isGrounded ? 7 : 3;
     if (!unlimited) this.charge = clamp(this.charge + FIXED_STEP * (this.boostOn ? -0.48 : 0.19) / stats.boostCapacity, 0, 1);
     if (!unlimited && this.boostOn && this.charge <= 0.01) this.boostExhausted = true;
-    return clamp(speed + clamp(target - speed, -5 * FIXED_STEP, acceleration * FIXED_STEP), 6, Math.max(this.rampBoostSpeed, 18 + 9 * stats.boostPower));
+    return clamp(speed + clamp(target - speed, -5 * FIXED_STEP, acceleration * FIXED_STEP), 6,
+      Math.max(this.rampBoostSpeed, cruiseSpeed + 9 * stats.boostPower));
   }
 
   private applyRampBooster(body: ContactBody): void {
@@ -568,7 +575,15 @@ export class GamePhysics {
         }
       } else if (target.kind === 'box') {
         const box = boxes.get(target.id);
-        if (box && target.health === 0 && !this.crashed) this.boxRewards.open(box);
+        if (box && target.health === 0 && !this.crashed) {
+          const activeWeapon = this.weapon.snapshot();
+          const reward = this.boxRewards.open(box, {
+            health: this.damage.health < this.damage.maxHealth,
+            ammo: activeWeapon.ammo < activeWeapon.capacity,
+          });
+          if (reward?.kind === 'health') this.damage.restoreUnit();
+          else if (reward?.kind === 'ammo') this.weapon.refillActive();
+        }
       } else {
         const hazard = active.get(target.id);
         if (!hazard || hazard.health <= 0) return;

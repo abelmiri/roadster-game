@@ -1364,21 +1364,46 @@ test('the distance reward bar advances through every goal, shows earned coins, a
   assert.equal(p.ids.get('distance-reward-earned').textContent,'دریافتی این دور: ۴٬۶۰۰ سکه · ۵٬۵۵۰ XP');
   assert.equal(p.storage.get('roadster-xp'),'5550');
   assert.equal(p.ids.get('menu-coins').textContent,'۴٬۶۰۰');
-  assert.equal(p.ids.get('distance-reward-fill').style.transform,'scaleX(1)');
-  assert.equal(p.ids.get('distance-reward-next').textContent,'همهٔ جایزه‌های مسیر را گرفتی!');
+  assert.equal(p.ids.get('distance-reward-fill').style.transform,'scaleX(0)');
+  assert.match(p.ids.get('distance-reward-next').textContent,/۱۱٬۵۰۰.*۲۰۰.*۳۰۰/);
+  assert.equal(p.ids.get('distance-reward-meter').getAttribute('aria-valuemin'),'10000');
+  assert.equal(p.ids.get('distance-reward-meter').getAttribute('aria-valuemax'),'20000');
+  assert.equal(p.ids.get('distance-reward-mark-0').classList.contains('is-reached'),false);
   p.context.snapshot.distance=12000; p.advance(197);
-  assert.equal(p.ids.get('distance-reward-meter').getAttribute('aria-valuenow'),'10000');
-  assert.equal(p.ids.get('coin-total').textContent,'۴٬۷۰۰');
+  assert.equal(p.ids.get('distance-reward-meter').getAttribute('aria-valuenow'),'12000');
+  assert.equal(p.ids.get('coin-total').textContent,'۴٬۹۰۰');
+  assert.equal(p.ids.get('xp-total').textContent,'۵٬۸۵۰ XP');
+  assert.equal(p.ids.get('distance-reward-fill').style.transform,'scaleX(0.2)');
   p.advance(1936);
   assert.equal(bar.classList.contains('is-celebrating'),true);
-  p.advance(1938);
+  p.advance(1998);
   assert.equal(bar.classList.contains('is-celebrating'),false,'the highlight must fade after 1.8 seconds without replaying for the same milestone');
   p.context.snapshot.health=25; p.context.impactNext=true; p.advance(2257);
   p.advance(5257); await p.click('primary-button'); p.advance(5274);
   assert.equal(bar.classList.contains('is-celebrating'),false);
   assert.equal(p.ids.get('distance-reward-fill').style.transform,'scaleX(0)');
   assert.equal(p.ids.get('distance-reward-earned').textContent,'دریافتی این دور: ۰ سکه · ۰ XP');
-  assert.equal(p.ids.get('coin-total').textContent,'۴٬۷۰۰');
+  assert.equal(p.ids.get('coin-total').textContent,'۴٬۹۰۰');
+});
+
+test('the distance reward bar cycles through five routes and completes at 50 km',async()=>{
+  const p=await page('en-US');
+  await p.click('primary-button');
+  for(const [distance,minimum,maximum,next,coins,xp] of [
+    [20000,20000,30000,'21,500 m · +300 COINS · +450 XP','13,300','16,650 XP'],
+    [30000,30000,40000,'31,500 m · +400 COINS · +600 XP','26,100','33,300 XP'],
+    [40000,40000,50000,'41,500 m · +500 COINS · +750 XP','43,000','55,500 XP'],
+    [50000,40000,50000,null,'64,000','83,250 XP'],
+  ]) {
+    p.context.snapshot.distance=distance; p.advance(distance);
+    assert.equal(p.ids.get('distance-reward-meter').getAttribute('aria-valuemin'),String(minimum));
+    assert.equal(p.ids.get('distance-reward-meter').getAttribute('aria-valuemax'),String(maximum));
+    assert.equal(p.ids.get('distance-reward-fill').style.transform,`scaleX(${distance===50000?1:0})`);
+    assert.equal(p.ids.get('coin-total').textContent,coins);
+    assert.equal(p.ids.get('xp-total').textContent,xp);
+    if(next) assert.ok(p.ids.get('distance-reward-next').textContent.includes(next));
+    else assert.equal(p.ids.get('distance-reward-next').textContent,'ALL DISTANCE BONUSES CLAIMED!');
+  }
 });
 
 test('menu balance opens a localized earning guide and an unavailable purchase tab without starting the game',async()=>{
@@ -1564,6 +1589,21 @@ test('box prizes update saved coins and XP once, show power timers, pause and cl
   assert.equal(p.ids.get('unlimited-boost-status').hidden, true);
   assert.equal(p.ids.get('coin-total').textContent, '۲۷۰');
   assert.equal(p.storage.get('roadster-xp'), '850');
+});
+
+test('health and ammo box prizes show localized notices and updated HUD values', async () => {
+  const p = await page('fa-IR'); await p.click('primary-button');
+  Object.assign(p.context.snapshot, { health: 75, boxRewardSerial: 1,
+    boxRewardEvents: [{ serial: 1, reward: { kind: 'health' } }] });
+  p.advance(17);
+  assert.match(p.ids.get('box-toast').textContent, /یک واحد سلامت/);
+  assert.equal(p.ids.get('health-meter').getAttribute('aria-valuenow'), '75');
+  Object.assign(p.context.snapshot, { boxRewardSerial: 2,
+    boxRewardEvents: [{ serial: 2, reward: { kind: 'ammo' } }] });
+  p.context.snapshot.weapon.ammo = p.context.snapshot.weapon.capacity;
+  p.advance(34);
+  assert.match(p.ids.get('box-toast').textContent, /گلوله‌های سلاح انتخاب‌شده پر شد/);
+  assert.equal(p.ids.get('ammo-meter').getAttribute('aria-valuenow'), String(p.context.snapshot.weapon.capacity));
 });
 
 test('car upgrades require the displayed player level and never spend XP when purchased',async()=>{

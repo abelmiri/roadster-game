@@ -4,6 +4,7 @@ export const CHUNK_LENGTH = 30;
 export const START_APRON_X = -64;
 export const BOX_UNLOCK_DISTANCE = 300;
 export const BOX_SPAWN_KEEP_CHANCE = .8;
+export const HAZARD_SPAWN_KEEP_CHANCE = .86;
 const BOX_UNLOCK_X = 7 + BOX_UNLOCK_DISTANCE;
 
 export type HazardKind = 'barrier' | 'drone' | 'pulse';
@@ -149,8 +150,56 @@ function sampleRamp(x: number, result: RoadSample): void {
   }
 }
 
-const baseHeight = (x: number): number => 1.15 + 0.72 * Math.sin(x * 0.105) + 0.92 * Math.sin(x * 0.30);
-const baseSlope = (x: number): number => 0.72 * 0.105 * Math.cos(x * 0.105) + 0.92 * 0.30 * Math.cos(x * 0.30);
+const EXTRA_WAVE_START = 450;
+const EXTRA_WAVE_FADE = 150;
+const extraWaveWeight = (x: number): number => {
+  const t = Math.max(0, Math.min(1, (x - EXTRA_WAVE_START) / EXTRA_WAVE_FADE));
+  return t * t * (3 - 2 * t);
+};
+const extraWaveWeightSlope = (x: number): number => {
+  const t = Math.max(0, Math.min(1, (x - EXTRA_WAVE_START) / EXTRA_WAVE_FADE));
+  return 6 * t * (1 - t) / EXTRA_WAVE_FADE;
+};
+const extraWave = (x: number): number => 0.3 * Math.sin(x * 0.18) + 0.18 * Math.sin(x * 0.48);
+const extraWaveSlope = (x: number): number => 0.3 * 0.18 * Math.cos(x * 0.18) + 0.18 * 0.48 * Math.cos(x * 0.48);
+const rollingHeight = (x: number): number => 1.15 + 0.72 * Math.sin(x * 0.105) + 0.92 * Math.sin(x * 0.30) +
+  extraWaveWeight(x) * extraWave(x);
+const rollingSlope = (x: number): number => 0.72 * 0.105 * Math.cos(x * 0.105) + 0.92 * 0.30 * Math.cos(x * 0.30) +
+  extraWaveWeightSlope(x) * extraWave(x) + extraWaveWeight(x) * extraWaveSlope(x);
+
+const FLAT_FIRST_CENTER = 760;
+const FLAT_PERIOD = 300;
+const FLAT_HALF_WIDTH = 45;
+const FLAT_BLEND_WIDTH = 16;
+
+function flatBlend(x: number): { center: number; weight: number; slope: number } | null {
+  const index = Math.round((x - FLAT_FIRST_CENTER) / FLAT_PERIOD);
+  if (index < 0) return null;
+  const center = FLAT_FIRST_CENTER + index * FLAT_PERIOD;
+  const offset = x - center;
+  const distance = Math.abs(offset);
+  if (distance >= FLAT_HALF_WIDTH) return null;
+  if (distance <= FLAT_HALF_WIDTH - FLAT_BLEND_WIDTH) return { center, weight: 1, slope: 0 };
+  const t = (FLAT_HALF_WIDTH - distance) / FLAT_BLEND_WIDTH;
+  return { center, weight: t * t * (3 - 2 * t), slope: -6 * t * (1 - t) * Math.sign(offset) / FLAT_BLEND_WIDTH };
+}
+
+const flatGrade = (center: number): number => 0.012 * Math.sin(center * 0.017);
+const baseHeight = (x: number): number => {
+  const blend = flatBlend(x);
+  if (!blend) return rollingHeight(x);
+  const height = rollingHeight(x);
+  const plateau = rollingHeight(blend.center) + flatGrade(blend.center) * (x - blend.center);
+  return height + blend.weight * (plateau - height);
+};
+const baseSlope = (x: number): number => {
+  const blend = flatBlend(x);
+  if (!blend) return rollingSlope(x);
+  const height = rollingHeight(x);
+  const plateau = rollingHeight(blend.center) + flatGrade(blend.center) * (x - blend.center);
+  return rollingSlope(x) * (1 - blend.weight) + blend.weight * flatGrade(blend.center) +
+    blend.slope * (plateau - height);
+};
 
 export interface RoadSample { height: number; slope: number }
 
@@ -221,8 +270,8 @@ export class TrackGenerator {
       : null;
     const hazards: HazardSpec[] = [];
 
-    // One challenge per chunk leaves a long, visible recovery section.
-    if (index >= 2 && !gap && !reserved) {
+    // Thin eligible challenges deterministically to leave about 18% more room between obstacles.
+    if (index >= 2 && !gap && !reserved && hash(index + 1337) < HAZARD_SPAWN_KEEP_CHANCE) {
       const kind: HazardKind = index % 4 === 3 ? 'drone' : index % 4 === 1 ? 'pulse' : 'barrier';
       const x = start + 19 + hash(index + 27) * 2.5;
       hazards.push({

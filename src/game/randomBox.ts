@@ -2,20 +2,23 @@ export const BOX_POWER_SECONDS = 20;
 export const SHIELD_BLINK_SECONDS = 3;
 export interface RandomBoxSpec { id: string; x: number; y: number; airborne: boolean; phase: number }
 export type BoxReward = { kind: 'coins'; amount: number } | { kind: 'xp'; amount: number }
-  | { kind: 'shield'; seconds: number } | { kind: 'boost'; seconds: number };
+  | { kind: 'shield'; seconds: number } | { kind: 'boost'; seconds: number }
+  | { kind: 'health' } | { kind: 'ammo' };
 export interface BoxRewardEvent {
   serial: number; boxId: string; x: number; y: number; airborne: boolean; phase: number; reward: BoxReward; age: number;
 }
 export const BOX_REWARDS: ReadonlyArray<{ reward: BoxReward; weight: number }> = [
-  { reward: { kind: 'coins', amount: 20 }, weight: 28 },
-  { reward: { kind: 'coins', amount: 50 }, weight: 20 },
-  { reward: { kind: 'coins', amount: 100 }, weight: 10 },
-  { reward: { kind: 'coins', amount: 200 }, weight: 4 },
-  { reward: { kind: 'shield', seconds: BOX_POWER_SECONDS }, weight: 12 },
-  { reward: { kind: 'boost', seconds: BOX_POWER_SECONDS }, weight: 12 },
-  { reward: { kind: 'xp', amount: 100 }, weight: 8 },
-  { reward: { kind: 'xp', amount: 250 }, weight: 4 },
-  { reward: { kind: 'xp', amount: 500 }, weight: 2 },
+  { reward: { kind: 'coins', amount: 20 }, weight: 24 },
+  { reward: { kind: 'coins', amount: 50 }, weight: 17 },
+  { reward: { kind: 'coins', amount: 100 }, weight: 9 },
+  { reward: { kind: 'coins', amount: 200 }, weight: 3 },
+  { reward: { kind: 'shield', seconds: BOX_POWER_SECONDS }, weight: 14 },
+  { reward: { kind: 'boost', seconds: BOX_POWER_SECONDS }, weight: 14 },
+  { reward: { kind: 'health' }, weight: 6 },
+  { reward: { kind: 'ammo' }, weight: 6 },
+  { reward: { kind: 'xp', amount: 100 }, weight: 4 },
+  { reward: { kind: 'xp', amount: 250 }, weight: 2 },
+  { reward: { kind: 'xp', amount: 500 }, weight: 1 },
 ];
 
 export function rollBoxReward(random = Math.random()): BoxReward {
@@ -43,14 +46,17 @@ export class RandomBoxRewards {
 
   constructor(private readonly random = Math.random) {}
 
-  open(box: RandomBoxSpec): BoxReward | null {
+  open(box: RandomBoxSpec, available: { health?: boolean; ammo?: boolean } = {}): BoxReward | null {
     if (this.opened.has(box.id)) return null;
     this.opened.add(box.id);
-    const reward = rollBoxReward(this.random());
+    const rolled = rollBoxReward(this.random());
+    const unusable = (rolled.kind === 'health' && available.health === false) ||
+      (rolled.kind === 'ammo' && available.ammo === false);
+    const reward: BoxReward = unusable ? { kind: 'coins', amount: 20 } : rolled;
     if (reward.kind === 'coins') this.coins += reward.amount;
     else if (reward.kind === 'xp') this.xp += reward.amount;
     else if (reward.kind === 'shield') this.shieldRemaining = reward.seconds;
-    else this.boostRemaining = reward.seconds;
+    else if (reward.kind === 'boost') this.boostRemaining = reward.seconds;
     this.events.push({ serial: ++this.serial, boxId: box.id, x: box.x, y: box.y,
       airborne: box.airborne, phase: box.phase, reward, age: 0 });
     if (this.events.length > 24) this.events.shift();

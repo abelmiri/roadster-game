@@ -56,6 +56,18 @@ export class VehicleDamage {
     this.invincibilityRemaining = INVINCIBLE_SECONDS;
     return true;
   }
+
+  restoreUnit(): number {
+    if (this.health === 0 || this.health >= this.maxHealth) return 0;
+    const previous = this.health;
+    if (this.hullHealth < MAX_HEALTH) {
+      this.hullHealth = Math.min(MAX_HEALTH, this.hullHealth + IMPACT_DAMAGE);
+    } else {
+      const missing = ((1 << this.armorLevel) - 1) & ~this.armorMask;
+      this.armorMask |= missing & -missing;
+    }
+    return this.health - previous;
+  }
 }
 
 /** Wall-clock hit stop followed by a smoothstep return to normal speed.

@@ -8,7 +8,7 @@ import RAPIER from '@dimforge/rapier2d-compat';
 
 let CAR_PAINTS, CAR_PAINT_PRICE, PlayerProgress, ExperienceProgress, RandomBoxRewards, rollBoxReward;
 let GamePhysics, TrackGenerator, MagneticShield, RandomBoxVisuals, CarBodyDamage, createRoadsterBody, carGarageIcon;
-let BOX_UNLOCK_DISTANCE;
+let BOX_UNLOCK_DISTANCE, CHUNK_LENGTH, RAMP_LANDING, RAMP_APPROACH, loopsBetween, rampsBetween;
 before(async () => {
   const outdir = path.resolve('node_modules/.cache/roadster-customization-tests');
   const entries = ['carPaint', 'playerProgress', 'experience', 'randomBox', 'physics', 'track', 'powerVisuals', 'carBodyDamage', 'roadsterModel', 'carGarageIcon'];
@@ -17,7 +17,7 @@ before(async () => {
   const modules = await Promise.all(entries.map(name => import(pathToFileURL(path.join(outdir, `${name}.mjs`)).href)));
   ({ CAR_PAINTS, CAR_PAINT_PRICE, PlayerProgress, ExperienceProgress, RandomBoxRewards, rollBoxReward, GamePhysics,
     TrackGenerator, MagneticShield, RandomBoxVisuals, CarBodyDamage, createRoadsterBody, carGarageIcon,
-    BOX_UNLOCK_DISTANCE } = Object.assign({}, ...modules));
+    BOX_UNLOCK_DISTANCE, CHUNK_LENGTH, RAMP_LANDING, RAMP_APPROACH, loopsBetween, rampsBetween } = Object.assign({}, ...modules));
   await RAPIER.init();
 });
 const idle = { jumpPressed: false, jumpHeld: false, suction: false, boost: false };
@@ -81,13 +81,14 @@ test('reward draws include every prize and larger coin amounts are strictly rare
   const counts = new Map();
   for (let ticket = 0; ticket < 100; ticket++) {
     const reward = rollBoxReward((ticket + .5) / 100);
-    const key = `${reward.kind}-${reward.amount ?? reward.seconds}`;
+    const value = reward.amount ?? reward.seconds;
+    const key = value === undefined ? reward.kind : `${reward.kind}-${value}`;
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
-  assert.equal(counts.size, 9);
+  assert.equal(counts.size, 11);
   const coins = [20, 50, 100, 200].map(amount => counts.get(`coins-${amount}`));
   assert.ok(coins.every((count, index) => count > 0 && (index === 0 || count < coins[index - 1])));
-  for (const key of ['shield-20', 'boost-20', 'xp-100', 'xp-250', 'xp-500']) assert.ok(counts.get(key) > 0);
+  for (const key of ['shield-20', 'boost-20', 'health', 'ammo', 'xp-100', 'xp-250', 'xp-500']) assert.ok(counts.get(key) > 0);
 });
 
 test('opened boxes never pay twice; timers refresh to 20 seconds and end exactly once', () => {
@@ -109,10 +110,14 @@ test('opened boxes never pay twice; timers refresh to 20 seconds and end exactly
   assert.equal(loot.shieldRemaining, 0); assert.equal(loot.boostRemaining, 0);
   loot.random = () => 0; loot.open(box('coins'));
   loot.random = () => .99; loot.open(box('xp'));
+  loot.random = () => .85; assert.deepEqual(loot.open(box('health')), { kind: 'health' });
+  loot.random = () => .91; assert.deepEqual(loot.open(box('ammo')), { kind: 'ammo' });
+  loot.random = () => .85; assert.deepEqual(loot.open(box('full-health'), { health: false }), { kind: 'coins', amount: 20 });
+  loot.random = () => .91; assert.deepEqual(loot.open(box('full-ammo'), { ammo: false }), { kind: 'coins', amount: 20 });
   loot.step(4);
   assert.equal(loot.events.length, 0);
-  assert.equal(loot.coins, 20); assert.equal(loot.xp, 500);
-  assert.equal(loot.open(box('coins')), null); assert.equal(loot.coins, 20);
+  assert.equal(loot.coins, 60); assert.equal(loot.xp, 500);
+  assert.equal(loot.open(box('coins')), null); assert.equal(loot.coins, 60);
 });
 
 test('cumulative box coins and XP persist across missed frames without duplicate or post-run awards', () => {
@@ -149,9 +154,10 @@ test('box density keeps about 80 percent of eligible placements after the openin
   let candidates=0,kept=0;
   for (let index=11;index<10000;index++) {
     const chunk=track.chunk(index);
-    // Existing box slots share clear challenge chunks; hazards expose the
-    // reserved/gap exclusions without duplicating the spawn hash decision.
-    if (index%3===1&&chunk.hazards.length>0) candidates++;
+    const start=index*CHUNK_LENGTH;
+    const reserved=loopsBetween(start-20,start+CHUNK_LENGTH+20).length>0 ||
+      rampsBetween(start-RAMP_LANDING,start+CHUNK_LENGTH+RAMP_APPROACH).length>0;
+    if (index%3===1&&!chunk.gap&&!reserved) candidates++;
     kept+=chunk.boxes.length;
   }
   assert.ok(candidates>1000,'the sample must cover enough independently thinned slots');
@@ -207,6 +213,36 @@ test('real bullets open ground and airborne boxes once without explosions and re
     assert.equal(game.snapshot(1).boxRewardSerial, 0, 'driving through a box must not claim its prize');
     assert.ok(game.randomBoxStates.some(box => box.id === ground.id));
   } finally { game.dispose(); }
+});
+
+test('shot boxes restore one health unit or refill only the selected weapon', () => {
+  const [spec] = firstBoxes();
+  for (const kind of ['health', 'ammo']) {
+    const game = new GamePhysics(spec.x - 14, { id: 'twin-gun', xp: 200 });
+    game.furthestX = game.startX + BOX_UNLOCK_DISTANCE;
+    game.boxRewards.random = () => kind === 'health' ? .85 : .91;
+    game.damage.hullHealth = 50;
+    game.weapon.ammunition.set('twin-gun', 10);
+    const otherAmmo = game.weapon.ammoFor('machine-gun');
+    try {
+      for (let i = 0; i < 240 && !game.crashed && game.snapshot(1).boxRewardSerial === 0; i++) {
+        game.step({ ...idle, suction: true, fire: true });
+      }
+      const state = game.snapshot(1);
+      assert.equal(state.boxRewardSerial, 1, `${kind} box did not open`);
+      assert.equal(state.boxRewardEvents[0].reward.kind, kind);
+      if (kind === 'health') {
+        assert.equal(state.health, 75);
+        assert.ok(state.weapon.ammo < state.weapon.capacity);
+      } else {
+        assert.equal(state.health, 50);
+        assert.equal(state.weapon.id, 'twin-gun');
+        assert.equal(state.weapon.ammo, state.weapon.capacity);
+        assert.equal(game.weapon.ammoFor('machine-gun'), otherAmmo);
+      }
+      assert.equal(game.boxRewards.open(spec), null, 'the same box paid twice');
+    } finally { game.dispose(); }
+  }
 });
 
 test('a shield protects hull and armor against actual obstacles and police until it expires', () => {

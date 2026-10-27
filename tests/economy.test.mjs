@@ -212,9 +212,9 @@ test('invalid or unavailable storage preserves safe defaults and session progres
     assert.equal(p.ownsWeapon('machine-gun'), true);
   }
   const p = new PlayerProgress({ getItem() { throw Error(); }, setItem() { throw Error(); } });
-  assert.equal(p.collect(20000, 0, 0), 5100);
+  assert.equal(p.collect(20000, 0, 0), 13300);
   assert.equal(p.purchaseWeapon('twin-gun', 200), 'purchased');
-  assert.equal(p.coins, 4100);
+  assert.equal(p.coins, 12300);
   assert.equal(p.finishRun(20001).bonus, 25);
   assert.equal(p.nameRecord('Driver'), true);
 });
@@ -280,7 +280,7 @@ test('old saves retain their wallet and record; corrupt and unowned upgrade leve
   const blocked = new PlayerProgress({ getItem() { throw Error(); }, setItem() { throw Error(); } });
   blocked.collect(30000, 0, 0);
   assert.equal(blocked.upgradeWeapon('machine-gun'), 'upgraded');
-  assert.equal(blocked.coins, 5100);
+  assert.equal(blocked.coins, 25600);
 });
 
 test('car upgrades have four exact price steps, debit atomically and persist independently', () => {
@@ -325,35 +325,49 @@ test('insufficient funds and corrupt vehicle levels cannot consume coins or rese
   }
 });
 
-test('all six distance bonuses pay their full value once per run, retain skipped goals, and reset cleanly',()=>{
-  assert.deepEqual(DISTANCE_COIN_REWARDS.map(reward=>[reward.distance,reward.coins]),[[1500,100],[3000,250],[4500,500],[6000,750],[7500,1000],[10000,1500]]);
+test('distance bonuses repeat through 50 km with increasing coin and XP multipliers, once per run',()=>{
+  const base=[[1500,100,150],[3000,250,300],[4500,500,600],[6000,750,1000],[7500,1000,1500],[10000,1500,2000]];
+  assert.deepEqual(DISTANCE_COIN_REWARDS.map(reward=>[reward.distance,reward.coins,reward.xp]),
+    Array.from({length:5},(_,interval)=>base.map(([distance,coins,xp])=>[interval*10000+distance,coins*(interval+1),xp*(interval+1)])).flat());
   const s=store(); const p=new PlayerProgress(s.storage);
-  const increments=[170,330,570,830,1070,1630];
+  let previousDistance=0;
+  let expectedCoins=0;
   for(const [index,reward] of DISTANCE_COIN_REWARDS.entries()) {
-    assert.equal(p.collect(reward.distance,0,0),increments[index],'the goal bonus is in addition to regular 200m rewards');
+    const increment=(Math.floor(reward.distance/200)-Math.floor(previousDistance/200))*10+reward.coins;
+    assert.equal(p.collect(reward.distance,0,0),increment,`milestone ${index} adds its bonus to regular distance coins`);
     assert.equal(p.collect(reward.distance,0,0),0);
     assert.equal(p.collect(reward.distance-1,0,0),0);
+    expectedCoins+=increment;
+    previousDistance=reward.distance;
   }
-  assert.equal(p.runCoins,4600);
-  assert.equal(new PlayerProgress(s.storage).coins,4600);
+  assert.equal(expectedCoins,64000);
+  assert.equal(p.runCoins,expectedCoins);
+  assert.equal(new PlayerProgress(s.storage).coins,expectedCoins);
   p.resetRun();
-  assert.equal(p.collect(10000,0,0),4600,'a skipped display interval must retain all six bonuses');
-  assert.equal(p.collect(10000,0,0),0);
-  assert.equal(p.coins,9200);
-  p.finishRun(10000);
-  assert.equal(p.collect(12000,1,1),0,'a wreck cannot keep earning rewards');
+  assert.equal(p.collect(50000,0,0),expectedCoins,'skipping every milestone retains every bonus');
+  assert.equal(p.collect(50000,0,0),0);
+  assert.equal(p.coins,expectedCoins*2);
+  p.finishRun(50000);
+  assert.equal(p.collect(51000,1,1),0,'a wreck cannot keep earning rewards');
   const boundary=new PlayerProgress();
   assert.equal(boundary.collect(1499.99,0,0),70);
   assert.equal(boundary.collect(1500,0,0),100);
+  assert.equal(boundary.collect(11499,0,0),4500,'the next interval has not reached its first milestone');
+  assert.equal(boundary.collect(11500,0,0),200);
   assert.equal(boundary.collect(Infinity,NaN,NaN),0);
 });
 
-test('the distance bar handles its next goal, completed route and invalid values',()=>{
+test('the distance bar tracks each 10 km interval, its next goal, and invalid values',()=>{
   assert.equal(distanceCoinProgress(0).next.distance,1500);
   const first=distanceCoinProgress(1500);
-  assert.equal(first.fraction,.15); assert.equal(first.next.distance,3000); assert.equal(first.next.coins,250);
+  assert.equal(first.fraction,.15); assert.equal(first.interval,0); assert.equal(first.next.distance,3000); assert.equal(first.next.coins,250);
   assert.equal(distanceCoinProgress(9999).next.coins,1500);
-  assert.deepEqual(distanceCoinProgress(12000),{distance:12000,fraction:1,next:null});
+  assert.deepEqual(distanceCoinProgress(10000),{distance:10000,interval:1,fraction:0,next:{distance:11500,coins:200,xp:300}});
+  assert.equal(distanceCoinProgress(12000).fraction,.2);
+  assert.equal(distanceCoinProgress(20000).interval,2);
+  assert.equal(distanceCoinProgress(40000).interval,4);
+  assert.deepEqual(distanceCoinProgress(50000),{distance:50000,interval:4,fraction:1,next:null});
+  assert.equal(distanceCoinProgress(52000).fraction,1);
   assert.equal(distanceCoinProgress(NaN).fraction,0);
   assert.equal(distanceCoinProgress(-100).distance,0);
 });

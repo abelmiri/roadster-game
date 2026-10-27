@@ -6,7 +6,7 @@ import { HudFeedback } from './game/hudFeedback';
 import { ExperienceProgress, LEVEL_XP } from './game/experience';
 import { PlayerProgress } from './game/playerProgress';
 import { CAR_UPGRADE_IDS, MAX_CAR_UPGRADE, carUpgradeCost, carUpgradeRequiredLevel, carUpgradeStats, type CarUpgradeId } from './game/carUpgrades';
-import { DISTANCE_COIN_REWARDS, FINAL_DISTANCE_REWARD, distanceCoinProgress } from './game/coinRewards';
+import { DISTANCE_COIN_REWARDS, DISTANCE_REWARD_INTERVAL, DISTANCE_REWARDS_PER_INTERVAL, FINAL_DISTANCE_REWARD, distanceCoinProgress } from './game/coinRewards';
 import { carGarageIcon } from './game/carGarageIcon';
 import { CAR_MODELS, CAR_MODEL_PRICE, carModel } from './game/carModels';
 import { ALL_CAR_PAINTS, CAR_PAINT_PRICE } from './game/carPaint';
@@ -66,7 +66,7 @@ app.innerHTML = `
     </header>
     <div id="distance-rewards" class="distance-rewards">
       <div class="distance-reward-heading"><span id="distance-reward-next"></span><strong id="distance-reward-earned"></strong></div>
-      <div id="distance-reward-meter" class="distance-reward-track" role="progressbar" aria-valuemin="0" aria-valuemax="${FINAL_DISTANCE_REWARD}"><span id="distance-reward-fill"></span>${DISTANCE_COIN_REWARDS.map((reward,index)=>`<i id="distance-reward-mark-${index}" class="distance-reward-mark" style="left:${reward.distance/FINAL_DISTANCE_REWARD*100}%" aria-hidden="true"></i>`).join('')}</div>
+      <div id="distance-reward-meter" class="distance-reward-track" role="progressbar" aria-valuemin="0" aria-valuemax="${DISTANCE_REWARD_INTERVAL}"><span id="distance-reward-fill"></span>${DISTANCE_COIN_REWARDS.slice(0,DISTANCE_REWARDS_PER_INTERVAL).map((reward,index)=>`<i id="distance-reward-mark-${index}" class="distance-reward-mark" style="left:${reward.distance/DISTANCE_REWARD_INTERVAL*100}%" aria-hidden="true"></i>`).join('')}</div>
     </div>
     <div class="district-tag"><span class="district-dot"></span><span id="district"></span></div>
     <div id="pursuit-glow" class="pursuit-glow" aria-hidden="true"></div>
@@ -798,9 +798,14 @@ function updateDistanceRewards(distance: number): void {
   fillIfChanged(element('distance-reward-fill'),progress.fraction);
   const meter=element('distance-reward-meter');
   attributeIfChanged(meter,'aria-label',t('distanceRewardTitle'));
+  attributeIfChanged(meter,'aria-valuemin',String(progress.interval*DISTANCE_REWARD_INTERVAL));
+  attributeIfChanged(meter,'aria-valuemax',String((progress.interval+1)*DISTANCE_REWARD_INTERVAL));
   attributeIfChanged(meter,'aria-valuenow',String(Math.min(FINAL_DISTANCE_REWARD,progress.distance)));
   attributeIfChanged(meter,'aria-valuetext',`${formatNumber(progress.distance)} ${t('meter')} · ${label}`);
-  for(const [index,reward] of DISTANCE_COIN_REWARDS.entries()) element(`distance-reward-mark-${index}`).classList.toggle('is-reached',progress.distance>=reward.distance);
+  for(let index=0;index<DISTANCE_REWARDS_PER_INTERVAL;index++) {
+    const reward=DISTANCE_COIN_REWARDS[progress.interval*DISTANCE_REWARDS_PER_INTERVAL+index];
+    element(`distance-reward-mark-${index}`).classList.toggle('is-reached',progress.distance>=reward.distance);
+  }
 }
 
 function updateHud(snapshot?: GameSnapshot): void {
@@ -1119,6 +1124,8 @@ function updateMissions(snapshot: GameSnapshot, finished = false): void {
 function boxRewardLabel(reward: BoxReward): string {
   if (reward.kind === 'coins') return t('boxCoinReward', { coins: formatNumber(reward.amount) });
   if (reward.kind === 'xp') return t('boxXpReward', { xp: formatNumber(reward.amount) });
+  if (reward.kind === 'health') return t('boxHealthReward');
+  if (reward.kind === 'ammo') return t('boxAmmoReward');
   return t(reward.kind === 'shield' ? 'boxShieldReward' : 'boxBoostReward', { seconds: formatNumber(reward.seconds) });
 }
 
