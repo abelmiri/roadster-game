@@ -6,6 +6,9 @@ export const IMPACT_PAUSE_SECONDS = 0.5;
 export const EXPLOSION_SLOWDOWN_SECONDS = 0.2;
 export const EXPLOSION_RECOVERY_SECONDS = 1;
 export const EXPLOSION_MIN_TIME_SCALE = 0.25;
+export const RAGDOLL_SLOWDOWN_SECONDS = 0.65;
+export const RAGDOLL_RECOVERY_SECONDS = 1.4;
+export const RAGDOLL_MIN_TIME_SCALE = 0.2;
 export const HIT_RECOVERY_SECONDS = 0.8;
 export const RESTART_DELAY_SECONDS = 3;
 export const WRECK_TIME_SCALE = 0.125;
@@ -104,17 +107,23 @@ export class ImpactPause {
 /** Explosions dip into slow motion without freezing. Both eased phases use
  * wall time and an exact integral, including frames crossing phase boundaries. */
 export class ExplosionSlowMotion {
-  private elapsed = EXPLOSION_SLOWDOWN_SECONDS + EXPLOSION_RECOVERY_SECONDS;
+  private elapsed: number;
   private entryScale = 1;
 
-  get active(): boolean { return this.elapsed < EXPLOSION_SLOWDOWN_SECONDS + EXPLOSION_RECOVERY_SECONDS; }
+  constructor(private readonly slowdownSeconds = EXPLOSION_SLOWDOWN_SECONDS,
+    private readonly recoverySeconds = EXPLOSION_RECOVERY_SECONDS,
+    private readonly minTimeScale = EXPLOSION_MIN_TIME_SCALE) {
+    this.elapsed = slowdownSeconds + recoverySeconds;
+  }
+
+  get active(): boolean { return this.elapsed < this.slowdownSeconds + this.recoverySeconds; }
   get timeScale(): number {
-    const slowing = this.elapsed < EXPLOSION_SLOWDOWN_SECONDS;
-    const t = slowing ? this.elapsed / EXPLOSION_SLOWDOWN_SECONDS
-      : Math.min(1, (this.elapsed - EXPLOSION_SLOWDOWN_SECONDS) / EXPLOSION_RECOVERY_SECONDS);
+    const slowing = this.elapsed < this.slowdownSeconds;
+    const t = slowing ? this.elapsed / this.slowdownSeconds
+      : Math.min(1, (this.elapsed - this.slowdownSeconds) / this.recoverySeconds);
     const eased = t * t * (3 - 2 * t);
-    return slowing ? this.entryScale + (EXPLOSION_MIN_TIME_SCALE - this.entryScale) * eased
-      : EXPLOSION_MIN_TIME_SCALE + (1 - EXPLOSION_MIN_TIME_SCALE) * eased;
+    return slowing ? this.entryScale + (this.minTimeScale - this.entryScale) * eased
+      : this.minTimeScale + (1 - this.minTimeScale) * eased;
   }
 
   start(): void {
@@ -123,28 +132,28 @@ export class ExplosionSlowMotion {
     this.elapsed = 0;
   }
   reset(): void {
-    this.elapsed = EXPLOSION_SLOWDOWN_SECONDS + EXPLOSION_RECOVERY_SECONDS;
+    this.elapsed = this.slowdownSeconds + this.recoverySeconds;
     this.entryScale = 1;
   }
   consume(elapsed: number): number {
     const dt = Math.max(0, elapsed);
     if (!this.active) return dt;
     const before = this.elapsed;
-    this.elapsed = Math.min(EXPLOSION_SLOWDOWN_SECONDS + EXPLOSION_RECOVERY_SECONDS, before + dt);
-    if (EXPLOSION_SLOWDOWN_SECONDS + EXPLOSION_RECOVERY_SECONDS - this.elapsed < 1e-9) {
-      this.elapsed = EXPLOSION_SLOWDOWN_SECONDS + EXPLOSION_RECOVERY_SECONDS;
+    this.elapsed = Math.min(this.slowdownSeconds + this.recoverySeconds, before + dt);
+    if (this.slowdownSeconds + this.recoverySeconds - this.elapsed < 1e-9) {
+      this.elapsed = this.slowdownSeconds + this.recoverySeconds;
     }
     return dt - (this.elapsed - before) + this.integral(this.elapsed) - this.integral(before);
   }
 
   private integral(elapsed: number): number {
     const primitive = (t: number): number => t ** 3 - 0.5 * t ** 4;
-    const down = Math.min(elapsed, EXPLOSION_SLOWDOWN_SECONDS);
-    const up = Math.max(0, elapsed - EXPLOSION_SLOWDOWN_SECONDS);
-    return this.entryScale * down + (EXPLOSION_MIN_TIME_SCALE - this.entryScale)
-      * EXPLOSION_SLOWDOWN_SECONDS * primitive(down / EXPLOSION_SLOWDOWN_SECONDS)
-      + EXPLOSION_MIN_TIME_SCALE * up + (1 - EXPLOSION_MIN_TIME_SCALE)
-      * EXPLOSION_RECOVERY_SECONDS * primitive(up / EXPLOSION_RECOVERY_SECONDS);
+    const down = Math.min(elapsed, this.slowdownSeconds);
+    const up = Math.max(0, elapsed - this.slowdownSeconds);
+    return this.entryScale * down + (this.minTimeScale - this.entryScale)
+      * this.slowdownSeconds * primitive(down / this.slowdownSeconds)
+      + this.minTimeScale * up + (1 - this.minTimeScale)
+      * this.recoverySeconds * primitive(up / this.recoverySeconds);
   }
 }
 

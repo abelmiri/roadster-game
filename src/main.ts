@@ -14,7 +14,7 @@ import type { BoxReward } from './game/randomBox';
 import { MISSIONS, missionSpec, type MissionSpec } from './game/missions';
 import { purchaseQuote, confirmPurchase, purchaseWeaponStats, purchaseCarStats, type PurchaseIntent, type PurchaseQuote } from './game/purchases';
 import { loopsBetween } from './game/track';
-import { ImpactPause, IMPACT_DAMAGE, IMPACT_PAUSE_SECONDS, ExplosionSlowMotion, RESTART_DELAY_SECONDS, WRECK_TIME_SCALE } from './game/damage';
+import { ImpactPause, IMPACT_DAMAGE, IMPACT_PAUSE_SECONDS, ExplosionSlowMotion, RAGDOLL_SLOWDOWN_SECONDS, RAGDOLL_RECOVERY_SECONDS, RAGDOLL_MIN_TIME_SCALE, RESTART_DELAY_SECONDS, WRECK_TIME_SCALE } from './game/damage';
 import { WeaponLoadout, WEAPONS, MAX_WEAPON_UPGRADE, weaponSpec, weaponUpgradeCost, type AimDirection } from './game/weapons';
 import { weaponIcon } from './game/weaponIcon';
 import { formatNumber, formatDecimal, formatPercent, getLanguage, setLanguage, t, type MessageKey } from './i18n';
@@ -355,8 +355,10 @@ const hudFeedback = new HudFeedback({
 });
 const impactPause = new ImpactPause();
 const explosionSlowMotion = new ExplosionSlowMotion();
+const ragdollSlowMotion = new ExplosionSlowMotion(RAGDOLL_SLOWDOWN_SECONDS, RAGDOLL_RECOVERY_SECONDS, RAGDOLL_MIN_TIME_SCALE);
 let lastImpactSerial = 0;
 let lastExplosionSerial = 0;
+let lastRagdollHitSerial = 0;
 let rewardTime = 0;
 let lastReward = 0;
 let lastRewardMessage: MessageKey = 'loopReward';
@@ -1035,8 +1037,10 @@ async function start(): Promise<void> {
     recordBonus = 0;
     impactPause.reset();
     explosionSlowMotion.reset();
+    ragdollSlowMotion.reset();
     lastImpactSerial = 0;
     lastExplosionSerial = 0;
+    lastRagdollHitSerial = 0;
     clearHeld();
     aimDirection = 1;
   }
@@ -1074,6 +1078,7 @@ function crash(): void {
   restartAvailableAt = performance.now() + RESTART_DELAY_SECONDS * 1000;
   impactPause.reset();
   explosionSlowMotion.reset();
+  ragdollSlowMotion.reset();
   accumulator = 0;
   holdInterpolation = false;
   clearHeld();
@@ -1669,7 +1674,8 @@ function renderFrame(now: number): void {
   lastFrame = now;
   let playDelta = 0;
   if (status === 'running') {
-    playDelta = Math.min(impactPause.consume(wallDelta), explosionSlowMotion.consume(wallDelta), 0.06);
+    playDelta = Math.min(impactPause.consume(wallDelta), explosionSlowMotion.consume(wallDelta),
+      ragdollSlowMotion.consume(wallDelta), 0.06);
     if (physics.crashed) crash();
   }
   if (status === 'running' && playDelta > 0) {
@@ -1693,6 +1699,7 @@ function renderFrame(now: number): void {
       steps++;
       const impacted = physics.impactSerial > lastImpactSerial;
       const exploded = physics.explosionSerial > lastExplosionSerial;
+      const ragdollHit = physics.ragdollHitSerial > lastRagdollHitSerial;
       if (impacted) {
         lastImpactSerial = physics.impactSerial;
         audio.play('impact');
@@ -1701,10 +1708,12 @@ function renderFrame(now: number): void {
         lastExplosionSerial = physics.explosionSerial;
         audio.play('explosion');
       }
+      if (ragdollHit) lastRagdollHitSerial = physics.ragdollHitSerial;
       // A fatal hit shows the menu immediately and starts the loose wreck;
       // it must not inherit hit stop or explosion slow motion from the living car.
       if (physics.crashed) { crash(); break; }
       if (exploded) explosionSlowMotion.start();
+      if (ragdollHit) ragdollSlowMotion.start();
       if (impacted) {
         impactPause.start();
         accumulator = 0;

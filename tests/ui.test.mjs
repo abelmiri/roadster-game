@@ -15,6 +15,7 @@ const stubs = {
     constructor(x,loadout){globalThis.physicsVehicle=loadout?.vehicle??'roadster';this.weapon=new VehicleWeapon('machine-gun',loadout?.upgrades);this.damage=new VehicleDamage(loadout?.carUpgrades?.armor??0);if(loadout)this.weapon.equip(loadout.id,loadout.xp);Object.assign(globalThis.snapshot,{distance:0,health:this.damage.health,hullHealth:100,maxHealth:this.damage.maxHealth,armorMask:this.damage.armorMask,carUpgrades:loadout?.carUpgrades??{},impactSerial:0,invincibilityRemaining:0,crashed:false,wrecked:false,loopCompletions:0,obstaclesDestroyed:0,policeDestroyed:0,flipsCompleted:0,flipCoins:0,runXp:0,boxCoins:0,boxXp:0,boxRewardSerial:0,boxRewardEvents:[],shieldRemaining:0,unlimitedBoostRemaining:0,missionStats:undefined,weapon:this.weapon.snapshot()});globalThis.dead=false}
     get impactSerial(){return globalThis.snapshot.impactSerial}
     get explosionSerial(){return this.weapon.destructionSerial}
+    ragdollHitSerial=0;
     stepWreck(){globalThis.wreckSteps++}
     get hazardStates(){return []} get chunks(){return new Map()} get distance(){return globalThis.snapshot.distance}
     get crashed(){return globalThis.dead} snapshot(alpha){globalThis.lastAlpha=alpha;globalThis.snapshot.weapon=this.weapon.snapshot();return globalThis.snapshot} dispose(){}
@@ -25,6 +26,7 @@ const stubs = {
     step(controls){globalThis.steps++;globalThis.lastControls=controls;const s=globalThis.snapshot;
       this.weapon.step(1/120,controls,{...s.car,vx:14,vy:0},[],()=>{});
       if(globalThis.explosionNext){globalThis.explosionNext=false;this.weapon.destroySerial++}
+      if(globalThis.ragdollHitNext){globalThis.ragdollHitNext=false;this.ragdollHitSerial++}
       if(globalThis.impactNext){globalThis.impactNext=false;this.damage.armorMask=s.armorMask??0;this.damage.hullHealth=s.health-(this.damage.health-this.damage.hullHealth);this.damage.invincibilityRemaining=0;this.damage.hit();Object.assign(s,{health:this.damage.health,hullHealth:this.damage.hullHealth,armorMask:this.damage.armorMask});s.impactSerial++;s.invincibilityRemaining=1.5;if(s.health===0)globalThis.dead=s.crashed=s.wrecked=true}
       else s.invincibilityRemaining=Math.max(0,s.invincibilityRemaining-1/120);
     }
@@ -131,7 +133,7 @@ async function page(language = 'en-US', saved = {}, development = false, reduced
     } }, navigator: { language },
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
     performance: { now: () => context.now }, requestAnimationFrame: callback => { context.frame = callback; },
-    console, Intl, now: 0, steps: 0, wreckSteps: 0, sounds: [], dead: false, impactNext: false, explosionNext: false,
+    console, Intl, now: 0, steps: 0, wreckSteps: 0, sounds: [], dead: false, impactNext: false, explosionNext: false, ragdollHitNext: false,
     snapshot: { car: { x: 7, y: 1, angle: 0 }, wheels: [], distance: 0, speed: 60 / 3.6, boost: 1,
       grounded: true, suctionActive: false, boostActive: false, crashed: false, jumpSerial: 0, jumpsUsed: 0,
       landingSerial: 0, landingImpact: 0, loop: null, loopCompletions: 0, obstaclesDestroyed: 0, policeDestroyed: 0, runXp: 0, crashReason: 'road',
@@ -687,6 +689,25 @@ test('weapon destruction keeps moving while easing down for 200 ms and recoverin
   p.advance(1267);
   assert.ok(Math.abs(p.context.lastRender.dt - .05) < 1e-9);
   assert.equal(p.context.sounds.filter(event => event === 'explosion').length, 1);
+});
+
+test('ragdoll collision triggers longer slow motion without impact freeze or damage', async () => {
+  const p = await page();
+  await p.click('primary-button');
+  p.context.ragdollHitNext = true;
+  p.advance(17);
+  const stepsAtHit = p.context.steps;
+  for (let time = 37; time <= 217; time += 20) p.advance(time);
+  assert.equal(p.context.snapshot.health, 100);
+  assert.equal(p.context.lastRender.frozen, false);
+  assert.ok(p.context.lastRender.dt > 0 && p.context.lastRender.dt < .02);
+  for (let time = 267; time <= 667; time += 50) p.advance(time);
+  assert.ok(p.context.steps > stepsAtHit, 'ragdoll collision should keep physics moving');
+  assert.ok(p.context.lastRender.dt > 0 && p.context.lastRender.dt < .02);
+  for (let time = 717; time <= 1217; time += 50) p.advance(time);
+  assert.ok(p.context.lastRender.dt < .05, 'slow motion should still be recovering after 1.2 seconds');
+  for (let time = 1267; time <= 2117; time += 50) p.advance(time);
+  assert.ok(Math.abs(p.context.lastRender.dt - .05) < 1e-9);
 });
 
 test('physics and visual effects share a smooth 800 ms recovery after collision hit stop', async () => {

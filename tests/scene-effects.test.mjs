@@ -7,9 +7,10 @@ import { Matrix4, Vector3, MeshLambertMaterial } from 'three';
 
 let CityBuildings, ObstacleDebris, CarBodyDamage, createRoadsterBody;
 let CarArmorVisual, carGarageIcon;
+let RagdollVisuals;
 before(async () => {
   const outdir = path.resolve('node_modules/.cache/roadster-scene-tests');
-  await build({ entryPoints: ['src/game/cityBuildings.ts', 'src/game/obstacleDebris.ts', 'src/game/carBodyDamage.ts', 'src/game/roadsterModel.ts', 'src/game/carArmor.ts', 'src/game/carGarageIcon.ts'], bundle: true,
+  await build({ entryPoints: ['src/game/cityBuildings.ts', 'src/game/obstacleDebris.ts', 'src/game/carBodyDamage.ts', 'src/game/roadsterModel.ts', 'src/game/carArmor.ts', 'src/game/carGarageIcon.ts', 'src/game/ragdollVisuals.ts'], bundle: true,
     platform: 'node', format: 'esm', outdir, outExtension: { '.js': '.mjs' }, external: ['three'] });
   ({ CityBuildings } = await import(pathToFileURL(path.join(outdir, 'cityBuildings.mjs')).href));
   ({ ObstacleDebris } = await import(pathToFileURL(path.join(outdir, 'obstacleDebris.mjs')).href));
@@ -17,6 +18,38 @@ before(async () => {
   ({ createRoadsterBody } = await import(pathToFileURL(path.join(outdir, 'roadsterModel.mjs')).href));
   ({ CarArmorVisual } = await import(pathToFileURL(path.join(outdir, 'carArmor.mjs')).href));
   ({ carGarageIcon } = await import(pathToFileURL(path.join(outdir, 'carGarageIcon.mjs')).href));
+  ({ RagdollVisuals } = await import(pathToFileURL(path.join(outdir, 'ragdollVisuals.mjs')).href));
+});
+
+test('ragdoll pieces follow physics poses and show a brief collision flash', () => {
+  const visuals = new RagdollVisuals();
+  const names = ['torso', 'head', 'leftArm', 'rightArm', 'leftLeg', 'rightLeg'];
+  const parts = Object.fromEntries(names.map((name, index) => [name, { x: 30 + index, y: 2 + index, angle: index * .1 }]));
+  try {
+    visuals.update([{ id: 3, outfit: 0, hit: false, hitAge: 0, parts }]);
+    const group = visuals.group.getObjectByName('ragdoll-3');
+    assert.ok(group);
+    assert.equal(group.getObjectByName('head').position.x, 31);
+    assert.equal(group.children.at(-1).visible, false);
+    visuals.update([{ id: 3, outfit: 0, hit: true, hitAge: .1, parts }]);
+    assert.equal(group.children.at(-1).visible, true);
+    visuals.update([{ id: 3, outfit: 0, hit: true, hitAge: .4, parts }]);
+    assert.equal(group.children.at(-1).visible, false);
+    visuals.update([]);
+    assert.equal(visuals.group.children.length, 0);
+  } finally { visuals.dispose(); }
+});
+
+test('ragdoll outfits render with four distinct shirt colors', () => {
+  const visuals = new RagdollVisuals();
+  const parts = Object.fromEntries(['torso', 'head', 'leftArm', 'rightArm', 'leftLeg', 'rightLeg']
+    .map(name => [name, { x: 0, y: 1, angle: 0 }]));
+  try {
+    visuals.update([0, 1, 2, 3].map(outfit => ({ id: outfit, outfit, hit: false, hitAge: 0, parts })));
+    const colors = [0, 1, 2, 3].map(id => visuals.group.getObjectByName(`ragdoll-${id}`)
+      .getObjectByName('torso').material.color.getHexString());
+    assert.equal(new Set(colors).size, 4);
+  } finally { visuals.dispose(); }
 });
 
 function positions(mesh) {

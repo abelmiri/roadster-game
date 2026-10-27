@@ -26,11 +26,13 @@ let RAMP_APPROACH;
 let RAMP_LANDING;
 let loopGeometry;
 let sprungBodyPose;
+let ragdollsBetween;
+let Ragdoll;
 
 before(async () => {
   const outdir = path.resolve('node_modules/.cache/roadster-tests');
   await build({
-    entryPoints: ['src/game/physics.ts', 'src/game/track.ts', 'src/game/vehicle.ts'],
+    entryPoints: ['src/game/physics.ts', 'src/game/track.ts', 'src/game/vehicle.ts', 'src/game/ragdoll.ts'],
     bundle: true,
     platform: 'node',
     format: 'esm',
@@ -41,9 +43,10 @@ before(async () => {
   await RAPIER.init();
   ({ GamePhysics, FIXED_STEP, START_SPEED, cruiseSpeedForDistance } = await import(pathToFileURL(path.join(outdir, 'physics.mjs')).href));
   ({ TrackGenerator, roadHeight, roadSlope, loopsBetween, loopGeometry, rampsBetween, RAMP_UNLOCK_DISTANCE,
-    RAMP_MIN_SPACING, RAMP_MAX_SPACING, RAMP_APPROACH, RAMP_LANDING } = await import(pathToFileURL(path.join(outdir, 'track.mjs')).href));
+    RAMP_MIN_SPACING, RAMP_MAX_SPACING, RAMP_APPROACH, RAMP_LANDING, ragdollsBetween } = await import(pathToFileURL(path.join(outdir, 'track.mjs')).href));
   ({ CAR_WHEEL_RADIUS, CAR_WHEEL_OFFSET, CAR_AXLE_Y, CAR_BODY_CLEARANCE, CAR_ARCH_RADIUS, sprungBodyPose } =
     await import(pathToFileURL(path.join(outdir, 'vehicle.mjs')).href));
+  ({ Ragdoll } = await import(pathToFileURL(path.join(outdir, 'ragdoll.mjs')).href));
 });
 
 const idle = { jumpPressed: false, jumpHeld: false, suction: false, boost: false };
@@ -107,6 +110,91 @@ test('track chunks are deterministic, continuous, and leave a run-up to each gap
       assert.equal(hazard.y, roadHeight(hazard.x));
     }
   }
+});
+
+test('ragdoll spawns vary within 300–500 meters and stay on clear road', () => {
+  const track = new TrackGenerator();
+  const spawns = ragdollsBetween(0, 10000);
+  assert.ok(spawns.length > 20);
+  const sites = new Map();
+  for (const spec of spawns) {
+    if (!sites.has(spec.siteId)) sites.set(spec.siteId, []);
+    sites.get(spec.siteId).push(spec);
+  }
+  let previous = 7;
+  const spacings = new Set();
+  const groupSizes = new Set();
+  const outfits = new Set();
+  for (const members of sites.values()) {
+    const center = (members[0].x + members.at(-1).x) / 2;
+    const spacing = center - previous;
+    assert.ok(spacing >= 300 && spacing <= 500, `site ${members[0].siteId}: ${spacing}m spacing`);
+    assert.ok(members.length <= 3);
+    for (let index = 1; index < members.length; index++) {
+      assert.ok(Math.abs(members[index].x - members[index - 1].x - 2.2) < 1e-9);
+    }
+    groupSizes.add(members.length);
+    spacings.add(Math.round(spacing));
+    previous = center;
+  }
+  for (const spec of spawns) {
+    assert.ok(track.hasRoad(spec.x - 1) && track.hasRoad(spec.x + 1));
+    assert.equal(loopsBetween(spec.x - 17, spec.x + 17).length, 0);
+    for (let index = Math.floor((spec.x - 8) / 30); index <= Math.floor((spec.x + 8) / 30); index++) {
+      assert.ok(track.chunk(index).hazards.every(hazard => Math.abs(hazard.x - spec.x) >= 8));
+    }
+    assert.equal(spec.y, roadHeight(spec.x));
+    outfits.add(spec.outfit);
+  }
+  assert.ok(spacings.size > 15, 'spawn spacing should vary');
+  assert.deepEqual([...groupSizes].sort(), [1, 2, 3]);
+  assert.deepEqual([...outfits].sort(), [0, 1, 2, 3]);
+  assert.deepEqual(ragdollsBetween(0, 10000), spawns);
+});
+
+test('car collision throws a jointed ragdoll without costing health', () => {
+  const spec = ragdollsBetween(0, 1000)[0];
+  const game = new GamePhysics(spec.x - 12);
+  try {
+    const disableHazards = () => {
+      for (const chunk of game.chunks.values()) for (const hazard of chunk.hazards) hazard.collider.setEnabled(false);
+    };
+    let actor;
+    for (let step = 0; step < 250 && !game.crashed; step++) {
+      disableHazards();
+      game.step(idle);
+      actor = game.ragdolls.get(spec.id);
+      if (actor?.hit) break;
+    }
+    assert.ok(actor?.hit, 'the car did not trigger the ragdoll collision');
+    assert.ok(game.ragdollHitSerial > 0);
+    assert.equal(game.snapshot(1).health, 100);
+    assert.equal(game.snapshot(1).impactSerial, 0);
+    assert.ok(actor.bodies.torso.linvel().x > 5, 'the collision did not throw the ragdoll');
+    assert.equal(game.snapshot(1).ragdolls[0].parts.head.x, actor.bodies.head.translation().x);
+    for (let step = 0; step < 90 && !game.crashed; step++) { disableHazards(); game.step(idle); }
+    const moved = game.ragdolls.get(spec.id);
+    assert.ok(moved?.hitAge > 0);
+    assert.ok(moved.bodies.torso.translation().x > spec.x + 2);
+    assert.equal(game.snapshot(1).health, 100);
+  } finally { game.dispose(); }
+});
+
+test('launched ragdoll parts collide with a floor and a solid obstacle', () => {
+  const world = new RAPIER.World({ x: 0, y: -20 });
+  world.timestep = FIXED_STEP;
+  world.createCollider(RAPIER.ColliderDesc.cuboid(20, .25).setTranslation(0, -.25));
+  world.createCollider(RAPIER.ColliderDesc.cuboid(.3, 5).setTranslation(4, 4));
+  const actor = new Ragdoll(world, { id: 0, siteId: 0, x: 0, y: 0, outfit: 0 });
+  try {
+    assert.equal(actor.launch(12), true);
+    assert.equal(actor.launch(12), false, 'one collision must not relaunch the ragdoll');
+    for (let step = 0; step < 240; step++) { actor.beforeStep(FIXED_STEP); world.step(); }
+    const positions = Object.values(actor.snapshot(1).parts);
+    assert.ok(positions.every(part => part.x < 4.8), 'a limb passed through the obstacle');
+    assert.ok(positions.every(part => part.y > -.6), 'a limb fell through the floor');
+    assert.ok(positions.some(part => Math.abs(part.angle) > .2), 'the ragdoll never tumbled');
+  } finally { actor.dispose(); world.free(); }
 });
 
 test('obstacles have wider average spacing and added road contours remain smooth', () => {
@@ -509,6 +597,33 @@ test('holding jump gains height, a second press works, and a third press is igno
   assert.ok(long > short + 0.1, `short=${short}, long=${long}`);
   assert.ok(double > long + 0.3, `long=${long}, double=${double}`);
   assert.ok(Math.abs(triple - double) < 0.02, `double=${double}, triple=${triple}`);
+});
+
+test('falling without a ground jump keeps both mid-air jumps available', () => {
+  const game = new GamePhysics(-60);
+  try {
+    const position = game.car.translation();
+    game.car.setTranslation({ x: position.x, y: position.y + 8 }, true);
+    game.car.setLinvel({ x: START_SPEED, y: -1 }, true);
+    stepFor(game, .2);
+    const falling = game.snapshot(1);
+    assert.equal(falling.grounded, false);
+    assert.equal(falling.jumpsUsed, 0);
+    assert.equal(falling.jumpSerial, 0);
+    const fallingSpeed = game.car.linvel().y;
+
+    game.step({ ...idle, jumpPressed: true, jumpHeld: true });
+    assert.equal(game.snapshot(1).jumpsUsed, 1);
+    assert.equal(game.snapshot(1).jumpSerial, 1);
+    assert.ok(game.car.linvel().y > fallingSpeed + 8);
+
+    game.step({ ...idle, jumpPressed: true, jumpHeld: true });
+    assert.equal(game.snapshot(1).jumpsUsed, 2);
+    assert.equal(game.snapshot(1).jumpSerial, 2);
+    game.step({ ...idle, jumpPressed: true, jumpHeld: true });
+    assert.equal(game.snapshot(1).jumpSerial, 2, 'a third mid-air jump must remain unavailable');
+    assert.equal(game.crashed, false);
+  } finally { game.dispose(); }
 });
 
 test('Space jumps and double jumps neutralize takeoff spin and gradually level the car', () => {

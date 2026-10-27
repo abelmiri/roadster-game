@@ -22,6 +22,7 @@ import { PoliceVisual } from './policeVisual';
 import { carVisibleDuringProtection } from './damage';
 import { CombatVisual, WeaponVisual } from './weaponVisual';
 import { MagneticShield, RandomBoxVisuals } from './powerVisuals';
+import { RagdollVisuals } from './ragdollVisuals';
 
 interface Theme {
   sky: string; haze: string; far: string; middle: string; near: string;
@@ -115,6 +116,7 @@ export class GameVisuals {
   private readonly combat = new CombatVisual();
   private readonly shield = new MagneticShield();
   private readonly randomBoxes = new RandomBoxVisuals();
+  private readonly ragdolls = new RagdollVisuals();
   private readonly loops = new Map<number, THREE.Group>();
   private viewHeight = VIEW_HALF_HEIGHT;
   private sun!: THREE.Mesh;
@@ -150,7 +152,8 @@ export class GameVisuals {
     this.worldGroup.add(this.armor.debris);
     this.wheelGroups = [createRoadsterWheel(), createRoadsterWheel()];
     this.worldGroup.add(this.carGroup, ...this.wheelGroups, this.smoke.mesh, this.debris.mesh, this.sparks.mesh,
-      this.police.group, this.policeWreck.group, this.policeSmoke.mesh, this.combat.group, this.depot.group, this.randomBoxes.group);
+      this.police.group, this.policeWreck.group, this.policeSmoke.mesh, this.combat.group, this.depot.group,
+      this.randomBoxes.group, this.ragdolls.group);
     this.fanGlow = box(1.8, 0.07, 0.55, new THREE.MeshBasicMaterial({ color: '#58f4dd', transparent: true, opacity: 0.8 }));
     this.fanGlow.position.set(0, -0.48, 0.08);
     this.fanGlow.visible = false;
@@ -474,6 +477,7 @@ export class GameVisuals {
     this.syncLoops(snapshot.car.x);
     this.randomBoxes.update(physics.randomBoxStates, sceneDelta, running && !impactFrozen,
       snapshot.boxRewardEvents, snapshot.boxRewardSerial);
+    this.ragdolls.update(snapshot.ragdolls ?? []);
     this.updateTheme(snapshot.distance);
     const body = sprungBodyPose(snapshot.car, snapshot.suspensionOffset, snapshot.suspensionPitch);
     this.carGroup.position.set(body.x, body.y, 1.15);
@@ -580,7 +584,7 @@ export class GameVisuals {
     this.policeSmoke.dispose();
     this.weapon.dispose();
     this.combat.dispose();
-    this.shield.dispose(); this.randomBoxes.dispose();
+    this.shield.dispose(); this.randomBoxes.dispose(); this.ragdolls.dispose();
     this.blur.dispose();
     this.groundMat.dispose();
     this.renderer.dispose();

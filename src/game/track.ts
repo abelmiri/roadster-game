@@ -29,6 +29,14 @@ export interface TrackChunk {
 
 export interface LoopSpec { id: number; entryX: number; radius: number }
 const loops: LoopSpec[] = [];
+export interface RagdollSpec { id: number; siteId: number; x: number; y: number; outfit: number }
+export const RAGDOLL_MIN_SPACING = 300;
+export const RAGDOLL_MAX_SPACING = 500;
+export const RAGDOLL_OUTFIT_COUNT = 4;
+const RAGDOLL_GROUP_GAP = 2.2;
+const ragdollSites: number[] = [];
+const ragdollSpawns: RagdollSpec[] = [];
+let ragdollPlacementTrack: TrackGenerator | undefined;
 
 export const RAMP_UNLOCK_DISTANCE = 800;
 const RAMP_UNLOCK_X = 7 + RAMP_UNLOCK_DISTANCE;
@@ -237,6 +245,67 @@ const fractional = (value: number): number => value - Math.floor(value);
 
 export function hash(seed: number): number {
   return fractional(Math.sin(seed * 127.1 + 78.233) * 43758.5453);
+}
+
+function ensureRagdolls(end: number): void {
+  if (!ragdollPlacementTrack) ragdollPlacementTrack = new TrackGenerator();
+  while (!ragdollSites.length || ragdollSites[ragdollSites.length - 1] < end) {
+    const siteId = ragdollSites.length;
+    const previous = siteId ? ragdollSites[siteId - 1] : 7;
+    const target = previous + 340 + hash(siteId + 2077) * 120;
+    const groupRoll = hash(siteId + 3419);
+    const count = groupRoll < .16 ? 3 : groupRoll < .43 ? 2 : 1;
+    const memberXs = (center: number, size: number): number[] =>
+      Array.from({ length: size }, (_, member) => center + (member - (size - 1) / 2) * RAGDOLL_GROUP_GAP);
+    const clear = (x: number): boolean => {
+      if (!ragdollPlacementTrack!.hasRoad(x - 1) || !ragdollPlacementTrack!.hasRoad(x + 1)) return false;
+      if (loopsBetween(x - 17, x + 17).length) return false;
+      const first = Math.floor((x - 8) / CHUNK_LENGTH);
+      const last = Math.floor((x + 8) / CHUNK_LENGTH);
+      for (let index = first; index <= last; index++) {
+        if (ragdollPlacementTrack!.chunk(index).hazards.some(hazard => Math.abs(hazard.x - x) < 8)) return false;
+      }
+      return true;
+    };
+    let center = target;
+    let size = count;
+    let placed = false;
+    for (const candidateSize of [count, 1]) {
+      for (const offset of [0, -4, 4, -8, 8, -12, 12, -16, 16, -20, 20]) {
+        const candidate = target + offset;
+        if (!memberXs(candidate, candidateSize).every(clear)) continue;
+        center = candidate;
+        size = candidateSize;
+        placed = true;
+        break;
+      }
+      if (placed) break;
+    }
+    ragdollSites.push(center);
+    for (const x of memberXs(center, size)) {
+      const id = ragdollSpawns.length;
+      ragdollSpawns.push({ id, siteId, x, y: roadHeight(x),
+        outfit: Math.floor(hash(id + 6291) * RAGDOLL_OUTFIT_COUNT) });
+    }
+    ragdollPlacementTrack.trim(Math.floor(center / CHUNK_LENGTH) - 5);
+  }
+}
+
+export function ragdollsBetween(start: number, end: number): RagdollSpec[] {
+  if (end < 0 || end < start) return [];
+  ensureRagdolls(end);
+  let low = 0;
+  let high = ragdollSpawns.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (ragdollSpawns[mid].x < start) low = mid + 1;
+    else high = mid;
+  }
+  const result: RagdollSpec[] = [];
+  for (let index = low; index < ragdollSpawns.length && ragdollSpawns[index].x <= end; index++) {
+    result.push(ragdollSpawns[index]);
+  }
+  return result;
 }
 
 /** The same continuous curve drives the visible road and its physics collider. */

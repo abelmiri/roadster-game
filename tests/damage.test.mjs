@@ -209,6 +209,18 @@ test('zero elapsed time holds explosion slow motion and reset restores normal sp
   assert.equal(slow.timeScale, 1);
   assert.equal(slow.consume(.2), .2);
 });
+test('ragdoll collision slow motion lasts longer than explosion slow motion', () => {
+  const slow = new ExplosionSlowMotion(.65, 1.4, .2);
+  slow.start();
+  slow.consume(.65);
+  assert.ok(Math.abs(slow.timeScale - .2) < 1e-9);
+  slow.consume(.55);
+  assert.equal(slow.active, true, 'the collision should still be slowed after a normal explosion ends');
+  assert.ok(slow.timeScale < 1);
+  slow.consume(.85);
+  assert.equal(slow.active, false);
+  assert.equal(slow.timeScale, 1);
+});
 test('flashing shares the immunity timer; the impact freeze and final recovery are visible', () => {
   assert.equal(carVisibleDuringProtection(1.5, true), true);
   const phases = Array.from({ length: 12 }, (_, i) => carVisibleDuringProtection(1.5 - i / 8, false));

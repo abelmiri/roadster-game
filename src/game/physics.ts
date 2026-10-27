@@ -1,6 +1,6 @@
 import RAPIER from '@dimforge/rapier2d-compat';
 import type { Collider, EventQueue, RigidBody, World } from '@dimforge/rapier2d-compat';
-import { CHUNK_LENGTH, START_APRON_X, BOX_UNLOCK_DISTANCE, TrackGenerator, roadHeight, roadSlope, sampleRoad, loopsBetween, loopGeometry, rampAt, RAMP_BOOSTER_LENGTH, type LoopSpec, type HazardSpec, type TrackChunk } from './track';
+import { CHUNK_LENGTH, START_APRON_X, BOX_UNLOCK_DISTANCE, TrackGenerator, roadHeight, roadSlope, sampleRoad, loopsBetween, loopGeometry, rampAt, ragdollsBetween, RAMP_BOOSTER_LENGTH, type LoopSpec, type HazardSpec, type TrackChunk } from './track';
 import { CAR_AXLE_Y, CAR_BODY_CLEARANCE, CAR_WHEEL_OFFSET, CAR_WHEEL_RADIUS, sprungBodyPose } from './vehicle';
 import { VehicleSuspension } from './suspension';
 import { WheelContactPhysics, ROAD_GRAVITY, type ContactBody } from './wheelContact';
@@ -15,6 +15,7 @@ import { CAR_UPGRADE_IDS, carUpgradeLevel, carUpgradeStats, type CarUpgrades } f
 import { RandomBoxRewards, type RandomBoxSpec, type BoxRewardEvent } from './randomBox';
 import { RunMissionTracker, type MissionStats } from './missionStats';
 import { carModel, type CarModelId } from './carModels';
+import { Ragdoll, type RagdollSnapshot } from './ragdoll';
 
 export const FIXED_STEP = 1 / 120;
 export const START_SPEED = 60 / 3.6;
@@ -92,6 +93,7 @@ export interface GameSnapshot {
   boxXp: number;
   boxRewardSerial: number;
   boxRewardEvents: readonly BoxRewardEvent[];
+  ragdolls: readonly RagdollSnapshot[];
   missionStats: MissionStats;
 }
 
@@ -126,10 +128,13 @@ export class GamePhysics {
   private readonly events: EventQueue;
   private readonly carColliders = new Set<number>();
   private readonly hazardColliders = new Map<number, ActiveHazard>();
+  readonly ragdolls = new Map<number, Ragdoll>();
+  private readonly ragdollColliders = new Map<number, Ragdoll>();
+  private readonly hitRagdolls = new Set<number>();
+  ragdollHitSerial = 0;
   private previous: [BodyPose, BodyPose, BodyPose];
   private current: [BodyPose, BodyPose, BodyPose];
   private time = 0;
-  private groundGrace = 0;
   private jumpLock = 0;
   private jumpHoldTime = 0;
   private jumpJetActive = false;
@@ -383,6 +388,30 @@ export class GamePhysics {
     this.generator.trim(first);
   }
 
+  private syncRagdolls(x: number): void {
+    for (const spec of ragdollsBetween(x - 65, x + 90)) {
+      if (this.ragdolls.has(spec.id) || this.hitRagdolls.has(spec.id)) continue;
+      const actor = new Ragdoll(this.world, spec);
+      this.ragdolls.set(spec.id, actor);
+      for (const collider of actor.colliders) this.ragdollColliders.set(collider.handle, actor);
+    }
+    for (const [id, actor] of this.ragdolls) {
+      if (actor.spec.x >= x - 110 && actor.hitAge < 8 && actor.bodies.torso.translation().x < x + 135) continue;
+      for (const collider of actor.colliders) this.ragdollColliders.delete(collider.handle);
+      actor.dispose();
+      this.ragdolls.delete(id);
+    }
+  }
+
+  private launchRagdoll(first: number, second: number, carSpeed: number): void {
+    const actor = this.carColliders.has(first) ? this.ragdollColliders.get(second)
+      : this.carColliders.has(second) ? this.ragdollColliders.get(first) : undefined;
+    if (actor?.launch(carSpeed)) {
+      this.hitRagdolls.add(actor.spec.id);
+      this.ragdollHitSerial++;
+    }
+  }
+
   private updateHazards(): void {
     for (const chunk of this.chunks.values()) {
       for (const hazard of chunk.hazards) {
@@ -461,7 +490,6 @@ export class GamePhysics {
       // attemptedLoops already prevents re-entering the magnetic branch.
       this.jumpLock = 0;
       this.jumpHoldTime = 1;
-      this.groundGrace = 0;
       this.car.setRotation(Math.atan2(Math.sin(this.car.rotation()), Math.cos(this.car.rotation())), true);
       this.roadContact.release(this.contactBody(), this.wheelAngle);
       this.setGravity(0);
@@ -476,7 +504,9 @@ export class GamePhysics {
     const theta = angle - Math.PI / 2;
     this.updateHazards();
     this.world.step(this.events);
-    this.events.drainCollisionEvents(() => {});
+    this.events.drainCollisionEvents((first, second, started) => {
+      if (started) this.launchRagdoll(first, second, active.speed);
+    });
     this.car.setTranslation({ x: geometry.x + radius * Math.cos(theta), y: geometry.y + radius * Math.sin(theta) }, true);
     this.car.setRotation(angle, true);
     this.car.setLinvel({ x: active.speed * Math.cos(angle), y: active.speed * Math.sin(angle) }, true);
@@ -499,7 +529,6 @@ export class GamePhysics {
       this.jumpLock = 0;
       this.jumpHoldTime = 1;
       this.jumpCount = 0;
-      this.groundGrace = 0.10;
       this.car.setRotation(geometry.angle, true);
       const support = this.roadSupport(this.car.translation().x);
       if (support) this.car.setTranslation({ x: this.car.translation().x, y: support.y }, true);
@@ -683,6 +712,8 @@ export class GamePhysics {
     this.jumpLock = Math.max(0, this.jumpLock - FIXED_STEP);
     const before = this.contactBody();
     this.ensureChunks(before.x);
+    this.syncRagdolls(before.x);
+    for (const actor of this.ragdolls.values()) actor.beforeStep(FIXED_STEP);
     if (this.stepLoop(controls)) {
       this.airborneRotation = 0;
       this.airborneFlips = 0;
@@ -698,10 +729,10 @@ export class GamePhysics {
       return;
     }
     if (!this.roadContact.hasContact(before)) this.isGrounded = false;
-    this.groundGrace = this.isGrounded ? 0.10 : Math.max(0, this.groundGrace - FIXED_STEP);
     if (this.isGrounded && this.jumpLock === 0) this.jumpCount = 0;
     if (controls.jumpPressed) {
-      const firstJump = this.jumpCount === 0 && (this.isGrounded || this.groundGrace > 0);
+      // A fall or ramp launch still leaves the first jump available in mid-air.
+      const firstJump = this.jumpCount === 0;
       const secondJump = this.jumpCount === 1 && !this.isGrounded;
       if (firstJump || secondJump) {
         // Add lift vertically while retaining the climb's upward momentum.
@@ -715,7 +746,6 @@ export class GamePhysics {
         if (firstJump) this.runMissions.stats.jumps++;
         else this.runMissions.stats.doubleJumps++;
         this.jumpSerial++;
-        this.groundGrace = 0;
         this.jumpLock = 0.16;
         this.jumpHoldTime = 0;
         this.isGrounded = false;
@@ -747,7 +777,6 @@ export class GamePhysics {
       this.landingImpact = clamp(Math.max(...this.roadContact.wheels.map((wheel) => wheel.impact)) / 18, 0, 1);
       this.jumpCount = 0;
       this.jumpHoldTime = 1;
-      this.groundGrace = 0.10;
     }
     this.car.setTranslation({ x: body.x, y: body.y }, true);
     this.car.setRotation(body.angle, true);
@@ -759,6 +788,7 @@ export class GamePhysics {
     this.world.step(this.events);
     this.events.drainCollisionEvents((first, second, started) => {
       if (!started) return;
+      this.launchRagdoll(first, second, body.vx);
       const hazard = this.carColliders.has(first) ? this.hazardColliders.get(second)
         : this.carColliders.has(second) ? this.hazardColliders.get(first) : undefined;
       if (hazard && hazard.health > 0) {
@@ -859,12 +889,14 @@ export class GamePhysics {
     for (const event of this.breakEvents) event.age += FIXED_STEP;
     const partXs = [this.car, ...this.wheels].map(part => part.translation().x);
     this.ensureChunks(Math.max(...partXs), Math.min(...partXs));
+    for (const actor of this.ragdolls.values()) actor.beforeStep(FIXED_STEP);
     this.updateHazards();
     const velocityBefore = this.car.linvel();
     const spinBefore = this.car.angvel();
     this.world.step(this.events);
     this.events.drainCollisionEvents((first, second, started) => {
       if (!started) return;
+      this.launchRagdoll(first, second, velocityBefore.x);
       const partHandle = this.carColliders.has(first) ? first : this.carColliders.has(second) ? second : undefined;
       if (partHandle === undefined) return;
       const other = partHandle === first ? second : first;
@@ -956,6 +988,7 @@ export class GamePhysics {
       unlimitedBoostRemaining: this.boxRewards.boostRemaining,
       boxCoins: this.boxRewards.coins, boxXp: this.boxRewards.xp,
       boxRewardSerial: this.boxRewards.serial, boxRewardEvents: this.boxRewards.events,
+      ragdolls: Array.from(this.ragdolls.values(), actor => actor.snapshot(alpha)),
       missionStats: { ...this.runMissions.stats },
     };
   }
