@@ -149,6 +149,8 @@ export class GamePhysics {
   private readonly ragdollColliders = new Map<number, Ragdoll>();
   private readonly hitRagdolls = new Set<number>();
   private readonly activatedRagdolls = new Set<number>();
+  private readonly mannequinsShot = new Set<number>();
+  private readonly mannequinsRammed = new Set<number>();
   ragdollHitSerial = 0;
   private ragdollGroundSerial = 0;
   private readonly ragdollGroundEvents: RagdollGroundEvent[] = [];
@@ -447,6 +449,10 @@ export class GamePhysics {
     const partPosition = struckPart.translation();
     if (actor.launch({ ...impact, x: partPosition.x, y: partPosition.y,
       angle: struckPart.rotation() }, partName)) {
+      if (this.mannequinsRammed.add(actor.spec.id)) {
+        this.runMissions.stats.ragdollsRammed = this.mannequinsRammed.size;
+        this.updateRagdollMissionMix();
+      }
       const firstImpact = !this.hitRagdolls.has(actor.spec.id);
       if (firstImpact) {
         // Let nearby members of the same group move through actual joint and
@@ -463,6 +469,12 @@ export class GamePhysics {
         this.ragdollHitSerial++;
       }
     }
+  }
+
+  private updateRagdollMissionMix(): void {
+    this.runMissions.stats.ragdollsShot = this.mannequinsShot.size;
+    this.runMissions.stats.ragdollsRammed = this.mannequinsRammed.size;
+    this.runMissions.stats.ragdollMix = Math.min(this.mannequinsShot.size, this.mannequinsRammed.size);
   }
 
   private resolveRagdollContact(first: number, second: number): void {
@@ -722,6 +734,8 @@ export class GamePhysics {
           actor.shoot({ x: hit?.x ?? target.x, y: hit?.y ?? target.y,
             vx: hit?.vx ?? 0, vy: hit?.vy ?? 0, angle: Math.atan2(hit?.vy ?? 0, hit?.vx ?? 1) },
           partName as RagdollPartName);
+          this.mannequinsShot.add(actor.spec.id);
+          this.updateRagdollMissionMix();
           this.hitRagdolls.add(actor.spec.id);
           this.ragdollHitSerial++;
         }
@@ -750,6 +764,7 @@ export class GamePhysics {
             health: this.damage.health < this.damage.maxHealth,
             ammo: activeWeapon.ammo < activeWeapon.capacity,
           });
+          if (reward && box.airborne) this.runMissions.stats.airBoxesOpened++;
           if (reward?.kind === 'health') this.damage.restoreUnit();
           else if (reward?.kind === 'ammo') this.weapon.refillActive();
           this.boxHealth.delete(target.id);

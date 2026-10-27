@@ -2,6 +2,7 @@ export const emptyMissionStats = () => ({
   distance: 0, maxSpeed: 0, speed80Seconds: 0, nightReached: 0, nightSeconds: 0,
   forwardFlips: 0, backflips: 0, jumps: 0, doubleJumps: 0, obstaclesShot: 0,
   dronesShot: 0, pulsesShot: 0, hazardsRammed: 0, dronesRammed: 0, policeDestroyed: 0,
+  ragdollsShot: 0, ragdollsRammed: 0, ragdollMix: 0, airBoxesOpened: 0,
   emptyWeapons: 0, boxesOpened: 0, loops: 0, longestFlight: 0, airSeconds: 0,
   boostSeconds: 0, cleanDistance: 0, noFireDistance: 0, noBoostDistance: 0,
   rampBoosts: 0, roofHits: 0, shots: 0, elapsed: 0,
