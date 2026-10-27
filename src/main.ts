@@ -60,6 +60,9 @@ app.innerHTML = `
           <button id="sound-button" class="icon-button sound-button" type="button" aria-pressed="true">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4 6 8H3v8h3l5 4Z"/><path class="sound-waves" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/><path class="sound-slash" d="m15 9 6 6m0-6-6 6"/></svg>
           </button>
+          <button id="music-button" class="icon-button music-button" type="button" aria-pressed="true">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/><path class="music-slash" d="m3 3 18 18"/></svg>
+          </button>
           <button id="language-button" class="language-button" type="button"><span id="language-en" lang="en" dir="ltr">EN</span><span class="language-separator" aria-hidden="true">/</span><span id="language-fa" lang="fa" dir="rtl">فارسی</span></button>
         </div>
       </div>
@@ -314,15 +317,18 @@ const speedLabel = element<HTMLSpanElement>('speed');
 const districtLabel = element<HTMLSpanElement>('district');
 const pauseButton = element<HTMLButtonElement>('pause-button');
 const soundButton = element<HTMLButtonElement>('sound-button');
+const musicButton = element<HTMLButtonElement>('music-button');
 const languageButton = element<HTMLButtonElement>('language-button');
 const audio = new GameAudio();
-const unlockMenuMusicOnFirstGesture = (): void => {
-  void audio.unlock().then(() => audio.setMenuMusic(
-    status !== 'running' && status !== 'loading' && status !== 'error' && !(status === 'crashed' && crashMenuHidden),
-  ));
+const musicShouldPlay = (): boolean => audio.musicOn && status !== 'loading' && status !== 'error' &&
+  !(status === 'crashed' && crashMenuHidden);
+const unlockAudioOnUserGesture = (): void => {
+  const syncMusic = (): void => audio.setMenuMusic(musicShouldPlay());
+  if (audio.needsUnlock) void audio.unlock().then(syncMusic);
+  else syncMusic();
 };
-document.addEventListener('pointerdown', unlockMenuMusicOnFirstGesture, { once: true, capture: true });
-document.addEventListener('keydown', unlockMenuMusicOnFirstGesture, { once: true, capture: true });
+document.addEventListener('pointerdown', unlockAudioOnUserGesture, { capture: true });
+document.addEventListener('keydown', unlockAudioOnUserGesture, { capture: true });
 let progressStorage: Storage | undefined;
 try { progressStorage = localStorage; } catch { /* Keep the game playable when browser storage is unavailable. */ }
 const sync = progressStorage ? new GameSync(progressStorage) : null;
@@ -817,6 +823,13 @@ function updateAudioButton(): void {
   soundButton.title = t(audio.muted ? 'unmuteTitle' : 'muteTitle');
 }
 
+function updateMusicButton(): void {
+  musicButton.classList.toggle('is-music-muted', !audio.musicOn);
+  musicButton.setAttribute('aria-pressed', String(audio.musicOn));
+  musicButton.setAttribute('aria-label', t(audio.musicOn ? 'muteMusic' : 'unmuteMusic'));
+  musicButton.title = t(audio.musicOn ? 'muteMusicTitle' : 'unmuteMusicTitle');
+}
+
 function updatePauseButton(): void {
   const paused = status === 'paused';
   pauseButton.classList.toggle('is-paused', paused);
@@ -975,7 +988,7 @@ function setOverlay(mode: 'ready' | 'paused' | 'crashed'): void {
   resumeCountdownUi.hidden = true;
   crashMenuToggle.hidden = mode !== 'crashed' || !crashMenuHidden;
   watchCrashButton.hidden = mode !== 'crashed';
-  audio.setMenuMusic(mode !== 'crashed' || !crashMenuHidden);
+  audio.setMenuMusic(musicShouldPlay());
   overlay.classList.toggle('is-game-over', mode === 'crashed');
   overlay.classList.toggle('is-compact', mode !== 'ready');
   controlsSummary.hidden = mode !== 'ready';
@@ -1058,6 +1071,7 @@ function updateLanguage(): void {
   element('language-en').classList.toggle('is-active', getLanguage() === 'en');
   element('language-fa').classList.toggle('is-active', getLanguage() === 'fa');
   updateAudioButton();
+  updateMusicButton();
   updatePauseButton();
   updateHud(physics?.snapshot(Math.min(1, accumulator / FIXED_STEP)));
   if (status === 'ready' || status === 'paused' || status === 'crashed') setOverlay(status);
@@ -1125,7 +1139,7 @@ async function start(): Promise<void> {
   if (resuming) clearHeld();
   status = 'running';
   crashMenuHidden = false;
-  audio.setMenuMusic(false);
+  audio.setMenuMusic(musicShouldPlay());
   crashMenuToggle.hidden = true;
   watchCrashButton.hidden = true;
   overlay.classList.remove('is-visible');
@@ -1631,6 +1645,14 @@ function toggleSound(): void {
   soundButton.blur();
 }
 
+function toggleMusic(): void {
+  audio.toggleMusic();
+  audio.setMenuMusic(musicShouldPlay());
+  updateMusicButton();
+  audio.play('click');
+  musicButton.blur();
+}
+
 window.addEventListener('keydown', (event) => {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
   if (!purchaseDialog.hidden) {
@@ -1746,7 +1768,7 @@ primaryButton.addEventListener('click', start);
 watchCrashButton.addEventListener('click', () => {
   if (status !== 'crashed') return;
   crashMenuHidden = true;
-  audio.setMenuMusic(false);
+  audio.setMenuMusic(musicShouldPlay());
   overlay.classList.remove('is-visible');
   crashMenuToggle.hidden = false;
 });
@@ -1758,6 +1780,7 @@ crashMenuToggle.addEventListener('click', () => {
 resumeCountdownUi.addEventListener('click', cancelResumeCountdown);
 pauseButton.addEventListener('click', () => { if (status === 'running') pause(); else if (status === 'paused') start(); });
 soundButton.addEventListener('click', toggleSound);
+musicButton.addEventListener('click', toggleMusic);
 languageButton.addEventListener('click', () => {
   setLanguage(getLanguage() === 'en' ? 'fa' : 'en');
   updateLanguage();

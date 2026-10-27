@@ -23,16 +23,12 @@ interface SoundLoops {
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 const STORAGE_KEY = 'roadster-muted';
-const MENU_MELODY = [72, 0, 76, 79, 76, 0, 74, 72,
-  71, 0, 74, 79, 74, 0, 71, 74,
-  72, 0, 76, 81, 79, 76, 0, 72,
-  69, 0, 72, 77, 76, 72, 69, 0];
-const MENU_CHORDS = [[60, 64, 67, 72], [55, 59, 62, 67], [57, 60, 64, 69], [53, 57, 60, 65]];
-const MENU_BASS = [36, 43, 45, 41];
+const MUSIC_STORAGE_KEY = 'roadster-music-enabled';
+const MENU_MUSIC_URL = new URL('../../assets/music/Saints Row_ The Third [Soundtrack] - Track  01 - Saints Row The Third - (320 Kbps).mp3', import.meta.url).href;
 
-/** Original, synthesised game audio. No downloads or decoding delay are needed.
- * A small persistent graph supplies the electric drive and air textures; action
- * sounds use short, disposable voices. The context is created only after input.
+/** Synthesised effects plus the bundled music track. A persistent graph supplies
+ * the electric drive and air textures; action sounds use short, disposable voices.
+ * The audio context and media source are created lazily and unlocked on input.
  */
 export class GameAudio {
   private context: AudioContext | null = null;
@@ -40,16 +36,16 @@ export class GameAudio {
   private noise: AudioBuffer | null = null;
   private loops: SoundLoops | null = null;
   private menuMusicGain: GainNode | null = null;
-  private menuMusicTimer: ReturnType<typeof setInterval> | null = null;
+  private menuMusicAudio: HTMLAudioElement | null = null;
+  private menuMusicPauseTimer: ReturnType<typeof setTimeout> | null = null;
   private menuMusicActive = false;
-  private menuMusicStep = 0;
-  private menuMusicNextTime = 0;
   private readonly loopSources: AudioScheduledSourceNode[] = [];
   private readonly voices = new Set<AudioScheduledSourceNode>();
   private readonly parameterTargets = new WeakMap<AudioParam, number>();
   private silent = false;
   private disposed = false;
   private running = false;
+  private musicEnabled = true;
   private suspendTimer: ReturnType<typeof setTimeout> | null = null;
   private lastLoopUpdate = -Infinity;
   private jumpSerial = 0;
@@ -61,9 +57,12 @@ export class GameAudio {
 
   constructor() {
     try { this.silent = localStorage.getItem(STORAGE_KEY) === 'true'; } catch { /* Private browsing can deny storage. */ }
+    try { this.musicEnabled = localStorage.getItem(MUSIC_STORAGE_KEY) !== 'false'; } catch { /* Music defaults to enabled. */ }
   }
 
   get muted(): boolean { return this.silent; }
+  get musicOn(): boolean { return this.musicEnabled; }
+  get needsUnlock(): boolean { return !this.context || this.context.state === 'suspended'; }
 
   /** Must be called from a pointer or keyboard event, including on Safari. */
   async unlock(): Promise<void> {
@@ -71,6 +70,7 @@ export class GameAudio {
     this.cancelSuspend();
     try {
       if (!this.context) this.createGraph();
+      if (this.menuMusicActive) this.playMenuTrack();
       if (this.context?.state === 'suspended') await this.context.resume();
       // A short silent buffer also unlocks older iOS Web Audio implementations.
       if (this.context && this.master) {
@@ -89,21 +89,32 @@ export class GameAudio {
   toggleMuted(): boolean {
     this.silent = !this.silent;
     try { localStorage.setItem(STORAGE_KEY, String(this.silent)); } catch { /* Storage is optional. */ }
-    if (this.master && this.context) this.target(this.master.gain, this.silent ? 0 : 0.62, 0.035);
+    if (this.master && this.context) this.target(this.master.gain, this.silent ? 0 : 1, 0.035);
     return this.silent;
   }
 
-  /** Chiptune loop for menus and pause screens; it is muted during gameplay. */
+  toggleMusic(): boolean {
+    this.musicEnabled = !this.musicEnabled;
+    try { localStorage.setItem(MUSIC_STORAGE_KEY, String(this.musicEnabled)); } catch { /* Storage is optional. */ }
+    return this.musicEnabled;
+  }
+
+  /** Starts or fades the soundtrack for gameplay, menus, and pause screens. */
   setMenuMusic(active: boolean): void {
     if (this.disposed) return;
-    this.menuMusicActive = active;
-    if (!active) {
-      if (this.menuMusicTimer !== null) clearInterval(this.menuMusicTimer);
-      this.menuMusicTimer = null;
-      if (this.context && this.menuMusicGain) this.target(this.menuMusicGain.gain, 0, 0.07);
+    this.menuMusicActive = active && this.musicEnabled;
+    if (!this.menuMusicActive) {
+      if (this.context && this.menuMusicGain) this.target(this.menuMusicGain.gain, 0, 0.42);
+      if (this.menuMusicPauseTimer !== null) clearTimeout(this.menuMusicPauseTimer);
+      this.menuMusicPauseTimer = setTimeout(() => {
+        this.menuMusicPauseTimer = null;
+        if (!this.menuMusicActive) this.menuMusicAudio?.pause();
+      }, 1400);
       return;
     }
     this.cancelSuspend();
+    if (!this.context) this.createGraph();
+    this.playMenuTrack();
     if (!this.context) return;
     if (this.context.state === 'suspended') {
       void this.context.resume().then(() => this.startMenuMusic()).catch(() => {});
@@ -113,51 +124,13 @@ export class GameAudio {
   private startMenuMusic(): void {
     if (!this.menuMusicActive || !this.context || !this.menuMusicGain || this.context.state !== 'running') return;
     this.cancelSuspend();
-    this.target(this.menuMusicGain.gain, 0.14, 0.12);
-    if (this.menuMusicTimer !== null) return;
-    this.menuMusicNextTime = this.context.currentTime + 0.04;
-    this.menuMusicTimer = setInterval(() => this.scheduleMenuMusic(), 80);
+    this.target(this.menuMusicGain.gain, 0.2, 0.42);
+    this.playMenuTrack();
   }
 
-  private scheduleMenuMusic(): void {
-    if (!this.menuMusicActive || !this.context || this.context.state !== 'running') return;
-    const beat = 60 / 98 / 2;
-    const horizon = this.context.currentTime + 0.18;
-    while (this.menuMusicNextTime < horizon) {
-      const step = this.menuMusicStep % MENU_MELODY.length;
-      const bar = Math.floor(step / 8);
-      const position = step % 8;
-      const lead = MENU_MELODY[step];
-      if (position === 0) {
-        for (const note of MENU_CHORDS[bar]) {
-          this.scheduleMenuTone(note, this.menuMusicNextTime, beat * 7.6, 'sine', 0.012, 0.12);
-        }
-        this.scheduleMenuTone(MENU_BASS[bar], this.menuMusicNextTime, beat * 5.8, 'triangle', 0.064);
-      }
-      if (position === 4) this.scheduleMenuTone(MENU_BASS[bar] + 7, this.menuMusicNextTime, beat * 3.2, 'triangle', 0.038);
-      if (lead) this.scheduleMenuTone(lead, this.menuMusicNextTime, beat * (position % 2 ? 0.62 : 0.78), 'triangle', 0.038);
-      if (position === 6 && lead) this.scheduleMenuTone(lead + 12, this.menuMusicNextTime, beat * 0.32, 'sine', 0.012);
-      this.menuMusicStep++;
-      this.menuMusicNextTime += beat;
-    }
-  }
-
-  private scheduleMenuTone(note: number, at: number, duration: number, type: OscillatorType, volume: number, attack = 0.008): void {
-    const context = this.context;
-    if (!context || !this.menuMusicGain) return;
-    const oscillator = context.createOscillator();
-    oscillator.type = type;
-    oscillator.frequency.setValueAtTime(440 * 2 ** ((note - 69) / 12), at);
-    const envelope = context.createGain();
-    envelope.gain.setValueAtTime(0.0001, at);
-    envelope.gain.exponentialRampToValueAtTime(volume, at + Math.min(attack, duration * 0.4));
-    envelope.gain.setValueAtTime(volume, at + duration * 0.72);
-    envelope.gain.exponentialRampToValueAtTime(0.0001, at + duration);
-    oscillator.connect(envelope);
-    envelope.connect(this.menuMusicGain);
-    oscillator.onended = () => { oscillator.disconnect(); envelope.disconnect(); };
-    oscillator.start(at);
-    oscillator.stop(at + duration + 0.015);
+  private playMenuTrack(): void {
+    if (!this.menuMusicActive || !this.musicEnabled || !this.menuMusicAudio || !this.menuMusicAudio.paused) return;
+    void this.menuMusicAudio.play().catch(() => {});
   }
 
   private createGraph(): void {
@@ -166,36 +139,30 @@ export class GameAudio {
     if (!AudioContextClass) return;
     const context = new AudioContextClass({ latencyHint: 'interactive' });
     this.context = context;
-    const master = context.createGain();
-    master.gain.value = this.silent ? 0 : 0.62;
+    const output = context.createGain();
+    output.gain.value = 0.62;
     const limiter = context.createDynamicsCompressor();
     limiter.threshold.value = -17;
     limiter.knee.value = 14;
     limiter.ratio.value = 4;
     limiter.attack.value = 0.006;
     limiter.release.value = 0.16;
-    master.connect(limiter);
+    output.connect(limiter);
     limiter.connect(context.destination);
+    const master = context.createGain();
+    master.gain.value = this.silent ? 0 : 1;
+    master.connect(output);
     this.master = master;
     const menuMusicGain = context.createGain();
     menuMusicGain.gain.value = 0;
-    menuMusicGain.connect(master);
-    const menuDelay = context.createDelay(0.6);
-    menuDelay.delayTime.value = 0.22;
-    const delayFilter = context.createBiquadFilter();
-    delayFilter.type = 'lowpass';
-    delayFilter.frequency.value = 2600;
-    const delayReturn = context.createGain();
-    delayReturn.gain.value = 0.18;
-    const delayFeedback = context.createGain();
-    delayFeedback.gain.value = 0.16;
-    menuMusicGain.connect(menuDelay);
-    menuDelay.connect(delayFilter);
-    delayFilter.connect(delayReturn);
-    delayReturn.connect(master);
-    delayFilter.connect(delayFeedback);
-    delayFeedback.connect(menuDelay);
+    menuMusicGain.connect(output);
     this.menuMusicGain = menuMusicGain;
+    const menuMusicAudio = new Audio(MENU_MUSIC_URL);
+    menuMusicAudio.loop = true;
+    menuMusicAudio.preload = 'auto';
+    const menuMusicSource = context.createMediaElementSource(menuMusicAudio);
+    menuMusicSource.connect(menuMusicGain);
+    this.menuMusicAudio = menuMusicAudio;
 
     const noise = context.createBuffer(1, Math.ceil(context.sampleRate * 3), context.sampleRate);
     const samples = noise.getChannelData(0);
@@ -520,6 +487,10 @@ export class GameAudio {
     this.reset();
     this.disposed = true;
     this.cancelSuspend();
+    if (this.menuMusicPauseTimer !== null) clearTimeout(this.menuMusicPauseTimer);
+    this.menuMusicPauseTimer = null;
+    this.menuMusicAudio?.pause();
+    this.menuMusicAudio = null;
     for (const source of this.loopSources) {
       try { source.stop(); } catch { /* Already closed. */ }
       source.disconnect();
