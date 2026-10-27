@@ -6,7 +6,10 @@ interface RagdollView {
   group: THREE.Group;
   parts: Record<RagdollPartName, THREE.Mesh>;
   flash: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
+  shotSerial: number;
 }
+
+interface BloodParticle { age: number; x: number; y: number; vx: number; vy: number; size: number }
 
 /** Simple readable mannequin pieces follow the articulated Rapier bodies. */
 export class RagdollVisuals {
@@ -23,6 +26,21 @@ export class RagdollVisuals {
   private readonly skin = new THREE.MeshStandardMaterial({ color: '#f3c9a8', roughness: .9 });
   private readonly pants = new THREE.MeshStandardMaterial({ color: '#526a85', roughness: .93 });
   private readonly lowerPants = new THREE.MeshStandardMaterial({ color: '#40566f', roughness: .93 });
+  private readonly bloodGeometry = new THREE.SphereGeometry(1, 5, 4);
+  private readonly bloodMaterial = new THREE.MeshBasicMaterial({ color: '#c51e35', transparent: true, opacity: .95,
+    depthWrite: false });
+  private readonly blood = new THREE.InstancedMesh(this.bloodGeometry, this.bloodMaterial, 96);
+  private readonly bloodParticles: BloodParticle[] = Array.from({ length: 96 }, () =>
+    ({ age: 1, x: 0, y: 0, vx: 0, vy: 0, size: 0 }));
+  private bloodCursor = 0;
+  private readonly transform = new THREE.Object3D();
+
+  constructor() {
+    this.blood.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.blood.frustumCulled = false;
+    this.blood.renderOrder = 4;
+    this.group.add(this.blood);
+  }
 
   private create(id: number, outfit: number): RagdollView {
     const group = new THREE.Group();
@@ -47,12 +65,12 @@ export class RagdollVisuals {
     flash.position.z = 1.5;
     group.add(flash);
     this.group.add(group);
-    const view = { group, parts, flash };
+    const view = { group, parts, flash, shotSerial: 0 };
     this.views.set(id, view);
     return view;
   }
 
-  update(states: readonly RagdollSnapshot[]): void {
+  update(states: readonly RagdollSnapshot[], delta = 1 / 60): void {
     const visible = new Set<number>();
     for (const state of states) {
       visible.add(state.id);
@@ -64,6 +82,22 @@ export class RagdollVisuals {
         mesh.rotation.z = pose.angle;
       }
       const flashAge = state.hit ? state.hitAge : Infinity;
+      const newShots = Math.min(5, Math.max(0, state.shotSerial - view.shotSerial));
+      view.shotSerial = state.shotSerial;
+      for (let shot = 0; shot < newShots; shot++) {
+        const count = 14;
+        for (let index = 0; index < count; index++) {
+          const particle = this.bloodParticles[this.bloodCursor];
+          this.bloodCursor = (this.bloodCursor + 1) % this.bloodParticles.length;
+          const angle = Math.atan2(state.hitVy, state.hitVx) + Math.PI + (index / count - .5) * 1.75;
+          const speed = 2.8 + ((index * 37 + state.id * 19) % 17) * .22;
+          particle.age = 0;
+          particle.x = state.hitX; particle.y = state.hitY;
+          particle.vx = Math.cos(angle) * speed - state.hitVx * .035;
+          particle.vy = Math.sin(angle) * speed - state.hitVy * .025;
+          particle.size = .035 + (index % 4) * .009;
+        }
+      }
       view.flash.visible = flashAge < .35;
       if (view.flash.visible) {
         const torso = state.parts.torso;
@@ -79,12 +113,29 @@ export class RagdollVisuals {
       view.group.removeFromParent();
       this.views.delete(id);
     }
+    let bloodCount = 0;
+    for (const particle of this.bloodParticles) {
+      if (particle.age >= .58) continue;
+      const dt = Math.min(Math.max(delta, 0), .06);
+      particle.age += dt;
+      particle.vy -= 9 * dt;
+      particle.x += particle.vx * dt; particle.y += particle.vy * dt;
+      particle.vx *= Math.exp(-2 * dt);
+      const fade = Math.max(0, 1 - particle.age / .58);
+      this.transform.position.set(particle.x, particle.y, 1.68);
+      this.transform.scale.setScalar(particle.size * fade);
+      this.transform.updateMatrix();
+      this.blood.setMatrixAt(bloodCount++, this.transform.matrix);
+    }
+    this.blood.count = bloodCount;
+    if (bloodCount) this.blood.instanceMatrix.needsUpdate = true;
   }
 
   dispose(): void {
     this.update([]);
     for (const geometry of [this.torso, this.head, this.upperArm, this.forearm, this.thigh, this.shin]) geometry.dispose();
     for (const material of [...this.shirts, this.skin, this.pants, this.lowerPants]) material.dispose();
+    this.bloodGeometry.dispose(); this.bloodMaterial.dispose();
     this.group.removeFromParent();
   }
 }

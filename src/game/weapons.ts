@@ -63,17 +63,18 @@ export class WeaponLoadout {
   private canSelect(id: string, xp: number): boolean { return canEquip(id, xp) && this.ownsWeapon(id); }
 }
 
-export interface CombatTarget { id: string; kind: 'hazard' | 'police' | 'box'; x: number; y: number; radius: number; health: number }
+export interface CombatTarget { id: string; kind: 'hazard' | 'police' | 'box' | 'ragdoll'; x: number; y: number; radius: number; health: number }
 export interface WeaponPose { x: number; y: number; angle: number; vx: number; vy: number }
 export interface Projectile {
   id: number; weapon: WeaponId; upgradeLevel: number; x: number; y: number; previousX: number; previousY: number;
   vx: number; vy: number; age: number; lifetime: number; distance: number;
+  range: number;
   targetId?: string; beamEndX?: number; beamEndY?: number;
 }
 export interface CombatEffect { id: number; x: number; y: number; age: number; size: number; destroyed: boolean; color: string }
 export interface WeaponImpact {
   x: number; y: number; directionX: number; directionY: number;
-  surface: 'hazard' | 'police' | 'box' | 'terrain'; destroyed: boolean;
+  surface: 'hazard' | 'police' | 'box' | 'ragdoll' | 'terrain'; destroyed: boolean;
 }
 export interface WeaponSnapshot {
   id: WeaponId; level: number; ammo: number; capacity: number; yaw: number; pitch: number;
@@ -148,7 +149,7 @@ export class VehicleWeapon {
   get shotsFired(): number { return this.shotSerial; }
 
   step(dt: number, controls: { fire?: boolean; aim?: AimDirection }, pose: WeaponPose,
-    targets: CombatTarget[], onDamage: (target: CombatTarget, damage: number) => void,
+    targets: CombatTarget[], onDamage: (target: CombatTarget, damage: number, impact?: { x: number; y: number; vx: number; vy: number }) => void,
     floorHeight: (x: number) => number = () => -Infinity,
     onImpact: (impact: WeaponImpact) => void = () => {}): void {
     this.previousYaw = this.yaw;
@@ -169,12 +170,16 @@ export class VehicleWeapon {
     const mountHeight = WEAPON_MOUNT.y + WEAPON_MOUNT.pivotY + this.mountLift;
     const mountX = pose.x + WEAPON_MOUNT.x * c - mountHeight * s;
     const mountY = pose.y + WEAPON_MOUNT.x * s + mountHeight * c;
+    const sight: Projectile = { id: -1, weapon: this.id, upgradeLevel: level, x: mountX, y: mountY,
+      previousX: mountX, previousY: mountY, vx: 0, vy: 0, age: 0, lifetime: 0, distance: 0, range: spec.range };
     const aimed = targets.filter(target => {
       const dx = target.x - mountX; const dy = target.y - mountY;
       const forward = (dx * c + dy * s) * this.direction;
       const elevationRange = target.kind === 'box' ? .9 : .5;
-      return target.health > 0 && forward > 2 && forward < spec.range && Math.abs(-dx * s + dy * c) < forward * elevationRange + .5;
-    }).sort((a, b) => Math.hypot(a.x - mountX, a.y - mountY) - Math.hypot(b.x - mountX, b.y - mountY))[0];
+      const availableRange = spec.range + Math.max(0, pose.vx * this.direction) * .6;
+      return target.health > 0 && forward > 2 && forward < availableRange && Math.abs(-dx * s + dy * c) < forward * elevationRange + .5;
+    }).sort((a, b) => Math.hypot(a.x - mountX, a.y - mountY) - Math.hypot(b.x - mountX, b.y - mountY))
+      .find(target => this.sweep(sight, target.x - mountX, target.y - mountY, targets, floorHeight).target?.id === target.id);
     let aimX = aimed ? aimed.x - mountX : 0;
     let aimY = aimed ? aimed.y - mountY : 0;
     // Floating boxes remain reachable on downhill waves: compensate for the
@@ -197,16 +202,17 @@ export class VehicleWeapon {
         const angle = pose.angle + (this.direction === 1 ? this.pitch : Math.PI - this.pitch) + (i - (count - 1) / 2) * .016;
         const ux = Math.cos(angle); const uy = Math.sin(angle);
         const x = mountX + ux * spec.muzzle; const y = mountY + uy * spec.muzzle;
+        const range = spec.range + Math.max(0, pose.vx * this.direction) * .6;
         const shot: Projectile = { id: ++this.serial, weapon: this.id, upgradeLevel: level, x, y, previousX: x, previousY: y,
           vx: ux * spec.speed + pose.vx, vy: uy * spec.speed + pose.vy,
-          age: 0, lifetime: this.id === 'laser-gun' ? .075 : 2.4, distance: 0,
+          age: 0, lifetime: this.id === 'laser-gun' ? .075 : 2.4, distance: 0, range,
           targetId: this.id === 'missile-launcher' ? aimed?.id : undefined };
         if (this.id === 'laser-gun') {
-          const hit = this.sweep(shot, ux * spec.range, uy * spec.range, targets, floorHeight);
-          shot.beamEndX = x + ux * spec.range * hit.t;
-          shot.beamEndY = y + uy * spec.range * hit.t;
+          const hit = this.sweep(shot, ux * range, uy * range, targets, floorHeight);
+          shot.beamEndX = x + ux * range * hit.t;
+          shot.beamEndY = y + uy * range * hit.t;
           if (hit.target) this.damage(hit.target, spec.damage, spec, shot.beamEndX, shot.beamEndY,
-            ux, uy, targets, onDamage, onImpact);
+            ux * spec.speed + pose.vx, uy * spec.speed + pose.vy, targets, onDamage, onImpact);
           else if (hit.t < 1) {
             this.effect(shot.beamEndX, shot.beamEndY, .2, false, spec.color);
             this.reportImpact(shot.beamEndX, shot.beamEndY, ux, uy, 'terrain', false, onImpact);
@@ -243,7 +249,7 @@ export class VehicleWeapon {
         this.effect(shot.x, shot.y, .3, false, shotSpec.color);
         this.reportImpact(shot.x, shot.y, shot.vx, shot.vy, 'terrain', false, onImpact);
       }
-      return hit.t === 1 && !hit.target && shot.distance < shotSpec.range;
+      return hit.t === 1 && !hit.target && shot.distance < shot.range;
     });
   }
 
@@ -273,18 +279,18 @@ export class VehicleWeapon {
   }
 
   private damage(target: CombatTarget, amount: number, spec: WeaponSpec, x: number, y: number,
-    vx: number, vy: number, targets: CombatTarget[], onDamage: (target: CombatTarget, damage: number) => void,
+    vx: number, vy: number, targets: CombatTarget[], onDamage: (target: CombatTarget, damage: number, impact?: { x: number; y: number; vx: number; vy: number }) => void,
     onImpact: (impact: WeaponImpact) => void): void {
     for (const victim of targets) {
       if (victim.health <= 0 || (victim !== target && (!spec.splash || Math.hypot(victim.x - x, victim.y - y) > spec.splash + victim.radius))) continue;
       const dealt = victim === target ? amount : Math.max(1, Math.round(amount * .6));
       const remaining = victim.health - dealt;
       victim.health = remaining <= 1e-9 ? 0 : remaining;
-      onDamage(victim, dealt);
+      onDamage(victim, dealt, { x: victim === target ? x : victim.x, y: victim === target ? y : victim.y, vx, vy });
       this.hitSerial++;
       // Loot crates open or launch away; only actual destruction triggers
       // explosion visuals, sound and the game's explosion slow motion.
-      const exploded = victim.health === 0 && victim.kind !== 'box';
+      const exploded = victim.health === 0 && victim.kind !== 'box' && victim.kind !== 'ragdoll';
       if (exploded) this.destroySerial++;
       this.reportImpact(victim === target ? x : victim.x, victim === target ? y : victim.y,
         vx, vy, victim.kind, exploded, onImpact);

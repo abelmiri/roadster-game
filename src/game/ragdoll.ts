@@ -13,6 +13,8 @@ export interface RagdollSnapshot {
   outfit: number;
   hit: boolean;
   hitAge: number;
+  hitX: number; hitY: number; hitVx: number; hitVy: number;
+  shotSerial: number;
   parts: Record<RagdollPartName, BodyPose>;
 }
 export interface RagdollImpact { x: number; y: number; vx: number; vy: number; angle: number }
@@ -47,6 +49,8 @@ export class Ragdoll {
   readonly colliders: Collider[] = [];
   hit = false;
   hitAge = 0;
+  hitImpact: RagdollImpact = { x: 0, y: 0, vx: 0, vy: 0, angle: 0 };
+  shotSerial = 0;
   private previous: Record<RagdollPartName, BodyPose>;
   private readonly downwardSpeed = {} as Record<RagdollPartName, number>;
   private groundImpactCooldown = 0;
@@ -96,8 +100,11 @@ export class Ragdoll {
       : memberIndex < middle ? 1 : memberIndex > middle ? -1 : siteId % 2 ? 1 : -1;
     const sway = Math.sin(this.idleTime * .85 + memberIndex * .37);
     const angle = toward * .045 + sway * .025 + (id % 3 - 1) * .012;
+    const sitting = this.spec.pose === 'sitting';
+    const hanging = this.spec.pose === 'hanging';
     const torso: BodyPose = { x: x + toward * .02 + sway * .016,
-      y: y + 1.12 + Math.sin(this.idleTime * 1.1) * .006, angle };
+      y: y + (sitting ? .76 : 1.12) + Math.sin(this.idleTime * 1.1) * .006,
+      angle: sitting ? toward * -.08 : hanging ? toward * .14 : angle };
     const neck = at(torso, 0, .53);
     const headAngle = angle + toward * .06 + Math.sin(this.idleTime * .68) * .025;
     const result = { torso, head: { x: neck.x - Math.sin(headAngle) * .21,
@@ -106,14 +113,18 @@ export class Ragdoll {
     for (const side of ['left', 'right'] as const) {
       const direction = side === 'left' ? -1 : 1;
       const towardNeighbor = gesturing && direction === toward;
-      const upperAngle = towardNeighbor ? direction * (.72 + .05 * sway)
+      const upperAngle = hanging && direction === toward ? direction * -1.15
+        : towardNeighbor ? direction * (.72 + .05 * sway)
         : angle + direction * (.18 + .025 * sway);
-      const forearmAngle = towardNeighbor ? direction * (1.55 + .10 * sway)
+      const forearmAngle = hanging && direction === toward ? direction * -1.35
+        : towardNeighbor ? direction * (1.55 + .10 * sway)
         : angle + direction * (.26 + .07 * Math.sin(this.idleTime + direction));
       const upper = below(at(torso, direction * .24, .30), upperAngle, .17);
       const forearm = below(at(upper, 0, -.17), forearmAngle, .16);
-      const thighAngle = angle + direction * (.095 + memberIndex * .012);
-      const shinAngle = angle + direction * .045 - thighAngle * .22;
+      const thighAngle = sitting ? Math.PI / 2 + direction * .10
+        : angle + direction * (.095 + memberIndex * .012);
+      const shinAngle = sitting ? Math.PI / 2 - direction * .18
+        : angle + direction * .045 - thighAngle * .22;
       const thigh = below(at(torso, direction * .15, -.34), thighAngle, .17);
       const shin = below(at(thigh, 0, -.17), shinAngle, .17);
       result[`${side}UpperArm`] = upper;
@@ -153,6 +164,7 @@ export class Ragdoll {
     if (this.hit) return false;
     this.hit = true;
     this.hitAge = 0;
+    this.hitImpact = { ...impact };
     const fromAbove = impact.y > this.spec.y + 1.65;
     const direction = Math.sign(impact.vx || this.spec.x - impact.x || 1);
     const forward = fromAbove ? impact.vx * .38 + direction * 2
@@ -175,6 +187,30 @@ export class Ragdoll {
       y: torso.mass() * vertical * .28 },
       { x: this.spec.x, y: this.spec.y + 1.4 }, true);
     return true;
+  }
+
+  /** Transfer five percent of each bullet's kinetic energy into the mannequin. */
+  shoot(impact: RagdollImpact): void {
+    if (!this.hit) {
+      this.hit = true;
+      this.hitAge = 0;
+      for (const name of RAGDOLL_PARTS) {
+        const body = this.bodies[name];
+        body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
+        body.setLinearDamping(.22);
+        body.setAngularDamping(.45);
+        body.setLinvel({ x: 0, y: 0 }, true);
+        body.setAngvel(0, true);
+      }
+    }
+    this.hitImpact = { ...impact };
+    this.shotSerial++;
+    const speed = Math.hypot(impact.vx, impact.vy);
+    if (speed < 1e-6) return;
+    const torso = this.bodies.torso;
+    const transferredSpeed = speed * Math.sqrt(.05);
+    torso.applyImpulseAtPoint({ x: torso.mass() * impact.vx / speed * transferredSpeed,
+      y: torso.mass() * impact.vy / speed * transferredSpeed }, { x: impact.x, y: impact.y }, true);
   }
 
   /** Detect the strongest downward part contact, including the first slam. */
@@ -210,7 +246,9 @@ export class Ragdoll {
         y: before.y + (now.y - before.y) * alpha,
         angle: before.angle + Math.atan2(Math.sin(angle - before.angle), Math.cos(angle - before.angle)) * alpha };
     }
-    return { id: this.spec.id, outfit: this.spec.outfit, hit: this.hit, hitAge: this.hitAge, parts };
+    return { id: this.spec.id, outfit: this.spec.outfit, hit: this.hit, hitAge: this.hitAge,
+      hitX: this.hitImpact.x, hitY: this.hitImpact.y, hitVx: this.hitImpact.vx, hitVy: this.hitImpact.vy,
+      shotSerial: this.shotSerial, parts };
   }
 
   dispose(): void { for (const name of RAGDOLL_PARTS) this.world.removeRigidBody(this.bodies[name]); }

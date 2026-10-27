@@ -479,7 +479,7 @@ export class GameVisuals {
     this.syncLoops(snapshot.car.x);
     this.randomBoxes.update(physics.randomBoxStates, sceneDelta, running && !impactFrozen,
       snapshot.boxRewardEvents, snapshot.boxRewardSerial);
-    this.ragdolls.update(snapshot.ragdolls ?? []);
+    this.ragdolls.update(snapshot.ragdolls ?? [], sceneDelta);
     this.ragdollGroundEffects.update(snapshot.ragdollGroundEvents, snapshot.ragdollGroundSerial,
       sceneDelta, running && !impactFrozen, physics.generator);
     this.updateTheme(snapshot.distance);

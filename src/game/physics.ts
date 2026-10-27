@@ -20,11 +20,12 @@ import { Ragdoll, type RagdollImpact, type RagdollGroundEvent, type RagdollSnaps
 export const FIXED_STEP = 1 / 120;
 export const START_SPEED = 60 / 3.6;
 export const SPEED_GAIN_PER_500M = 10 / 3.6;
+export const MAX_CRUISE_SPEED = 320 / 3.6;
 export const JUMP_THRUST_DURATION = 0.19;
 export const RAMP_BOOST_SPEED = 7;
 
 export function cruiseSpeedForDistance(distance: number): number {
-  return START_SPEED + Math.max(0, distance) / 500 * SPEED_GAIN_PER_500M;
+  return Math.min(MAX_CRUISE_SPEED, START_SPEED + Math.max(0, distance) / 500 * SPEED_GAIN_PER_500M);
 }
 
 export interface Controls {
@@ -94,6 +95,7 @@ export interface GameSnapshot {
   boxRewardSerial: number;
   boxRewardEvents: readonly BoxRewardEvent[];
   ragdolls: readonly RagdollSnapshot[];
+  ragdollHitCount: number;
   ragdollGroundSerial: number;
   ragdollGroundEvents: readonly RagdollGroundEvent[];
   missionStats: MissionStats;
@@ -599,6 +601,11 @@ export class GamePhysics {
     }
     const boxes = new Map(this.randomBoxStates.map(box => [box.id, box]));
     for (const box of boxes.values()) targets.push({ id: box.id, kind: 'box', x: box.x, y: box.y, radius: .58, health: 1 });
+    for (const actor of this.ragdolls.values()) {
+      const torso = actor.bodies.torso.translation();
+      targets.push({ id: `ragdoll-${actor.spec.id}`, kind: 'ragdoll', x: torso.x, y: torso.y,
+        radius: .62, health: 1 });
+    }
     if (!this.pursuit.disabled && this.pursuit.visibility > .5) {
       targets.push({ id: 'police', kind: 'police', x: this.pursuit.x,
         y: (this.roadSupport(this.pursuit.x)?.y ?? roadHeight(this.pursuit.x) + CAR_BODY_CLEARANCE) + .20,
@@ -608,7 +615,17 @@ export class GamePhysics {
     const body = sprungBodyPose({ ...p, angle: this.car.rotation() },
       this.activeLoop ? this.suspension.offset : 0, this.activeLoop ? this.suspension.pitch : 0);
     const v = this.car.linvel();
-    this.weapon.step(FIXED_STEP, controls, { ...body, vx: v.x, vy: v.y }, targets, (target) => {
+    this.weapon.step(FIXED_STEP, controls, { ...body, vx: v.x, vy: v.y }, targets, (target, _damage, hit) => {
+      if (target.kind === 'ragdoll') {
+        const actor = this.ragdolls.get(Number(target.id.slice('ragdoll-'.length)));
+        if (actor) {
+          actor.shoot({ x: hit?.x ?? target.x, y: hit?.y ?? target.y,
+            vx: hit?.vx ?? 0, vy: hit?.vy ?? 0, angle: Math.atan2(hit?.vy ?? 0, hit?.vx ?? 1) });
+          this.hitRagdolls.add(actor.spec.id);
+          this.ragdollHitSerial++;
+        }
+        return;
+      }
       if (target.kind === 'police') {
         const destroyed = this.policeHealth > 0 && target.health === 0;
         this.policeHealth = target.health;
@@ -673,6 +690,7 @@ export class GamePhysics {
   }
 
   private emitWeaponSparks(impact: WeaponImpact): void {
+    if (impact.surface === 'ragdoll') return;
     this.sparkEvents.push({ serial: ++this.sparkSerial, x: impact.x, y: impact.y,
       vx: 0, vy: 0, directionX: impact.directionX, directionY: impact.directionY,
       strength: impact.destroyed ? 24 : 10, age: 0, kind: impact.surface === 'terrain' ? 'terrain' : 'projectile' });
@@ -1013,6 +1031,7 @@ export class GamePhysics {
       boxCoins: this.boxRewards.coins, boxXp: this.boxRewards.xp,
       boxRewardSerial: this.boxRewards.serial, boxRewardEvents: this.boxRewards.events,
       ragdolls: Array.from(this.ragdolls.values(), actor => actor.snapshot(alpha)),
+      ragdollHitCount: this.hitRagdolls.size,
       ragdollGroundSerial: this.ragdollGroundSerial,
       ragdollGroundEvents: this.ragdollGroundEvents,
       missionStats: { ...this.runMissions.stats },

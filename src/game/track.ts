@@ -31,7 +31,7 @@ export interface LoopSpec { id: number; entryX: number; radius: number }
 const loops: LoopSpec[] = [];
 export interface RagdollSpec {
   id: number; siteId: number; memberIndex: number; groupSize: number;
-  x: number; y: number; outfit: number;
+  x: number; y: number; outfit: number; pose: 'standing' | 'sitting' | 'hanging';
 }
 export const RAGDOLL_MIN_SPACING = 300;
 export const RAGDOLL_MAX_SPACING = 500;
@@ -272,8 +272,29 @@ function ensureRagdolls(end: number): void {
     };
     let center = target;
     let size = count;
+    let pose: RagdollSpec['pose'] = 'standing';
     let placed = false;
-    for (const candidateSize of [count, 1]) {
+    // Occasionally place a small group at a gap edge, where they sit or hold
+    // on to the ledge. Keep the procedural schedule stable across visits.
+    if (hash(siteId + 4907) < .34) {
+      const chunk = ragdollPlacementTrack.chunk(Math.floor(target / CHUNK_LENGTH));
+      const previousChunkGap = ragdollPlacementTrack.chunk(Math.floor(target / CHUNK_LENGTH) - 1).gap;
+      const nearbyGap = chunk.gap && Math.min(Math.abs(chunk.gap.start - target), Math.abs(chunk.gap.end - target)) < 105 ? chunk.gap
+        : previousChunkGap && Math.min(Math.abs(previousChunkGap.start - target), Math.abs(previousChunkGap.end - target)) < 105
+          ? previousChunkGap : null;
+      if (nearbyGap) {
+        const edge = Math.abs(nearbyGap.start - target) < Math.abs(nearbyGap.end - target)
+          ? nearbyGap.start : nearbyGap.end;
+        const edgeCenter = edge + (edge === nearbyGap.start ? -.48 : .48);
+        center = edgeCenter;
+        pose = hash(siteId + 5149) < .5 ? 'sitting' : 'hanging';
+        const spacing = center - previous;
+        placed = spacing >= 300 && spacing <= 500 && memberXs(center, count).every(x => Math.abs(x - edge) < 2.4);
+        if (placed) size = count;
+        else { center = target; pose = 'standing'; }
+      }
+    }
+    for (const candidateSize of (placed ? [] : [count, 1])) {
       for (const offset of [0, -4, 4, -8, 8, -12, 12, -16, 16, -20, 20]) {
         const candidate = target + offset;
         if (!memberXs(candidate, candidateSize).every(clear)) continue;
@@ -287,7 +308,7 @@ function ensureRagdolls(end: number): void {
     ragdollSites.push(center);
     for (const [memberIndex, x] of memberXs(center, size).entries()) {
       const id = ragdollSpawns.length;
-      ragdollSpawns.push({ id, siteId, memberIndex, groupSize: size, x, y: roadHeight(x),
+      ragdollSpawns.push({ id, siteId, memberIndex, groupSize: size, x, y: roadHeight(x), pose,
         outfit: Math.floor(hash(id + 6291) * RAGDOLL_OUTFIT_COUNT) });
     }
     ragdollPlacementTrack.trim(Math.floor(center / CHUNK_LENGTH) - 5);

@@ -930,7 +930,7 @@ function setOverlay(mode: 'ready' | 'paused' | 'crashed'): void {
   eyebrow.innerHTML = `<span class="eyebrow-line"></span>${t(mode === 'crashed' && physics.snapshot(1).health === 0 ? 'carDestroyed' : `${prefix}Eyebrow`)}`;
   title.innerHTML = t(`${prefix}Title`);
   description.textContent = mode === 'crashed'
-    ? `${physics.snapshot(1).crashReason === 'police' ? t('policeCaught') + ' ' : ''}${t('crashedDescription', { distance: formatNumber(physics.distance), best: formatNumber(best) })} · ${t('runXp', { xp: formatNumber(experience.runXp) })} · ${t('runCoins', { coins: formatNumber(player.runCoins) })}`
+    ? `${physics.snapshot(1).crashReason === 'police' ? t('policeCaught') + ' ' : ''}${t('crashedDescription', { distance: formatNumber(physics.distance), best: formatNumber(best) })} · ${t('ragdollsHit', { count: formatNumber(physics.snapshot(1).ragdollHitCount) })} · ${t('runXp', { xp: formatNumber(experience.runXp) })} · ${t('runCoins', { coins: formatNumber(player.runCoins) })}`
     : t(mode === 'ready' ? 'readyDescription' : 'pausedDescription');
   primaryLabel.textContent = t(mode === 'ready' ? 'start' : mode === 'paused' ? 'resumeRun' : 'runAgain');
   overlayFoot.innerHTML = t(`${prefix}Foot`);

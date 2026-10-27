@@ -129,13 +129,22 @@ export class CombatVisual {
   readonly group = new THREE.Group();
   private readonly material = new THREE.MeshBasicMaterial({ color: '#fff0ba' });
   private readonly geometry = new THREE.SphereGeometry(1, 8, 6);
+  private readonly flameGeometry = new THREE.ConeGeometry(.12, 1, 8, 1);
+  private readonly redFlame = new THREE.MeshBasicMaterial({ color: '#ff2414', transparent: true,
+    opacity: .94, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending });
+  private readonly blueFlame = new THREE.MeshBasicMaterial({ color: '#d34d63', transparent: true,
+    opacity: .94, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending });
   private readonly effectGeometry = new THREE.IcosahedronGeometry(1, 0);
   private readonly shots: THREE.Mesh[] = [];
+  private readonly flames: THREE.Mesh[] = [];
   private readonly effects: THREE.Mesh[] = [];
   constructor() {
     for (let i = 0; i < 64; i++) {
       const mesh = new THREE.Mesh(this.geometry, this.material.clone()); mesh.visible = false;
       this.shots.push(mesh); this.group.add(mesh);
+      const flame = new THREE.Mesh(this.flameGeometry, this.redFlame);
+      flame.visible = false; flame.renderOrder = 2;
+      this.flames.push(flame); this.group.add(flame);
     }
     for (let i = 0; i < 40; i++) {
       const mesh = new THREE.Mesh(this.effectGeometry, new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false }));
@@ -144,8 +153,22 @@ export class CombatVisual {
   }
   update(state: WeaponSnapshot): void {
     this.shots.forEach((mesh, index) => {
-      const shot = state.projectiles[index]; mesh.visible = Boolean(shot); if (!shot) return;
+      const shot = state.projectiles[index];
+      mesh.visible = Boolean(shot);
+      if (!shot) { this.flames[index].visible = false; return; }
       const spec = weaponSpec(shot.weapon);
+      const flame = this.flames[index];
+      const beam = shot.beamEndX !== undefined && shot.beamEndY !== undefined;
+      flame.visible = !beam && shot.weapon !== 'laser-gun';
+      if (flame.visible) {
+        const angle = Math.atan2(shot.vy, shot.vx);
+        const flicker = .82 + .18 * Math.sin(shot.age * 70 + shot.id * 1.7);
+        flame.material = shot.weapon === 'twin-gun' || shot.weapon === 'cannon' ||
+          shot.weapon === 'missile-launcher' || shot.weapon === 'plasma-cannon' ? this.blueFlame : this.redFlame;
+        flame.position.set(shot.x - Math.cos(angle) * .16, shot.y - Math.sin(angle) * .16, 1.91);
+        flame.rotation.z = angle - Math.PI / 2;
+        flame.scale.set(1.12, .52 * flicker, 1.12);
+      }
       (mesh.material as THREE.MeshBasicMaterial).color.set(spec.color);
       if (shot.beamEndX !== undefined && shot.beamEndY !== undefined) {
         const dx = shot.beamEndX - shot.x; const dy = shot.beamEndY - shot.y;
@@ -167,7 +190,8 @@ export class CombatVisual {
     });
   }
   dispose(): void {
-    this.geometry.dispose(); this.effectGeometry.dispose(); this.material.dispose();
+    this.geometry.dispose(); this.flameGeometry.dispose(); this.effectGeometry.dispose();
+    this.material.dispose(); this.redFlame.dispose(); this.blueFlame.dispose();
     for (const mesh of [...this.shots, ...this.effects]) (mesh.material as THREE.Material).dispose();
     this.group.removeFromParent();
   }
