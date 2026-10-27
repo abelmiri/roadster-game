@@ -1,6 +1,6 @@
 import RAPIER from '@dimforge/rapier2d-compat';
 import type { Collider, EventQueue, RigidBody, World } from '@dimforge/rapier2d-compat';
-import { CHUNK_LENGTH, START_APRON_X, BOX_UNLOCK_DISTANCE, TrackGenerator, roadHeight, roadSlope, sampleRoad, loopsBetween, loopGeometry, rampAt, ragdollsBetween, gapSpectatorsBetween, RAMP_BOOSTER_LENGTH, type LoopSpec, type HazardSpec, type TrackChunk } from './track';
+import { CHUNK_LENGTH, START_APRON_X, BOX_UNLOCK_DISTANCE, TrackGenerator, roadHeight, roadSlope, sampleRoad, loopsBetween, loopGeometry, rampAt, ragdollsBetween, gapSpectatorsBetween, RAMP_BOOSTER_LENGTH, hash, type LoopSpec, type HazardSpec, type TrackChunk } from './track';
 import { CAR_AXLE_Y, CAR_BODY_CLEARANCE, CAR_WHEEL_OFFSET, CAR_WHEEL_RADIUS, sprungBodyPose } from './vehicle';
 import { VehicleSuspension } from './suspension';
 import { WheelContactPhysics, ROAD_GRAVITY, type ContactBody } from './wheelContact';
@@ -10,12 +10,12 @@ import { LOOP_XP, OBSTACLE_XP, POLICE_XP } from './experience';
 import { VehicleDamage } from './damage';
 import type { BreakEvent } from './obstacleDebris';
 import type { SparkEvent } from './impactSparks';
-import { VehicleWeapon, type AimDirection, type CombatTarget, type WeaponId, type WeaponSnapshot, type WeaponImpact, type WeaponUpgrades } from './weapons';
+import { VehicleWeapon, WEAPONS, type AimDirection, type CombatTarget, type WeaponId, type WeaponSnapshot, type WeaponImpact, type WeaponUpgrades } from './weapons';
 import { CAR_UPGRADE_IDS, carUpgradeLevel, carUpgradeStats, type CarUpgrades } from './carUpgrades';
 import { RandomBoxRewards, type RandomBoxSpec, type BoxRewardEvent } from './randomBox';
 import { RunMissionTracker, type MissionStats } from './missionStats';
 import { carModel, type CarModelId } from './carModels';
-import { Ragdoll, type RagdollImpact, type RagdollGroundEvent, type RagdollSnapshot } from './ragdoll';
+import { RAGDOLL_PARTS, Ragdoll, type RagdollImpact, type RagdollPartName, type RagdollGroundEvent, type RagdollSnapshot } from './ragdoll';
 
 export const FIXED_STEP = 1 / 120;
 export const START_SPEED = 60 / 3.6;
@@ -25,7 +25,7 @@ export const JUMP_THRUST_DURATION = 0.19;
 export const RAMP_BOOST_SPEED = 7;
 
 export interface HealthHitEvent {
-  serial: number; id: string; kind: 'box' | 'drone'; x: number; y: number; health: number; age: number;
+  serial: number; id: string; kind: 'box' | 'drone' | 'hazard'; x: number; y: number; health: number; maxHealth: number; age: number;
 }
 
 export function cruiseSpeedForDistance(distance: number): number {
@@ -114,6 +114,7 @@ interface ActiveHazard {
   x: number;
   y: number;
   health: number;
+  maxHealth: number;
 }
 
 interface ActiveChunk {
@@ -122,12 +123,18 @@ interface ActiveChunk {
   hazards: ActiveHazard[];
 }
 
+interface DebrisShard {
+  age: number; life: number; x: number; y: number; vx: number; vy: number; radius: number;
+}
+
 interface RoadSupport { y: number; angle: number; contacts: number }
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 const angleDelta = (from: number, to: number): number => Math.atan2(Math.sin(to - from), Math.cos(to - from));
 const GRAVITY = ROAD_GRAVITY;
+const BOX_MAX_HEALTH = 3;
+const DEBRIS_SHARD_CAPACITY = 96;
 
 export class GamePhysics {
   readonly generator = new TrackGenerator();
@@ -141,6 +148,7 @@ export class GamePhysics {
   readonly ragdolls = new Map<number, Ragdoll>();
   private readonly ragdollColliders = new Map<number, Ragdoll>();
   private readonly hitRagdolls = new Set<number>();
+  private readonly activatedRagdolls = new Set<number>();
   ragdollHitSerial = 0;
   private ragdollGroundSerial = 0;
   private readonly ragdollGroundEvents: RagdollGroundEvent[] = [];
@@ -174,12 +182,15 @@ export class GamePhysics {
   private previousSuspensionPitch = 0;
   private readonly damage = new VehicleDamage();
   private readonly boxRewards = new RandomBoxRewards();
+  private readonly boxHealth = new Map<string, number>();
   private readonly runMissions = new RunMissionTracker();
   private jumpSerial = 0;
   private landingSerial = 0;
   private landingImpact = 0;
   private readonly pursuit: PolicePursuit;
   private readonly weapon: VehicleWeapon;
+  private readonly ownedWeapons: ReadonlySet<WeaponId>;
+  private readonly weaponXp: number;
   private policeHealth = 12;
   private policeWreck: PoliceWreck | null = null;
   private previousPoliceX: number;
@@ -192,6 +203,9 @@ export class GamePhysics {
   private hazardView: { id: string; kind: HazardSpec['kind']; x: number; y: number; phase: number }[] = [];
   private breakSerial = 0;
   private readonly breakEvents: BreakEvent[] = [];
+  private readonly debrisShards: DebrisShard[] = Array.from({ length: DEBRIS_SHARD_CAPACITY }, () =>
+    ({ age: 0, life: 0, x: 0, y: 0, vx: 0, vy: 0, radius: .12 }));
+  private debrisShardCursor = 0;
   private sparkSerial = 0;
   private readonly sparkEvents: SparkEvent[] = [];
   private healthHitSerial = 0;
@@ -207,10 +221,13 @@ export class GamePhysics {
   private readonly carUpgrades: CarUpgrades = {};
   private carStats = carUpgradeStats();
 
-  constructor(private readonly startX = 7, loadout?: { id: WeaponId; xp: number; upgrades?: WeaponUpgrades; carUpgrades?: CarUpgrades; vehicle?: CarModelId }) {
+  constructor(private readonly startX = 7, loadout?: { id: WeaponId; xp: number; upgrades?: WeaponUpgrades;
+    ownedWeapons?: readonly WeaponId[]; carUpgrades?: CarUpgrades; vehicle?: CarModelId }) {
     this.furthestX = startX;
     this.pursuit = new PolicePursuit(startX);
     this.weapon = new VehicleWeapon('machine-gun', loadout?.upgrades);
+    this.ownedWeapons = new Set(loadout?.ownedWeapons ?? [loadout?.id ?? 'machine-gun']);
+    this.weaponXp = loadout?.xp ?? 0;
     if (loadout) this.weapon.equip(loadout.id, loadout.xp);
     this.upgradeCar(loadout?.carUpgrades ?? {});
     this.selectVehicle(loadout?.vehicle ?? 'roadster');
@@ -375,8 +392,9 @@ export class GamePhysics {
       );
       const destroyed = this.destroyedHazards.has(hazard.id);
       collider.setEnabled(!destroyed);
+      const maxHealth = hazard.kind === 'drone' ? 2 : hazard.kind === 'pulse' ? 4 : 3;
       const active = { spec: hazard, body, collider, x: hazard.x, y,
-        health: destroyed ? 0 : hazard.kind === 'drone' ? 2 : hazard.kind === 'pulse' ? 4 : 3 };
+        health: destroyed ? 0 : maxHealth, maxHealth };
       if (!destroyed) this.hazardColliders.set(collider.handle, active);
       return active;
     });
@@ -405,7 +423,7 @@ export class GamePhysics {
   private syncRagdolls(x: number): void {
     const nearby = [...ragdollsBetween(x - 65, x + 90), ...gapSpectatorsBetween(x - 65, x + 90)];
     for (const spec of nearby) {
-      if (this.ragdolls.has(spec.id) || this.hitRagdolls.has(spec.id)) continue;
+      if (this.ragdolls.has(spec.id) || this.activatedRagdolls.has(spec.id)) continue;
       const actor = new Ragdoll(this.world, spec);
       this.ragdolls.set(spec.id, actor);
       for (const collider of actor.colliders) this.ragdollColliders.set(collider.handle, actor);
@@ -419,12 +437,77 @@ export class GamePhysics {
   }
 
   private launchRagdoll(first: number, second: number, impact: RagdollImpact): void {
-    const actor = this.carColliders.has(first) ? this.ragdollColliders.get(second)
-      : this.carColliders.has(second) ? this.ragdollColliders.get(first) : undefined;
-    if (actor?.launch(impact)) {
-      this.hitRagdolls.add(actor.spec.id);
-      this.ragdollHitSerial++;
+    const ragdollHandle = this.carColliders.has(first) ? second
+      : this.carColliders.has(second) ? first : undefined;
+    if (ragdollHandle === undefined) return;
+    const actor = this.ragdollColliders.get(ragdollHandle);
+    const partName = actor?.partForCollider(ragdollHandle);
+    if (!actor || !partName) return;
+    const struckPart = actor.bodies[partName];
+    const partPosition = struckPart.translation();
+    if (actor.launch({ ...impact, x: partPosition.x, y: partPosition.y,
+      angle: struckPart.rotation() }, partName)) {
+      const firstImpact = !this.hitRagdolls.has(actor.spec.id);
+      if (firstImpact) {
+        // Let nearby members of the same group move through actual joint and
+        // body contacts instead of leaving them as immovable kinematic targets.
+        for (const neighbor of this.ragdolls.values()) {
+          if (neighbor === actor || neighbor.spec.siteId !== actor.spec.siteId) continue;
+          if (Math.abs(neighbor.spec.x - actor.spec.x) <= 5) {
+            neighbor.wake();
+            this.activatedRagdolls.add(neighbor.spec.id);
+          }
+        }
+        this.hitRagdolls.add(actor.spec.id);
+        this.activatedRagdolls.add(actor.spec.id);
+        this.ragdollHitSerial++;
+      }
     }
+  }
+
+  private resolveRagdollContact(first: number, second: number): void {
+    const firstActor = this.ragdollColliders.get(first);
+    const secondActor = this.ragdollColliders.get(second);
+    if (!firstActor || !secondActor || firstActor === secondActor) return;
+    const firstPart = firstActor.partForCollider(first);
+    const secondPart = secondActor.partForCollider(second);
+    if (!firstPart || !secondPart || (firstActor.hit && secondActor.hit)) return;
+
+    const firstBody = firstActor.bodies[firstPart];
+    const secondBody = secondActor.bodies[secondPart];
+    const firstPosition = firstBody.translation();
+    const secondPosition = secondBody.translation();
+    const firstVelocity = firstBody.linvel();
+    const secondVelocity = secondBody.linvel();
+    let nx = firstPosition.x - secondPosition.x;
+    let ny = firstPosition.y - secondPosition.y;
+    const distance = Math.hypot(nx, ny);
+    if (distance < 1e-4) {
+      nx = Math.sign(firstActor.spec.x - secondActor.spec.x) || 1;
+      ny = 0;
+    } else {
+      nx /= distance;
+      ny /= distance;
+    }
+    const relativeNormalSpeed = (firstVelocity.x - secondVelocity.x) * nx
+      + (firstVelocity.y - secondVelocity.y) * ny;
+    const approachSpeed = -relativeNormalSpeed;
+    if (approachSpeed < .7) return;
+
+    firstActor.wake();
+    secondActor.wake();
+    this.activatedRagdolls.add(firstActor.spec.id);
+    this.activatedRagdolls.add(secondActor.spec.id);
+    firstBody.setLinvel(firstVelocity, true);
+    secondBody.setLinvel(secondVelocity, true);
+    const firstMass = Math.max(.05, firstBody.mass());
+    const secondMass = Math.max(.05, secondBody.mass());
+    const reducedMass = firstMass * secondMass / (firstMass + secondMass);
+    const impulse = Math.min(6, approachSpeed * reducedMass * .72);
+    const point = { x: (firstPosition.x + secondPosition.x) * .5,
+      y: (firstPosition.y + secondPosition.y) * .5 };
+    firstBody.applyImpulseAtPoint({ x: nx * impulse, y: ny * impulse }, point, true);
+    secondBody.applyImpulseAtPoint({ x: -nx * impulse, y: -ny * impulse }, point, true);
   }
 
   private collectRagdollGroundImpacts(): void {
@@ -532,10 +615,13 @@ export class GamePhysics {
     this.updateHazards();
     this.world.step(this.events);
     this.events.drainCollisionEvents((first, second, started) => {
-      if (started) this.launchRagdoll(first, second, {
-        x: p.x, y: p.y, vx: active.speed * Math.cos(this.car.rotation()),
-        vy: active.speed * Math.sin(this.car.rotation()), angle: this.car.rotation(),
-      });
+      if (started) {
+        this.launchRagdoll(first, second, {
+          x: p.x, y: p.y, vx: active.speed * Math.cos(this.car.rotation()),
+          vy: active.speed * Math.sin(this.car.rotation()), angle: this.car.rotation(),
+        });
+        this.resolveRagdollContact(first, second);
+      }
     });
     this.collectRagdollGroundImpacts();
     this.car.setTranslation({ x: geometry.x + radius * Math.cos(theta), y: geometry.y + radius * Math.sin(theta) }, true);
@@ -609,11 +695,15 @@ export class GamePhysics {
       targets.push({ id: hazard.spec.id, kind: 'hazard', x: hazard.x, y: hazard.y, radius: .65, health: hazard.health });
     }
     const boxes = new Map(this.randomBoxStates.map(box => [box.id, box]));
-    for (const box of boxes.values()) targets.push({ id: box.id, kind: 'box', x: box.x, y: box.y, radius: .58, health: 1 });
+    for (const box of boxes.values()) targets.push({ id: box.id, kind: 'box', x: box.x, y: box.y,
+      radius: .58, health: this.boxHealth.get(box.id) ?? BOX_MAX_HEALTH });
     for (const actor of this.ragdolls.values()) {
-      const torso = actor.bodies.torso.translation();
-      targets.push({ id: `ragdoll-${actor.spec.id}`, kind: 'ragdoll', x: torso.x, y: torso.y,
-        radius: .62, health: 1 });
+      for (const part of RAGDOLL_PARTS) {
+        const position = actor.bodies[part].translation();
+        const radius = part === 'torso' ? .56 : part === 'head' ? .34 : .3;
+        targets.push({ id: `ragdoll-${actor.spec.id}:${part}`, kind: 'ragdoll',
+          x: position.x, y: position.y, radius, health: 1 });
+      }
     }
     if (!this.pursuit.disabled && this.pursuit.visibility > .5) {
       targets.push({ id: 'police', kind: 'police', x: this.pursuit.x,
@@ -626,10 +716,12 @@ export class GamePhysics {
     const v = this.car.linvel();
     this.weapon.step(FIXED_STEP, controls, { ...body, vx: v.x, vy: v.y }, targets, (target, _damage, hit) => {
       if (target.kind === 'ragdoll') {
-        const actor = this.ragdolls.get(Number(target.id.slice('ragdoll-'.length)));
-        if (actor) {
+        const [id, partName] = target.id.slice('ragdoll-'.length).split(':');
+        const actor = this.ragdolls.get(Number(id));
+        if (actor && RAGDOLL_PARTS.includes(partName as RagdollPartName)) {
           actor.shoot({ x: hit?.x ?? target.x, y: hit?.y ?? target.y,
-            vx: hit?.vx ?? 0, vy: hit?.vy ?? 0, angle: Math.atan2(hit?.vy ?? 0, hit?.vx ?? 1) });
+            vx: hit?.vx ?? 0, vy: hit?.vy ?? 0, angle: Math.atan2(hit?.vy ?? 0, hit?.vx ?? 1) },
+          partName as RagdollPartName);
           this.hitRagdolls.add(actor.spec.id);
           this.ragdollHitSerial++;
         }
@@ -649,7 +741,8 @@ export class GamePhysics {
             speed: this.car.linvel().x, source: 'weapon' });
         }
       } else if (target.kind === 'box') {
-        this.showHealthHit(target.id, 'box', target.x, target.y, target.health);
+        this.boxHealth.set(target.id, target.health);
+        this.showHealthHit(target.id, 'box', target.x, target.y, target.health, BOX_MAX_HEALTH);
         const box = boxes.get(target.id);
         if (box && target.health === 0 && !this.crashed) {
           const activeWeapon = this.weapon.snapshot();
@@ -659,16 +752,23 @@ export class GamePhysics {
           });
           if (reward?.kind === 'health') this.damage.restoreUnit();
           else if (reward?.kind === 'ammo') this.weapon.refillActive();
+          this.boxHealth.delete(target.id);
         }
       } else {
         const hazard = active.get(target.id);
         if (!hazard || hazard.health <= 0) return;
-        if (hazard.spec.kind === 'drone') this.showHealthHit(target.id, 'drone', hazard.x, hazard.y, target.health);
+        this.showHealthHit(target.id, hazard.spec.kind === 'drone' ? 'drone' : 'hazard',
+          hazard.x, hazard.y, target.health, hazard.maxHealth);
         if (target.health === 0) this.breakHazard(hazard, 'weapon', this.car.linvel().x);
         else hazard.health = target.health;
       }
     }, x => this.generator.hasRoad(x) ? roadHeight(x) : -Infinity, impact => this.emitWeaponSparks(impact));
     this.runMissions.recordWeapon(this.weapon.activeId, this.weapon.ammoFor(this.weapon.activeId), this.weapon.shotsFired);
+    if (this.weapon.ammoFor(this.weapon.activeId) <= 0) {
+      const fallback = [...WEAPONS].reverse().find(spec => this.ownedWeapons.has(spec.id)
+        && this.weapon.ammoFor(spec.id) > 0);
+      if (fallback) this.weapon.equip(fallback.id, this.weaponXp);
+    }
   }
 
   private breakHazard(hazard: ActiveHazard, source: BreakEvent['source'], speed: number): void {
@@ -691,8 +791,73 @@ export class GamePhysics {
   }
 
   private addBreakEvent(event: Omit<BreakEvent, 'serial' | 'age'>): void {
-    this.breakEvents.push({ ...event, serial: ++this.breakSerial, age: 0 });
+    const recorded = { ...event, serial: ++this.breakSerial, age: 0 };
+    this.breakEvents.push(recorded);
     if (this.breakEvents.length > 32) this.breakEvents.shift();
+    this.spawnDebrisShards(recorded);
+  }
+
+  private spawnDebrisShards(event: BreakEvent): void {
+    const visualCount = event.kind === 'police' ? 26 : event.source === 'weapon' ? 24
+      : event.kind === 'drone' ? 16 : event.kind === 'pulse' ? 18 : 14;
+    const count = Math.min(10, visualCount);
+    for (let index = 0; index < count; index++) {
+      const shard = this.debrisShards[this.debrisShardCursor];
+      this.debrisShardCursor = (this.debrisShardCursor + 1) % DEBRIS_SHARD_CAPACITY;
+      const seed = event.serial * 137 + index * 11;
+      shard.age = 0;
+      shard.life = 1.5 + hash(seed + 1) * .9;
+      shard.x = event.x + (hash(seed + 2) - .5) * .8;
+      shard.y = event.y + (hash(seed + 3) - .5) * .85;
+      shard.radius = .10 + hash(seed + 10) * .07;
+      if (event.source === 'weapon') {
+        const angle = index / visualCount * Math.PI * 2 + (hash(seed + 5) - .5) * .35;
+        const impulse = 6 + hash(seed + 6) * 8;
+        shard.vx = event.speed * .12 + Math.cos(angle) * impulse;
+        shard.vy = 3 + Math.sin(angle) * impulse;
+      } else {
+        shard.vx = Math.max(0, event.speed) * .62 + 3 + hash(seed + 5) * 7;
+        shard.vy = 2.5 + hash(seed + 6) * 5;
+      }
+    }
+  }
+
+  private advanceDebrisShards(dt: number): void {
+    for (const shard of this.debrisShards) {
+      if (shard.age >= shard.life) continue;
+      const from = { x: shard.x, y: shard.y };
+      shard.age += dt;
+      shard.vy -= 18 * dt;
+      shard.x += shard.vx * dt;
+      shard.y += shard.vy * dt;
+
+      const speed = Math.hypot(shard.vx, shard.vy);
+      if (speed > 2.2) {
+        for (const actor of this.ragdolls.values()) {
+          const part = actor.debrisContact(from, { x: shard.x, y: shard.y }, shard.radius);
+          if (!part) continue;
+          actor.hitByDebris({ x: shard.x, y: shard.y, vx: shard.vx, vy: shard.vy,
+            angle: Math.atan2(shard.vy, shard.vx) }, part);
+          this.activatedRagdolls.add(actor.spec.id);
+          if (!this.hitRagdolls.has(actor.spec.id)) {
+            this.hitRagdolls.add(actor.spec.id);
+            this.ragdollHitSerial++;
+          }
+          shard.age = shard.life;
+          break;
+        }
+      }
+      if (shard.age >= shard.life) continue;
+      if (shard.vy < 0 && this.generator.hasRoad(shard.x)) {
+        const floor = roadHeight(shard.x) + shard.radius;
+        if (shard.y < floor) {
+          if (shard.y < floor - .45) { shard.age = shard.life; continue; }
+          shard.y = floor;
+          shard.vy *= -.23;
+          shard.vx *= .68;
+        }
+      }
+    }
   }
 
   private emitSparks(x: number, y: number, vx: number, vy: number): void {
@@ -708,9 +873,9 @@ export class GamePhysics {
     if (this.sparkEvents.length > 24) this.sparkEvents.shift();
   }
 
-  private showHealthHit(id: string, kind: HealthHitEvent['kind'], x: number, y: number, health: number): void {
+  private showHealthHit(id: string, kind: HealthHitEvent['kind'], x: number, y: number, health: number, maxHealth: number): void {
     const previous = this.healthHitEvents.get(id);
-    this.healthHitEvents.set(id, { serial: ++this.healthHitSerial, id, kind, x, y, health, age: 0 });
+    this.healthHitEvents.set(id, { serial: ++this.healthHitSerial, id, kind, x, y, health, maxHealth, age: 0 });
     if (!previous && this.healthHitEvents.size > 24) {
       const oldest = [...this.healthHitEvents.values()].sort((a, b) => a.serial - b.serial)[0];
       if (oldest) this.healthHitEvents.delete(oldest.id);
@@ -766,7 +931,7 @@ export class GamePhysics {
     this.ageSparks();
     for (const [id, event] of this.healthHitEvents) {
       event.age += FIXED_STEP;
-      if (event.age > 1.15) this.healthHitEvents.delete(id);
+      if (event.age > 2.4) this.healthHitEvents.delete(id);
     }
     this.advancePoliceWreck();
     for (const event of this.breakEvents) event.age += FIXED_STEP;
@@ -776,6 +941,7 @@ export class GamePhysics {
     this.ensureChunks(before.x);
     this.syncRagdolls(before.x);
     for (const actor of this.ragdolls.values()) actor.beforeStep(FIXED_STEP);
+    this.advanceDebrisShards(FIXED_STEP);
     if (this.stepLoop(controls)) {
       this.airborneRotation = 0;
       this.airborneFlips = 0;
@@ -851,6 +1017,7 @@ export class GamePhysics {
     this.events.drainCollisionEvents((first, second, started) => {
       if (!started) return;
       this.launchRagdoll(first, second, body);
+      this.resolveRagdollContact(first, second);
       const hazard = this.carColliders.has(first) ? this.hazardColliders.get(second)
         : this.carColliders.has(second) ? this.hazardColliders.get(first) : undefined;
       if (hazard && hazard.health > 0) {
@@ -953,6 +1120,7 @@ export class GamePhysics {
     const partXs = [this.car, ...this.wheels].map(part => part.translation().x);
     this.ensureChunks(Math.max(...partXs), Math.min(...partXs));
     for (const actor of this.ragdolls.values()) actor.beforeStep(FIXED_STEP);
+    this.advanceDebrisShards(FIXED_STEP);
     this.updateHazards();
     const velocityBefore = this.car.linvel();
     const spinBefore = this.car.angvel();
@@ -962,6 +1130,7 @@ export class GamePhysics {
       const carPosition = this.car.translation();
       this.launchRagdoll(first, second, { ...carPosition, vx: velocityBefore.x,
         vy: velocityBefore.y, angle: this.car.rotation() });
+      this.resolveRagdollContact(first, second);
       const partHandle = this.carColliders.has(first) ? first : this.carColliders.has(second) ? second : undefined;
       if (partHandle === undefined) return;
       const other = partHandle === first ? second : first;

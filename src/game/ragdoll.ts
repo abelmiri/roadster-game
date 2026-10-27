@@ -47,6 +47,7 @@ const below = (point: { x: number; y: number }, angle: number, length: number): 
 export class Ragdoll {
   readonly bodies: Record<RagdollPartName, RigidBody>;
   readonly colliders: Collider[] = [];
+  private readonly colliderParts = new Map<number, RagdollPartName>();
   hit = false;
   hitAge = 0;
   hitImpact: RagdollImpact = { x: 0, y: 0, vx: 0, vy: 0, angle: 0 };
@@ -68,8 +69,10 @@ export class Ragdoll {
       const shape = part.halfHeight
         ? RAPIER.ColliderDesc.capsule(part.halfHeight, part.radius)
         : RAPIER.ColliderDesc.ball(part.radius);
-      this.colliders.push(world.createCollider(shape.setDensity(name === 'torso' ? 2 : 1)
-        .setFriction(.8).setRestitution(.14).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS), body));
+      const collider = world.createCollider(shape.setDensity(name === 'torso' ? 2 : 1)
+        .setFriction(.55).setRestitution(.06).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS), body);
+      this.colliders.push(collider);
+      this.colliderParts.set(collider.handle, name);
       bodies[name] = body;
     }
     this.bodies = bodies;
@@ -167,57 +170,84 @@ export class Ragdoll {
     for (const name of RAGDOLL_PARTS) this.downwardSpeed[name] = -this.bodies[name].linvel().y;
   }
 
-  launch(impact: RagdollImpact): boolean {
-    if (this.hit) return false;
+  partForCollider(handle: number): RagdollPartName | undefined { return this.colliderParts.get(handle); }
+
+  wake(): void { this.activateDynamics(); }
+
+  private activateDynamics(): void {
+    if (this.hit) return;
     this.hit = true;
     this.hitAge = 0;
-    this.hitImpact = { ...impact };
-    const fromAbove = impact.y > this.spec.y + 1.65;
-    const direction = Math.sign(impact.vx || this.spec.x - impact.x || 1);
-    const forward = fromAbove ? impact.vx * .38 + direction * 2
-      : direction * Math.max(7, Math.abs(impact.vx) * .75);
-    const lift = Math.min(11, 3.8 + Math.abs(impact.vx) * .2
-      + Math.max(0, impact.vy) * .2 + impact.vx * Math.sin(impact.angle) * .12);
-    const slam = Math.min(22, Math.max(9, Math.max(0, -impact.vy) * 1.3 + Math.abs(impact.vx) * .27));
-    const vertical = fromAbove ? -slam : lift;
-    for (const [index, name] of RAGDOLL_PARTS.entries()) {
+    for (const name of RAGDOLL_PARTS) {
       const body = this.bodies[name];
       body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
-      body.setLinearDamping(.22);
-      body.setAngularDamping(.45);
-      body.setLinvel({ x: forward + (index % 2 ? 1.2 : -.8),
-        y: vertical + (index < 2 ? (fromAbove ? -1 : 1.5) : 0) }, true);
-      body.setAngvel((index % 2 ? -2.5 : 2.5) * direction, true);
+      body.setLinearDamping(.48);
+      body.setAngularDamping(.85);
+      body.setLinvel({ x: 0, y: 0 }, true);
+      body.setAngvel(0, true);
     }
-    const torso = this.bodies.torso;
-    torso.applyImpulseAtPoint({ x: torso.mass() * forward * .25,
-      y: torso.mass() * vertical * .28 },
-      { x: this.spec.x, y: this.spec.y + 1.4 }, true);
+  }
+
+  launch(impact: RagdollImpact, part: RagdollPartName = 'torso'): boolean {
+    this.activateDynamics();
+    this.hitImpact = { ...impact };
+    const body = this.bodies[part];
+    const speed = Math.hypot(impact.vx, impact.vy);
+    if (speed < 1.2) return false;
+    // Car colliders are sensors during driving, so Rapier reports overlap but
+    // cannot transfer momentum. Apply a local impact on every newly touched
+    // body part, including contacts after the ragdoll is already moving.
+    const transfer = Math.min(.92, .50 + speed * .014);
+    body.applyImpulseAtPoint({ x: body.mass() * impact.vx * transfer,
+      y: body.mass() * (impact.vy * transfer + Math.min(3.2, speed * .065)) },
+    { x: impact.x, y: impact.y }, true);
     return true;
   }
 
-  /** Transfer five percent of each bullet's kinetic energy into the mannequin. */
-  shoot(impact: RagdollImpact): void {
-    if (!this.hit) {
-      this.hit = true;
-      this.hitAge = 0;
-      for (const name of RAGDOLL_PARTS) {
-        const body = this.bodies[name];
-        body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
-        body.setLinearDamping(.22);
-        body.setAngularDamping(.45);
-        body.setLinvel({ x: 0, y: 0 }, true);
-        body.setAngvel(0, true);
-      }
-    }
+  /** Transfer five percent of each bullet's kinetic energy to the struck part. */
+  shoot(impact: RagdollImpact, part: RagdollPartName = 'torso'): void {
+    this.activateDynamics();
     this.hitImpact = { ...impact };
     this.shotSerial++;
     const speed = Math.hypot(impact.vx, impact.vy);
     if (speed < 1e-6) return;
-    const torso = this.bodies.torso;
+    const struck = this.bodies[part];
     const transferredSpeed = speed * Math.sqrt(.05);
-    torso.applyImpulseAtPoint({ x: torso.mass() * impact.vx / speed * transferredSpeed,
-      y: torso.mass() * impact.vy / speed * transferredSpeed }, { x: impact.x, y: impact.y }, true);
+    struck.applyImpulseAtPoint({ x: struck.mass() * impact.vx / speed * transferredSpeed,
+      y: struck.mass() * impact.vy / speed * transferredSpeed }, { x: impact.x, y: impact.y }, true);
+  }
+
+  hitByDebris(impact: RagdollImpact, part: RagdollPartName): void {
+    this.activateDynamics();
+    this.hitImpact = { ...impact };
+    const speed = Math.hypot(impact.vx, impact.vy);
+    if (speed < 1e-6) return;
+    const struck = this.bodies[part];
+    const transfer = Math.min(.72, .30 + speed * .02);
+    struck.applyImpulseAtPoint({ x: struck.mass() * impact.vx * transfer,
+      y: struck.mass() * (impact.vy * transfer + .3) }, { x: impact.x, y: impact.y }, true);
+  }
+
+  debrisContact(from: { x: number; y: number }, to: { x: number; y: number }, radius: number): RagdollPartName | null {
+    const distance = Math.hypot(to.x - from.x, to.y - from.y);
+    const samples = Math.max(1, Math.min(5, Math.ceil(distance / .06)));
+    for (let sample = 1; sample <= samples; sample++) {
+      const alpha = sample / samples;
+      const x = from.x + (to.x - from.x) * alpha;
+      const y = from.y + (to.y - from.y) * alpha;
+      for (const name of RAGDOLL_PARTS) {
+        const body = this.bodies[name];
+        const position = body.translation();
+        const angle = body.rotation();
+        const dx = x - position.x, dy = y - position.y;
+        const localX = dx * Math.cos(angle) + dy * Math.sin(angle);
+        const localY = -dx * Math.sin(angle) + dy * Math.cos(angle);
+        const shape = partShapes[name];
+        const nearestY = Math.max(-shape.halfHeight, Math.min(shape.halfHeight, localY));
+        if (Math.hypot(localX, localY - nearestY) <= shape.radius + radius) return name;
+      }
+    }
+    return null;
   }
 
   /** Detect the strongest downward part contact, including the first slam. */
@@ -235,6 +265,9 @@ export class Ragdoll {
       const floor = surface.height(position.x);
       const bottom = position.y - Math.abs(Math.cos(body.rotation())) * shape.halfHeight - shape.radius;
       if (bottom > floor + .16) continue;
+      // A part that has already passed through the surface (for example when
+      // falling into or below a gap) is not a landing and must not emit dust.
+      if (bottom < floor - .24) continue;
       if (!strongest || speed > strongest.speed) strongest = { x: position.x, y: floor, speed };
     }
     if (!strongest) return null;

@@ -10,7 +10,7 @@ export const RAGDOLL_SLOWDOWN_SECONDS = 0.65;
 export const RAGDOLL_RECOVERY_SECONDS = 1.4;
 export const RAGDOLL_MIN_TIME_SCALE = 0.2;
 export const HIT_RECOVERY_SECONDS = 0.8;
-export const RESTART_DELAY_SECONDS = 3;
+export const RESTART_DELAY_SECONDS = 1;
 export const WRECK_TIME_SCALE = 0.125;
 export const INVINCIBLE_SECONDS = 1.5;
 

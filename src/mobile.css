@@ -5,6 +5,9 @@
 .coin-method-mobile { display: none; }
 
 @media (max-width: 900px), (pointer: coarse) and (orientation: landscape) {
+  .game-shell:has(#resume-countdown-ui:not([hidden])) .topbar,
+  .game-shell:has(#resume-countdown-ui:not([hidden])) .distance-rewards,
+  .game-shell:has(#resume-countdown-ui:not([hidden])) .fps-counter { visibility: hidden; }
   :root { --hud-scale: .8; --hud-resource-width: 110px; --hud-weapon-width: 0px; --hud-edge: 18px; --mobile-corner-gap: 40px; --mobile-menu-edge-gap: 24px; }
   .topbar { height: 54px; padding: max(14px,env(safe-area-inset-top)) var(--mobile-corner-gap) 0; align-items: flex-start; }
   .topbar-tools, .settings-controls, .hud { gap: 5px; }
@@ -27,7 +30,7 @@
   .icon-button svg { width: 17px; height: 17px; }
   .language-button { min-height: 30px; padding: 0 8px; font-size: 9px; gap: 4px; }
   .district-tag { display: none; }
-  .distance-rewards { top: max(49px,calc(env(safe-area-inset-top) + 42px)); left: 50%; right: auto; width: min(390px,calc(100% - 36px)); padding: 4px 8px 6px; transform: translateX(-50%) scale(var(--distance-reward-scale,1)); }
+  .distance-rewards { top: max(2px,env(safe-area-inset-top)); left: 50%; right: auto; width: min(390px,calc(100% - 36px)); padding: 4px 8px 6px; transform: translateX(-50%) scale(var(--distance-reward-scale,1)); }
   .distance-reward-heading, html[lang=fa] .distance-reward-heading { font-size: 7px; gap: 1px 8px; margin-bottom: 4px; }
   .distance-reward-track { height: 3px; }
   .distance-reward-mark { width: 5px; height: 5px; }
@@ -281,4 +284,37 @@
 @media (max-width: 600px) and (orientation: landscape) {
   .overlay .menu-layout { grid-template-columns: minmax(0,1.1fr) minmax(22px,.2fr) minmax(128px,.8fr); gap: 8px; }
   .menu-keyboard-column { padding-inline: 8px; }
+}
+
+@media (max-width: 900px), (pointer: coarse) and (orientation: landscape) {
+  .topbar-tools { margin-right: 51px; }
+  .game-shell.is-mobile-settings-mode .topbar-tools { margin-right: 102px; }
+  #mobile-settings-button { position: absolute; top: max(14px,env(safe-area-inset-top)); right: calc(var(--mobile-corner-gap) + 54px); display: grid; place-items: center; width: 46px; height: 46px; border-color: #ffffff66; background: #26374662; backdrop-filter: blur(12px); }
+  #mobile-settings-button[hidden] { display: none; }
+  #mobile-settings-button svg { width: 23px; height: 23px; }
+  .mobile-settings-dialog { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: max(18px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left)); isolation: isolate; }
+  .mobile-settings-dialog[hidden] { display: none; }
+  .mobile-settings-backdrop { position: absolute; z-index: -1; inset: 0; width: 100%; height: 100%; border: 0; background: #071421a8; backdrop-filter: blur(11px); -webkit-backdrop-filter: blur(11px); }
+  .mobile-settings-card { position: relative; width: min(420px,100%); overflow: hidden; padding: clamp(20px,5vw,28px); border: 1px solid #a6f4df55; border-radius: 22px; background: radial-gradient(ellipse at 8% 0,#a6f4df18,transparent 46%),linear-gradient(145deg,#203c50f5,#102234f7 72%); box-shadow: 0 28px 90px #020911b8, inset 0 1px #ffffff16; animation: mobile-settings-enter .22s cubic-bezier(.2,.8,.2,1) both; }
+  .mobile-settings-card::before { position: absolute; top: 0; left: 22px; right: 22px; height: 1px; background: linear-gradient(90deg,transparent,#a6f4dfaa,transparent); content: ""; }
+  .mobile-settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .mobile-settings-eyebrow { color: #9cebd7; font-size: 8px; font-weight: 850; letter-spacing: .2em; }
+  .mobile-settings-heading h2 { margin: 5px 0 0; color: #f1fff8; font-size: clamp(19px,5vw,24px); font-weight: 850; line-height: 1.3; }
+  .mobile-settings-close { min-height: 38px; padding: 0 13px; border: 1px solid #ffffff24; border-radius: 11px; background: #ffffff0b; color: #d9eee8; font: inherit; font-size: 10px; font-weight: 800; cursor: pointer; }
+  .mobile-settings-close:hover { border-color: #a6f4df88; background: #a6f4df12; }
+  .mobile-settings-hint { margin: 8px 0 20px; color: #b7cbd0; font-size: 10px; line-height: 1.7; }
+  html[lang=fa] .mobile-settings-hint { font-size: 11px; }
+  .mobile-settings-actions .settings-controls { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; width: 100%; direction: rtl; }
+  .mobile-settings-actions .settings-controls > .icon-button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; width: 100%; height: 76px; padding: 8px 5px; border: 1px solid #b5eade25; border-radius: 15px; background: linear-gradient(150deg,#ffffff0c,#ffffff04); color: #eefbf7; box-shadow: inset 0 1px #ffffff0a; transition: transform .16s ease,border-color .16s ease,background .16s ease; }
+  .mobile-settings-actions .settings-controls > .icon-button:hover, .mobile-settings-actions .settings-controls > .icon-button:focus-visible { transform: translateY(-2px); border-color: #9debd48a; background: linear-gradient(145deg,#a6f4df1b,#ffffff09); }
+  .mobile-settings-actions .settings-controls > .icon-button svg { flex: 0 0 auto; width: 25px; height: 25px; }
+  .mobile-settings-actions .settings-controls > .icon-button::after { content: attr(aria-label); max-width: 100%; overflow: hidden; color: #bfd5d3; font-size: 8px; font-weight: 750; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+  html[lang=fa] .mobile-settings-actions .settings-controls > .icon-button::after { font-size: 9px; }
+  .mobile-settings-actions .settings-controls > .language-button { grid-column: 1 / -1; display: flex; min-height: 47px; height: 47px; justify-content: center; gap: 8px; border-color: #a6f4df35; border-radius: 13px; background: #a6f4df0c; color: #e9fff8; font-size: 12px; }
+  .mobile-settings-actions .settings-controls > .language-button:hover { background: #a6f4df18; }
+  @keyframes mobile-settings-enter { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-settings-card { animation: none; }
 }

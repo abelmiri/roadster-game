@@ -12,9 +12,9 @@ interface PopupView {
 }
 
 const POOL_SIZE = 24;
-const POPUP_SECONDS = 1.15;
+const POPUP_SECONDS = 2.4;
 
-/** Brief health labels shown at the hit location of crates and drones. */
+/** Brief health bars shown above crates and destructible hazards after a hit. */
 export class HealthHitPopups {
   readonly group = new THREE.Group();
   private readonly views: PopupView[] = [];
@@ -25,8 +25,8 @@ export class HealthHitPopups {
     this.group.name = 'health-hit-popups';
     for (let index = 0; index < POOL_SIZE; index++) {
       const canvas = document.createElement('canvas');
-      canvas.width = 160;
-      canvas.height = 64;
+      canvas.width = 192;
+      canvas.height = 48;
       const context = canvas.getContext('2d');
       if (!context) throw new Error('Canvas 2D is unavailable for health popups');
       const texture = new THREE.CanvasTexture(canvas);
@@ -34,7 +34,7 @@ export class HealthHitPopups {
       const material = new THREE.SpriteMaterial({ map: texture, transparent: true,
         depthTest: false, depthWrite: false, toneMapped: false });
       const sprite = new THREE.Sprite(material);
-      sprite.scale.set(1.05, .42, 1);
+      sprite.scale.set(1.5, .32, 1);
       sprite.renderOrder = 8;
       sprite.visible = false;
       this.group.add(sprite);
@@ -42,21 +42,33 @@ export class HealthHitPopups {
     }
   }
 
-  private draw(view: PopupView, health: number): void {
+  private draw(view: PopupView, health: number, maxHealth: number): void {
     const { context, canvas, texture } = view;
     context.clearRect(0, 0, canvas.width, canvas.height);
+    const ratio = Math.max(0, Math.min(1, health / Math.max(1, maxHealth)));
+    const red = Math.round(244 - ratio * 171);
+    const green = Math.round(67 + ratio * 166);
+    const blue = Math.round(75 + ratio * 46);
+    const color = `rgb(${red}, ${green}, ${blue})`;
+    const left = 8, top = 9, outerWidth = canvas.width - 16, outerHeight = canvas.height - 18;
+    const innerLeft = 13, innerTop = 14, innerWidth = canvas.width - 26, innerHeight = canvas.height - 28;
     context.beginPath();
-    context.roundRect(5, 5, canvas.width - 10, canvas.height - 10, 18);
-    context.fillStyle = 'rgba(12, 27, 43, 0.92)';
+    context.roundRect(left, top, outerWidth, outerHeight, 14);
+    context.fillStyle = 'rgba(8, 19, 31, 0.9)';
     context.fill();
-    context.lineWidth = 3;
-    context.strokeStyle = 'rgba(155, 244, 220, 0.95)';
+    context.lineWidth = 2;
+    context.strokeStyle = color;
     context.stroke();
-    context.fillStyle = '#ffffff';
-    context.font = 'bold 32px system-ui, sans-serif';
-    context.textAlign = 'center';
-    context.textBaseline = 'middle';
-    context.fillText(`HP ${Math.max(0, Math.ceil(health))}`, canvas.width / 2, canvas.height / 2 + 1);
+    context.beginPath();
+    context.roundRect(innerLeft, innerTop, innerWidth, innerHeight, 9);
+    context.fillStyle = 'rgba(255, 255, 255, 0.14)';
+    context.fill();
+    if (ratio > 0) {
+      context.beginPath();
+      context.roundRect(innerLeft, innerTop, Math.max(innerHeight, innerWidth * ratio), innerHeight, 9);
+      context.fillStyle = color;
+      context.fill();
+    }
     texture.needsUpdate = true;
   }
 
@@ -78,12 +90,12 @@ export class HealthHitPopups {
       }
       if (view.serial !== event.serial) {
         view.serial = event.serial;
-        this.draw(view, event.health);
+        this.draw(view, event.health, event.maxHealth);
       }
       const progress = Math.min(1, Math.max(0, event.age / POPUP_SECONDS));
       view.sprite.visible = progress < 1;
-      view.sprite.position.set(event.x, event.y + (event.kind === 'drone' ? .82 : 1.15) + progress * .25, 2.8);
-      view.material.opacity = progress > .78 ? (1 - progress) / .22 : 1;
+      view.sprite.position.set(event.x, event.y + (event.kind === 'drone' ? .95 : 1.3) + progress * .2, 2.8);
+      view.material.opacity = progress > .84 ? (1 - progress) / .16 : 1;
     }
     for (const [id, view] of this.byId) {
       if (visible.has(id)) continue;

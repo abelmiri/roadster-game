@@ -40,20 +40,21 @@ const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) throw new Error('Missing app element');
 
 app.innerHTML = `
-  <div class="game-shell">
+  <div id="game-shell" class="game-shell">
     <div id="scene" class="scene"></div>
     <div class="vignette" aria-hidden="true"></div>
     ${import.meta.env.DEV ? '<div id="fps-counter" class="fps-counter" aria-hidden="true" lang="en" dir="ltr">-- FPS</div>' : ''}
     <header class="topbar">
       <div class="brand"><img class="brand-mark app-icon" src="/icons/icon-192.png" width="32" height="32" alt="" /><span data-i18n="brand"></span><span class="brand-edition" data-i18n="edition"></span></div>
       <div class="topbar-tools">
-        <div class="hud" aria-live="off">
+        <div id="topbar-hud" class="hud" aria-live="off">
           <div class="hud-stat"><span id="distance-title" class="hud-label" data-i18n="distance"></span><strong id="distance"></strong></div>
           <div class="hud-divider"></div>
           <div class="hud-stat"><span class="hud-label" data-i18n="best"></span><strong id="best"></strong><small id="best-player" class="best-player"></small></div>
           <button id="pause-button" class="icon-button" type="button"><span class="pause-icon" aria-hidden="true"></span></button>
+          <button id="mobile-settings-button" class="icon-button mobile-settings-button" type="button" aria-haspopup="dialog" aria-controls="mobile-settings-dialog" aria-expanded="false" hidden><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
         </div>
-        <div class="settings-controls">
+        <div id="settings-controls" class="settings-controls">
           <button id="missions-button" class="icon-button" type="button" aria-haspopup="dialog" aria-controls="missions-dialog" aria-expanded="false"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5H5v16h14V5h-4M9 3h6v4H9zM8 12l2 2 5-4M8 18h7"/></svg></button>
           <button id="touch-layout-button" class="icon-button touch-layout-button" type="button" aria-controls="touch-layout-editor" aria-expanded="false"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/></svg></button>
           <button id="armory-button" class="icon-button armory-button" type="button" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h9v7H4zM13 10h8v3h-8M7 15v4m-4 0h12M6 6h5"/></svg></button>
@@ -67,6 +68,17 @@ app.innerHTML = `
         </div>
       </div>
     </header>
+    <div id="mobile-settings-dialog" class="mobile-settings-dialog" hidden>
+      <button id="mobile-settings-backdrop" class="mobile-settings-backdrop" type="button" aria-label="Close settings"></button>
+      <section class="mobile-settings-card" role="dialog" aria-modal="true" aria-labelledby="mobile-settings-title">
+        <div class="mobile-settings-heading">
+          <div><span class="mobile-settings-eyebrow" data-i18n="mobileSettingsEyebrow"></span><h2 id="mobile-settings-title" data-i18n="mobileSettingsTitle"></h2></div>
+          <button id="mobile-settings-close" class="mobile-settings-close" type="button" data-i18n="closeSettings"></button>
+        </div>
+        <p class="mobile-settings-hint" data-i18n="mobileSettingsHint"></p>
+        <div id="mobile-settings-actions" class="mobile-settings-actions"></div>
+      </section>
+    </div>
     <div id="distance-rewards" class="distance-rewards">
       <div class="distance-reward-heading"><span id="distance-reward-next"></span><strong id="distance-reward-earned"></strong></div>
       <div id="distance-reward-meter" class="distance-reward-track" role="progressbar" aria-valuemin="0" aria-valuemax="${DISTANCE_REWARD_INTERVAL}"><span id="distance-reward-fill"></span>${DISTANCE_COIN_REWARDS.slice(0,DISTANCE_REWARDS_PER_INTERVAL).map((reward,index)=>`<i id="distance-reward-mark-${index}" class="distance-reward-mark" style="left:${reward.distance/DISTANCE_REWARD_INTERVAL*100}%" aria-hidden="true"></i>`).join('')}</div>
@@ -316,9 +328,48 @@ const boostMeter = element<HTMLDivElement>('boost-meter');
 const speedLabel = element<HTMLSpanElement>('speed');
 const districtLabel = element<HTMLSpanElement>('district');
 const pauseButton = element<HTMLButtonElement>('pause-button');
+const mobileSettingsButton = element<HTMLButtonElement>('mobile-settings-button');
+const mobileSettingsDialog = element<HTMLDivElement>('mobile-settings-dialog');
+const mobileSettingsBackdrop = element<HTMLButtonElement>('mobile-settings-backdrop');
+const mobileSettingsClose = element<HTMLButtonElement>('mobile-settings-close');
+const mobileSettingsActions = element<HTMLDivElement>('mobile-settings-actions');
+const settingsControls = element<HTMLDivElement>('settings-controls');
+const settingsHome = settingsControls.parentElement!;
+const settingsHud = element<HTMLDivElement>('topbar-hud');
+const gameShell = element<HTMLDivElement>('game-shell');
 const soundButton = element<HTMLButtonElement>('sound-button');
 const musicButton = element<HTMLButtonElement>('music-button');
 const languageButton = element<HTMLButtonElement>('language-button');
+function syncMobileSettingsPlacement(): void {
+  const inMobileRun = status === 'running' && isCompactMenu();
+  gameShell.classList.toggle('is-mobile-settings-mode', inMobileRun);
+  if (inMobileRun) {
+    if (settingsControls.parentElement !== mobileSettingsActions) mobileSettingsActions.append(settingsControls);
+    mobileSettingsButton.hidden = false;
+    return;
+  }
+  if (settingsControls.parentElement !== settingsHome) settingsHome.insertBefore(settingsControls, settingsHud.nextSibling);
+  mobileSettingsButton.hidden = true;
+  if (!mobileSettingsDialog.hidden) closeMobileSettings(false);
+}
+function openMobileSettings(): void {
+  if (mobileSettingsButton.hidden || status !== 'running') return;
+  clearHeld();
+  mobileSettingsDialog.hidden = false;
+  mobileSettingsButton.setAttribute('aria-expanded', 'true');
+  mobileSettingsClose.focus();
+}
+function closeMobileSettings(returnFocus = true): void {
+  mobileSettingsDialog.hidden = true;
+  mobileSettingsButton.setAttribute('aria-expanded', 'false');
+  if (returnFocus && !mobileSettingsButton.hidden) mobileSettingsButton.focus();
+}
+mobileSettingsButton.addEventListener('click', openMobileSettings);
+mobileSettingsClose.addEventListener('click', () => closeMobileSettings());
+mobileSettingsBackdrop.addEventListener('click', () => closeMobileSettings());
+mobileSettingsActions.addEventListener('click', event => {
+  if (event.target instanceof Element && event.target.closest('button')) closeMobileSettings(false);
+}, true);
 const audio = new GameAudio();
 const musicShouldPlay = (): boolean => audio.musicOn && status !== 'loading' && status !== 'error' &&
   !(status === 'crashed' && crashMenuHidden);
@@ -587,7 +638,7 @@ element('telegram-unlink').addEventListener('click', () => {
 const formatDistance = (meters: number): string => `${formatNumber(meters, 4)} <small>${t('meter')}</small>`;
 const districtKeys: MessageKey[] = ['districtMorning', 'districtDowntown', 'districtNight'];
 const weaponName = (id: string): string => t(`weapon${WEAPONS.findIndex(spec => spec.id === id)}` as MessageKey);
-const dialogBlocked = (): boolean => !purchaseDialog.hidden || !missionsDialog.hidden;
+const dialogBlocked = (): boolean => !purchaseDialog.hidden || !missionsDialog.hidden || !mobileSettingsDialog.hidden;
 const missionName = (spec: MissionSpec): string => `${spec.title[getLanguage()]} · ${formatNumber(spec.target)}`;
 const missionValue = (spec: MissionSpec, value: number): string => spec.unit === 'seconds' ? formatDecimal(Math.floor(value * 10 + 1e-6) / 10) : formatNumber(value);
 let displayedMissionHistory = -1;
@@ -1068,6 +1119,9 @@ function updateLanguage(): void {
   updateRecordDialog();
   languageButton.setAttribute('aria-label', t('switchLanguage'));
   languageButton.title = t('switchLanguage');
+  mobileSettingsButton.setAttribute('aria-label', t('mobileSettingsTitle'));
+  mobileSettingsButton.title = t('mobileSettingsTitle');
+  mobileSettingsBackdrop.setAttribute('aria-label', t('closeSettings'));
   element('language-en').classList.toggle('is-active', getLanguage() === 'en');
   element('language-fa').classList.toggle('is-active', getLanguage() === 'fa');
   updateAudioButton();
@@ -1112,7 +1166,9 @@ async function start(): Promise<void> {
     restartAvailableAt = 0;
     primaryButton.disabled = false;
     physics.dispose();
-    physics = new GamePhysics(7, { id: loadout.selected, xp: experience.total, upgrades: player.weaponUpgrades, carUpgrades: player.carUpgrades, vehicle: player.selectedVehicle });
+    physics = new GamePhysics(7, { id: loadout.selected, xp: experience.total, upgrades: player.weaponUpgrades,
+      ownedWeapons: WEAPONS.filter(spec => player.ownsWeapon(spec.id)).map(spec => spec.id),
+      carUpgrades: player.carUpgrades, vehicle: player.selectedVehicle });
     audio.reset();
     accumulator = 0;
     holdInterpolation = false;
@@ -1655,6 +1711,16 @@ function toggleMusic(): void {
 
 window.addEventListener('keydown', (event) => {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (!mobileSettingsDialog.hidden) {
+    if (event.code === 'Escape') { event.preventDefault(); if (!event.repeat) closeMobileSettings(); return; }
+    if (event.code === 'Tab') {
+      const buttons = [mobileSettingsClose, ...mobileSettingsActions.querySelectorAll<HTMLButtonElement>('button:not([hidden])')];
+      const first = buttons[0]; const last = buttons.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    }
+    return;
+  }
   if (!purchaseDialog.hidden) {
     if (event.code === 'Escape') { event.preventDefault(); if (!event.repeat) closePurchase(); }
     if (event.code === 'Tab') {
@@ -1814,12 +1880,13 @@ function frame(now: number): void {
 }
 
 function renderFrame(now: number): void {
+  syncMobileSettingsPlacement();
   updateFps?.(now);
   const wallDelta = Math.max(0, (now - lastFrame) / 1000);
   const delta = Math.min(wallDelta, 0.06);
   lastFrame = now;
   let playDelta = 0;
-  if (status === 'running') {
+  if (status === 'running' && mobileSettingsDialog.hidden) {
     playDelta = Math.min(impactPause.consume(wallDelta), explosionSlowMotion.consume(wallDelta),
       ragdollSlowMotion.consume(wallDelta), 0.06);
     if (physics.crashed) crash();
@@ -1879,7 +1946,9 @@ function renderFrame(now: number): void {
   }
   const frozen = impactPause.active;
   const snapshot = physics.snapshot(frozen || holdInterpolation ? 1 : Math.min(1, accumulator / FIXED_STEP));
-  const simulating = status === 'running' && !frozen;
+  if (status === 'running' && snapshot.weapon.id !== loadout.selected
+    && loadout.select(snapshot.weapon.id, experience.total)) refreshArmory();
+  const simulating = status === 'running' && !frozen && mobileSettingsDialog.hidden;
   if (status === 'running') updateMissions(snapshot);
   if (simulating) missionRewardTime = Math.max(0, missionRewardTime - playDelta);
   if (status === 'running') player.trackScore(snapshot.distance, now);
@@ -1945,7 +2014,9 @@ async function boot(): Promise<void> {
     }
     syncReady = true;
     await RAPIER.init();
-    physics = new GamePhysics(7, { id: loadout.selected, xp: experience.total, upgrades: player.weaponUpgrades, carUpgrades: player.carUpgrades, vehicle: player.selectedVehicle });
+    physics = new GamePhysics(7, { id: loadout.selected, xp: experience.total, upgrades: player.weaponUpgrades,
+      ownedWeapons: WEAPONS.filter(spec => player.ownsWeapon(spec.id)).map(spec => spec.id),
+      carUpgrades: player.carUpgrades, vehicle: player.selectedVehicle });
     visuals = new GameVisuals(sceneElement);
     visuals.setVehicle(player.selectedVehicle);
     visuals.setPaint(player.selectedPaint);

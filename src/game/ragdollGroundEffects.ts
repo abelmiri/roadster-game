@@ -89,6 +89,12 @@ export class RagdollGroundEffects {
       if (dt && (road?.hasRoad(particle.x) ?? true)) {
         const floor = roadHeight(particle.x) + particle.size * .35;
         if (particle.y < floor) {
+          // Particles that fell through a gap must not snap back onto the
+          // road when their horizontal drift reaches the far edge.
+          if (particle.y < floor - .45) {
+            particle.life = particle.age;
+            continue;
+          }
           particle.y = floor;
           particle.vy = dust ? 0 : Math.max(0, -particle.vy * .22);
           particle.vx *= dust ? .72 : .48;

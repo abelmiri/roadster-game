@@ -3,8 +3,8 @@ import type { RandomBoxSpec } from './randomBox';
 export const CHUNK_LENGTH = 30;
 export const START_APRON_X = -64;
 export const BOX_UNLOCK_DISTANCE = 300;
-export const BOX_SPAWN_KEEP_CHANCE = .8;
-export const HAZARD_SPAWN_KEEP_CHANCE = .86;
+export const BOX_SPAWN_KEEP_CHANCE = .64;
+export const HAZARD_SPAWN_KEEP_CHANCE = .688;
 const BOX_UNLOCK_X = 7 + BOX_UNLOCK_DISTANCE;
 
 export type HazardKind = 'barrier' | 'drone' | 'pulse';
