@@ -31,7 +31,8 @@ export interface LoopSpec { id: number; entryX: number; radius: number }
 const loops: LoopSpec[] = [];
 export interface RagdollSpec {
   id: number; siteId: number; memberIndex: number; groupSize: number;
-  x: number; y: number; outfit: number; pose: 'standing' | 'sitting' | 'hanging';
+  x: number; y: number; outfit: number; pose: 'standing' | 'sitting' | 'hanging' | 'looking';
+  lookDirection?: -1 | 1;
 }
 export const RAGDOLL_MIN_SPACING = 300;
 export const RAGDOLL_MAX_SPACING = 500;
@@ -40,6 +41,9 @@ const RAGDOLL_GROUP_GAP = 2.2;
 const ragdollSites: number[] = [];
 const ragdollSpawns: RagdollSpec[] = [];
 let ragdollPlacementTrack: TrackGenerator | undefined;
+let gapSpectatorTrack: TrackGenerator | undefined;
+const gapSpectators: RagdollSpec[] = [];
+let gapSpectatorsGeneratedThrough = -1;
 
 export const RAMP_UNLOCK_DISTANCE = 800;
 const RAMP_UNLOCK_X = 7 + RAMP_UNLOCK_DISTANCE;
@@ -272,29 +276,8 @@ function ensureRagdolls(end: number): void {
     };
     let center = target;
     let size = count;
-    let pose: RagdollSpec['pose'] = 'standing';
     let placed = false;
-    // Occasionally place a small group at a gap edge, where they sit or hold
-    // on to the ledge. Keep the procedural schedule stable across visits.
-    if (hash(siteId + 4907) < .34) {
-      const chunk = ragdollPlacementTrack.chunk(Math.floor(target / CHUNK_LENGTH));
-      const previousChunkGap = ragdollPlacementTrack.chunk(Math.floor(target / CHUNK_LENGTH) - 1).gap;
-      const nearbyGap = chunk.gap && Math.min(Math.abs(chunk.gap.start - target), Math.abs(chunk.gap.end - target)) < 105 ? chunk.gap
-        : previousChunkGap && Math.min(Math.abs(previousChunkGap.start - target), Math.abs(previousChunkGap.end - target)) < 105
-          ? previousChunkGap : null;
-      if (nearbyGap) {
-        const edge = Math.abs(nearbyGap.start - target) < Math.abs(nearbyGap.end - target)
-          ? nearbyGap.start : nearbyGap.end;
-        const edgeCenter = edge + (edge === nearbyGap.start ? -.48 : .48);
-        center = edgeCenter;
-        pose = hash(siteId + 5149) < .5 ? 'sitting' : 'hanging';
-        const spacing = center - previous;
-        placed = spacing >= 300 && spacing <= 500 && memberXs(center, count).every(x => Math.abs(x - edge) < 2.4);
-        if (placed) size = count;
-        else { center = target; pose = 'standing'; }
-      }
-    }
-    for (const candidateSize of (placed ? [] : [count, 1])) {
+    for (const candidateSize of [count, 1]) {
       for (const offset of [0, -4, 4, -8, 8, -12, 12, -16, 16, -20, 20]) {
         const candidate = target + offset;
         if (!memberXs(candidate, candidateSize).every(clear)) continue;
@@ -308,11 +291,55 @@ function ensureRagdolls(end: number): void {
     ragdollSites.push(center);
     for (const [memberIndex, x] of memberXs(center, size).entries()) {
       const id = ragdollSpawns.length;
-      ragdollSpawns.push({ id, siteId, memberIndex, groupSize: size, x, y: roadHeight(x), pose,
+      ragdollSpawns.push({ id, siteId, memberIndex, groupSize: size, x, y: roadHeight(x), pose: 'standing',
         outfit: Math.floor(hash(id + 6291) * RAGDOLL_OUTFIT_COUNT) });
     }
     ragdollPlacementTrack.trim(Math.floor(center / CHUNK_LENGTH) - 5);
   }
+}
+
+/** Two or three spectators straddle each procedural gap, sitting or peering in. */
+export function gapSpectatorsBetween(start: number, end: number): RagdollSpec[] {
+  if (end < 0 || end < start) return [];
+  if (!gapSpectatorTrack) gapSpectatorTrack = new TrackGenerator();
+  const through = Math.floor(end / CHUNK_LENGTH);
+  for (let index = gapSpectatorsGeneratedThrough + 1; index <= through; index++) {
+    const gap = gapSpectatorTrack.chunk(index).gap;
+    gapSpectatorsGeneratedThrough = index;
+    if (!gap) continue;
+    const count = hash(index + 7021) < .52 ? 2 : 3;
+    const sitAtStart = hash(index + 7297) < .5;
+    const people: Array<{ x: number; pose: RagdollSpec['pose']; lookDirection: -1 | 1 }> = [
+      { x: gap.start - .58, pose: sitAtStart ? 'sitting' : 'looking', lookDirection: 1 },
+      { x: gap.end + .58, pose: sitAtStart ? 'looking' : 'sitting', lookDirection: -1 },
+    ];
+    if (count === 3) {
+      const extraAtStart = hash(index + 7411) < .5;
+      people.push(extraAtStart
+        ? { x: gap.start - 2.78, pose: 'looking', lookDirection: 1 }
+        : { x: gap.end + 2.78, pose: 'looking', lookDirection: -1 });
+    }
+    people.sort((a, b) => a.x - b.x);
+    const siteId = 1_000_000 + index;
+    for (const [memberIndex, person] of people.entries()) {
+      const id = 10_000_000 + index * 3 + memberIndex;
+      gapSpectators.push({ id, siteId, memberIndex, groupSize: count, x: person.x,
+        y: roadHeight(person.x), outfit: Math.floor(hash(id + 6291) * RAGDOLL_OUTFIT_COUNT),
+        pose: person.pose, lookDirection: person.lookDirection });
+    }
+  }
+  let low = 0;
+  let high = gapSpectators.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (gapSpectators[middle].x < start) low = middle + 1;
+    else high = middle;
+  }
+  const result: RagdollSpec[] = [];
+  for (let index = low; index < gapSpectators.length && gapSpectators[index].x <= end; index++) {
+    result.push(gapSpectators[index]);
+  }
+  return result;
 }
 
 export function ragdollsBetween(start: number, end: number): RagdollSpec[] {

@@ -24,6 +24,7 @@ import { CombatVisual, WeaponVisual } from './weaponVisual';
 import { MagneticShield, RandomBoxVisuals } from './powerVisuals';
 import { RagdollVisuals } from './ragdollVisuals';
 import { RagdollGroundEffects } from './ragdollGroundEffects';
+import { HealthHitPopups } from './healthHitPopups';
 
 interface Theme {
   sky: string; haze: string; far: string; middle: string; near: string;
@@ -119,6 +120,7 @@ export class GameVisuals {
   private readonly randomBoxes = new RandomBoxVisuals();
   private readonly ragdolls = new RagdollVisuals();
   private readonly ragdollGroundEffects = new RagdollGroundEffects();
+  private readonly healthHitPopups = new HealthHitPopups();
   private readonly loops = new Map<number, THREE.Group>();
   private viewHeight = VIEW_HALF_HEIGHT;
   private sun!: THREE.Mesh;
@@ -156,6 +158,7 @@ export class GameVisuals {
     this.worldGroup.add(this.carGroup, ...this.wheelGroups, this.smoke.mesh, this.debris.mesh, this.sparks.mesh,
       this.police.group, this.policeWreck.group, this.policeSmoke.mesh, this.combat.group, this.depot.group,
       this.randomBoxes.group, this.ragdolls.group, this.ragdollGroundEffects.dust, this.ragdollGroundEffects.drops);
+    this.worldGroup.add(this.healthHitPopups.group);
     this.fanGlow = box(1.8, 0.07, 0.55, new THREE.MeshBasicMaterial({ color: '#58f4dd', transparent: true, opacity: 0.8 }));
     this.fanGlow.position.set(0, -0.48, 0.08);
     this.fanGlow.visible = false;
@@ -479,6 +482,7 @@ export class GameVisuals {
     this.syncLoops(snapshot.car.x);
     this.randomBoxes.update(physics.randomBoxStates, sceneDelta, running && !impactFrozen,
       snapshot.boxRewardEvents, snapshot.boxRewardSerial);
+    this.healthHitPopups.update(snapshot.healthHitEvents, snapshot.healthHitSerial);
     this.ragdolls.update(snapshot.ragdolls ?? [], sceneDelta);
     this.ragdollGroundEffects.update(snapshot.ragdollGroundEvents, snapshot.ragdollGroundSerial,
       sceneDelta, running && !impactFrozen, physics.generator);
@@ -589,6 +593,7 @@ export class GameVisuals {
     this.weapon.dispose();
     this.combat.dispose();
     this.shield.dispose(); this.randomBoxes.dispose(); this.ragdolls.dispose(); this.ragdollGroundEffects.dispose();
+    this.healthHitPopups.dispose();
     this.blur.dispose();
     this.groundMat.dispose();
     this.renderer.dispose();

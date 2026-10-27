@@ -96,27 +96,34 @@ export class Ragdoll {
   private standingPose(): Record<RagdollPartName, BodyPose> {
     const { x, y, id, siteId, memberIndex, groupSize } = this.spec;
     const middle = (groupSize - 1) / 2;
+    const lookDirection = this.spec.lookDirection ?? 1;
     const toward = groupSize === 1 ? (id % 2 ? 1 : -1)
       : memberIndex < middle ? 1 : memberIndex > middle ? -1 : siteId % 2 ? 1 : -1;
     const sway = Math.sin(this.idleTime * .85 + memberIndex * .37);
     const angle = toward * .045 + sway * .025 + (id % 3 - 1) * .012;
     const sitting = this.spec.pose === 'sitting';
     const hanging = this.spec.pose === 'hanging';
+    const looking = this.spec.pose === 'looking';
+    const torsoAngle = looking ? -lookDirection * .24 : sitting ? lookDirection * -.08
+      : hanging ? toward * .14 : angle;
     const torso: BodyPose = { x: x + toward * .02 + sway * .016,
       y: y + (sitting ? .76 : 1.12) + Math.sin(this.idleTime * 1.1) * .006,
-      angle: sitting ? toward * -.08 : hanging ? toward * .14 : angle };
+      angle: torsoAngle };
     const neck = at(torso, 0, .53);
-    const headAngle = angle + toward * .06 + Math.sin(this.idleTime * .68) * .025;
+    const headAngle = looking ? torsoAngle - lookDirection * .35
+      : torsoAngle + toward * .06 + Math.sin(this.idleTime * .68) * .025;
     const result = { torso, head: { x: neck.x - Math.sin(headAngle) * .21,
       y: neck.y + Math.cos(headAngle) * .21, angle: headAngle } } as Record<RagdollPartName, BodyPose>;
     const gesturing = groupSize > 1 && (siteId + memberIndex) % 2 === 0;
     for (const side of ['left', 'right'] as const) {
       const direction = side === 'left' ? -1 : 1;
       const towardNeighbor = gesturing && direction === toward;
-      const upperAngle = hanging && direction === toward ? direction * -1.15
+      const upperAngle = looking && direction === lookDirection ? direction * 1.05
+        : hanging && direction === toward ? direction * -1.15
         : towardNeighbor ? direction * (.72 + .05 * sway)
         : angle + direction * (.18 + .025 * sway);
-      const forearmAngle = hanging && direction === toward ? direction * -1.35
+      const forearmAngle = looking && direction === lookDirection ? direction * 1.28
+        : hanging && direction === toward ? direction * -1.35
         : towardNeighbor ? direction * (1.55 + .10 * sway)
         : angle + direction * (.26 + .07 * Math.sin(this.idleTime + direction));
       const upper = below(at(torso, direction * .24, .30), upperAngle, .17);

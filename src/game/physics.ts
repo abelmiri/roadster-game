@@ -1,6 +1,6 @@
 import RAPIER from '@dimforge/rapier2d-compat';
 import type { Collider, EventQueue, RigidBody, World } from '@dimforge/rapier2d-compat';
-import { CHUNK_LENGTH, START_APRON_X, BOX_UNLOCK_DISTANCE, TrackGenerator, roadHeight, roadSlope, sampleRoad, loopsBetween, loopGeometry, rampAt, ragdollsBetween, RAMP_BOOSTER_LENGTH, type LoopSpec, type HazardSpec, type TrackChunk } from './track';
+import { CHUNK_LENGTH, START_APRON_X, BOX_UNLOCK_DISTANCE, TrackGenerator, roadHeight, roadSlope, sampleRoad, loopsBetween, loopGeometry, rampAt, ragdollsBetween, gapSpectatorsBetween, RAMP_BOOSTER_LENGTH, type LoopSpec, type HazardSpec, type TrackChunk } from './track';
 import { CAR_AXLE_Y, CAR_BODY_CLEARANCE, CAR_WHEEL_OFFSET, CAR_WHEEL_RADIUS, sprungBodyPose } from './vehicle';
 import { VehicleSuspension } from './suspension';
 import { WheelContactPhysics, ROAD_GRAVITY, type ContactBody } from './wheelContact';
@@ -23,6 +23,10 @@ export const SPEED_GAIN_PER_500M = 10 / 3.6;
 export const MAX_CRUISE_SPEED = 320 / 3.6;
 export const JUMP_THRUST_DURATION = 0.19;
 export const RAMP_BOOST_SPEED = 7;
+
+export interface HealthHitEvent {
+  serial: number; id: string; kind: 'box' | 'drone'; x: number; y: number; health: number; age: number;
+}
 
 export function cruiseSpeedForDistance(distance: number): number {
   return Math.min(MAX_CRUISE_SPEED, START_SPEED + Math.max(0, distance) / 500 * SPEED_GAIN_PER_500M);
@@ -84,6 +88,8 @@ export interface GameSnapshot {
   breakEvents: readonly BreakEvent[];
   sparkSerial: number;
   sparkEvents: readonly SparkEvent[];
+  healthHitSerial: number;
+  healthHitEvents: readonly HealthHitEvent[];
   runXp: number;
   health: number;
   impactSerial: number;
@@ -188,6 +194,8 @@ export class GamePhysics {
   private readonly breakEvents: BreakEvent[] = [];
   private sparkSerial = 0;
   private readonly sparkEvents: SparkEvent[] = [];
+  private healthHitSerial = 0;
+  private readonly healthHitEvents = new Map<string, HealthHitEvent>();
   private readonly destroyedHazards = new Set<string>();
   private policeDestroyed = 0;
   private furthestX: number;
@@ -395,7 +403,8 @@ export class GamePhysics {
   }
 
   private syncRagdolls(x: number): void {
-    for (const spec of ragdollsBetween(x - 65, x + 90)) {
+    const nearby = [...ragdollsBetween(x - 65, x + 90), ...gapSpectatorsBetween(x - 65, x + 90)];
+    for (const spec of nearby) {
       if (this.ragdolls.has(spec.id) || this.hitRagdolls.has(spec.id)) continue;
       const actor = new Ragdoll(this.world, spec);
       this.ragdolls.set(spec.id, actor);
@@ -640,6 +649,7 @@ export class GamePhysics {
             speed: this.car.linvel().x, source: 'weapon' });
         }
       } else if (target.kind === 'box') {
+        this.showHealthHit(target.id, 'box', target.x, target.y, target.health);
         const box = boxes.get(target.id);
         if (box && target.health === 0 && !this.crashed) {
           const activeWeapon = this.weapon.snapshot();
@@ -653,6 +663,7 @@ export class GamePhysics {
       } else {
         const hazard = active.get(target.id);
         if (!hazard || hazard.health <= 0) return;
+        if (hazard.spec.kind === 'drone') this.showHealthHit(target.id, 'drone', hazard.x, hazard.y, target.health);
         if (target.health === 0) this.breakHazard(hazard, 'weapon', this.car.linvel().x);
         else hazard.health = target.health;
       }
@@ -695,6 +706,15 @@ export class GamePhysics {
       vx: 0, vy: 0, directionX: impact.directionX, directionY: impact.directionY,
       strength: impact.destroyed ? 24 : 10, age: 0, kind: impact.surface === 'terrain' ? 'terrain' : 'projectile' });
     if (this.sparkEvents.length > 24) this.sparkEvents.shift();
+  }
+
+  private showHealthHit(id: string, kind: HealthHitEvent['kind'], x: number, y: number, health: number): void {
+    const previous = this.healthHitEvents.get(id);
+    this.healthHitEvents.set(id, { serial: ++this.healthHitSerial, id, kind, x, y, health, age: 0 });
+    if (!previous && this.healthHitEvents.size > 24) {
+      const oldest = [...this.healthHitEvents.values()].sort((a, b) => a.serial - b.serial)[0];
+      if (oldest) this.healthHitEvents.delete(oldest.id);
+    }
   }
 
   private advancePoliceWreck(): void {
@@ -744,6 +764,10 @@ export class GamePhysics {
     this.previous = this.current.map((pose) => ({ ...pose })) as [BodyPose, BodyPose, BodyPose];
     this.time += FIXED_STEP;
     this.ageSparks();
+    for (const [id, event] of this.healthHitEvents) {
+      event.age += FIXED_STEP;
+      if (event.age > 1.15) this.healthHitEvents.delete(id);
+    }
     this.advancePoliceWreck();
     for (const event of this.breakEvents) event.age += FIXED_STEP;
     while (this.breakEvents.length && this.breakEvents[0].age > 2.5) this.breakEvents.shift();
@@ -1023,6 +1047,7 @@ export class GamePhysics {
       obstaclesDestroyed: this.obstaclesDestroyed, policeDestroyed: this.policeDestroyed,
       breakSerial: this.breakSerial, breakEvents: this.breakEvents,
       sparkSerial: this.sparkSerial, sparkEvents: this.sparkEvents,
+      healthHitSerial: this.healthHitSerial, healthHitEvents: Array.from(this.healthHitEvents.values()),
       runXp: this.loopCompletions * LOOP_XP + this.obstaclesDestroyed * OBSTACLE_XP + this.policeDestroyed * POLICE_XP + this.boxRewards.xp,
       health: this.damage.health, impactSerial: this.damage.impactSerial,
       invincibilityRemaining: this.damage.invincibilityRemaining,

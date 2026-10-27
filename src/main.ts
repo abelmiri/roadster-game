@@ -158,15 +158,26 @@ app.innerHTML = `
     </div>
     <div id="overlay" class="overlay is-visible">
       <div class="intro-grid" aria-hidden="true"></div>
+      <div class="menu-layout">
       <div class="overlay-card">
         <span id="eyebrow" class="eyebrow"></span>
         <h1 id="overlay-title"></h1>
         <p id="overlay-description" class="overlay-description"></p>
+        <div class="menu-stats-row">
+          <div class="menu-player-score"><span class="menu-stat-icon" aria-hidden="true">★</span><span class="menu-stat-label" data-i18n="playerScore"></span><strong id="menu-player-score"></strong></div>
+          <button id="menu-wallet-button" class="menu-coin-wallet" type="button" aria-haspopup="dialog" aria-controls="coin-dialog" aria-expanded="false"><span class="coin-symbol" aria-hidden="true">●</span><span class="menu-stat-label" data-i18n="coinBalance"></span><strong id="menu-coins"></strong><span class="coin-info-label" data-i18n="coinDetails"></span></button>
+          <button id="menu-missions-button" class="menu-missions-button" type="button" aria-haspopup="dialog" aria-controls="missions-dialog" aria-expanded="false"><span class="menu-stat-icon" aria-hidden="true">☷</span><span class="menu-stat-label" data-i18n="missions"></span><strong id="menu-missions-progress"></strong><strong id="menu-missions-number" aria-hidden="true"></strong><span aria-hidden="true">↗</span></button>
+        </div>
         <div id="overlay-controls" class="control-summary"><div><span data-number="1"></span><strong data-i18n="jump"></strong><small data-i18n="jumpSummary"></small></div><div><span data-number="2"></span><strong data-i18n="suction"></strong><small data-i18n="suctionSummary"></small></div><div><span data-number="3"></span><strong data-i18n="boost"></strong><small data-i18n="boostSummary"></small></div></div>
-        <button id="menu-wallet-button" class="menu-coin-wallet" type="button" aria-haspopup="dialog" aria-controls="coin-dialog" aria-expanded="false"><span class="coin-symbol" aria-hidden="true">●</span><span data-i18n="coinBalance"></span><strong id="menu-coins"></strong><span class="coin-info-label" data-i18n="coinDetails"></span></button>
-        <button id="menu-missions-button" class="menu-missions-button" type="button" aria-haspopup="dialog" aria-controls="missions-dialog" aria-expanded="false"><span data-i18n="missions"></span><strong id="menu-missions-progress"></strong><span aria-hidden="true">↗</span></button>
-        <button id="primary-button" class="primary-button" type="button"><span id="primary-label"></span><span class="button-arrow" aria-hidden="true">↗</span></button>
-        <button id="account-button" class="account-button" type="button"></button>
+        <div class="menu-action-row">
+          <button id="primary-button" class="primary-button" type="button"><span id="primary-label"></span><span class="button-arrow" aria-hidden="true">↗</span></button>
+          <button id="account-button" class="account-button" type="button"><span class="account-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8.5" r="3.2" stroke="#a6f4df" stroke-width="1.35"/><path d="M5.8 19.2c.6-3.1 2.8-5 6.2-5s5.6 1.9 6.2 5" stroke="#a6f4df" stroke-width="1.35" stroke-linecap="round"/></svg></span><span id="account-button-label"></span></button>
+        </div>
+        <div class="menu-run-records">
+          <div><span data-i18n="menuBestDistance"></span><strong id="menu-best-distance"></strong></div>
+          <div><span data-i18n="menuLastDistance"></span><strong id="menu-last-distance"></strong></div>
+        </div>
+        <button id="watch-crash-button" class="watch-crash-button" type="button" data-i18n="watchCrash" hidden></button>
         <div id="overlay-foot" class="overlay-foot"></div>
         <footer class="app-credits">
           <a href="https://github.com/abelmiri" target="_blank" rel="noopener noreferrer" dir="ltr">© 2026 abelmiri</a>
@@ -174,8 +185,25 @@ app.innerHTML = `
           <a href="/legal/index.html" target="_blank" rel="noopener noreferrer" data-i18n="legalCredits"></a>
         </footer>
       </div>
+      <div class="menu-empty-column" aria-hidden="true"></div>
+      <aside class="menu-keyboard-column" aria-labelledby="menu-keyboard-title">
+        <strong id="menu-keyboard-title" data-i18n="keyboardControls"></strong>
+        <div><kbd>SPACE</kbd><span data-i18n="jumpGuide"></span></div>
+        <div><kbd>↓</kbd><span data-i18n="suction"></span></div>
+        <div><kbd>SHIFT</kbd><span data-i18n="airBoost"></span></div>
+        <div><kbd>← / →</kbd><span data-i18n="turnWeapon"></span></div>
+        <div><kbd>F</kbd><span data-i18n="fire"></span></div>
+        <div><kbd>1–8</kbd><span data-i18n="selectWeapon"></span></div>
+        <div><kbd>G</kbd><span data-i18n="armory"></span></div>
+        <div><kbd>Z / X</kbd><span data-i18n="airJets"></span></div>
+      </aside>
+      </div>
       <div class="overlay-side" aria-hidden="true"><span data-i18n="sideIndex"></span><span data-i18n="sideMotto"></span></div>
     </div>
+    <button id="crash-menu-toggle" class="crash-menu-toggle" type="button" data-i18n="showCrashMenu" hidden></button>
+    <button id="resume-countdown-ui" class="resume-countdown-ui" type="button" hidden>
+      <span id="resume-countdown-label"></span><small data-i18n="cancelResumeCountdown"></small>
+    </button>
     <div id="coin-dialog" class="coin-dialog" role="dialog" aria-modal="true" aria-labelledby="coin-dialog-title" hidden>
       <div class="coin-dialog-card">
         <div class="coin-dialog-heading"><div><span class="coin-eyebrow" data-i18n="coinGuideEyebrow"></span><h2 id="coin-dialog-title" data-i18n="coinGuideTitle"></h2></div><button id="coin-guide-close" class="armory-close" type="button" data-i18n="coinGuideClose"></button></div>
@@ -270,6 +298,11 @@ const description = element<HTMLParagraphElement>('overlay-description');
 const controlsSummary = element<HTMLDivElement>('overlay-controls');
 const primaryButton = element<HTMLButtonElement>('primary-button');
 const primaryLabel = element<HTMLSpanElement>('primary-label');
+const menuPlayerScore = element<HTMLElement>('menu-player-score');
+const watchCrashButton = element<HTMLButtonElement>('watch-crash-button');
+const crashMenuToggle = element<HTMLButtonElement>('crash-menu-toggle');
+const resumeCountdownUi = element<HTMLButtonElement>('resume-countdown-ui');
+const resumeCountdownLabel = element<HTMLSpanElement>('resume-countdown-label');
 const overlayFoot = element<HTMLDivElement>('overlay-foot');
 const loading = element<HTMLDivElement>('loading');
 const distanceLabel = element<HTMLSpanElement>('distance');
@@ -283,6 +316,13 @@ const pauseButton = element<HTMLButtonElement>('pause-button');
 const soundButton = element<HTMLButtonElement>('sound-button');
 const languageButton = element<HTMLButtonElement>('language-button');
 const audio = new GameAudio();
+const unlockMenuMusicOnFirstGesture = (): void => {
+  void audio.unlock().then(() => audio.setMenuMusic(
+    status !== 'running' && status !== 'loading' && status !== 'error' && !(status === 'crashed' && crashMenuHidden),
+  ));
+};
+document.addEventListener('pointerdown', unlockMenuMusicOnFirstGesture, { once: true, capture: true });
+document.addEventListener('keydown', unlockMenuMusicOnFirstGesture, { once: true, capture: true });
 let progressStorage: Storage | undefined;
 try { progressStorage = localStorage; } catch { /* Keep the game playable when browser storage is unavailable. */ }
 const sync = progressStorage ? new GameSync(progressStorage) : null;
@@ -378,6 +418,10 @@ let accumulator = 0;
 let holdInterpolation = false;
 let lastFrame = performance.now();
 let restartAvailableAt = 0;
+let crashMenuHidden = false;
+let resumeCountdownUntil = 0;
+let resumeCountdownTimer: number | undefined;
+let resumeCountdownComplete = false;
 let jumpQueued = false;
 let currentDistrict = 0;
 const warnedChallenges = new Set<string>();
@@ -389,6 +433,7 @@ let best = player.record.distance;
 const accountDialog = element<HTMLDivElement>('account-dialog');
 accountDialog.hidden = true;
 const accountButton = element<HTMLButtonElement>('account-button');
+const accountButtonLabel = element<HTMLSpanElement>('account-button-label');
 const accountStatus = element<HTMLParagraphElement>('account-status');
 let accountBusy = false;
 let startPending = false;
@@ -436,7 +481,9 @@ sync && (sync.onError = accountError);
 
 function updateAccountUi(): void {
   const signed = Boolean(sync?.signedIn);
-  accountButton.textContent = `${ac('button')}${sync?.hasConflict ? ' !' : ''}`;
+  const accountLabel = `${ac('button')}${sync?.hasConflict ? ' !' : ''}`;
+  accountButtonLabel.textContent = accountLabel;
+  accountButton.setAttribute('aria-label', accountLabel);
   element('account-title').textContent = ac('title');
   element('account-description').textContent = ac('intro');
   for (const [id, key] of [
@@ -551,6 +598,7 @@ function refreshMissions(force = false): void {
   const completedText = t('missionCompletedCount', { count: formatNumber(progress.completed.length), total: formatNumber(MISSIONS.length) });
   textIfChanged(element('missions-completed-count'), completedText);
   textIfChanged(element('menu-missions-progress'), completedText);
+  textIfChanged(element('menu-missions-number'), `${formatNumber(progress.completed.length)} / ${formatNumber(MISSIONS.length)}`);
   textIfChanged(element('missions-score'), t('missionScore', { score: formatNumber(progress.score) }));
   textIfChanged(element('missions-coins'), t('missionCoinsEarned', { coins: formatNumber(progress.earnedCoins) }));
   for (let index = 0; index < 3; index++) {
@@ -922,7 +970,12 @@ function updateHud(snapshot?: GameSnapshot): void {
 }
 
 function setOverlay(mode: 'ready' | 'paused' | 'crashed'): void {
-  overlay.classList.add('is-visible');
+  if (mode !== 'crashed') crashMenuHidden = false;
+  overlay.classList.toggle('is-visible', !(mode === 'crashed' && crashMenuHidden));
+  resumeCountdownUi.hidden = true;
+  crashMenuToggle.hidden = mode !== 'crashed' || !crashMenuHidden;
+  watchCrashButton.hidden = mode !== 'crashed';
+  audio.setMenuMusic(mode !== 'crashed' || !crashMenuHidden);
   overlay.classList.toggle('is-game-over', mode === 'crashed');
   overlay.classList.toggle('is-compact', mode !== 'ready');
   controlsSummary.hidden = mode !== 'ready';
@@ -932,19 +985,37 @@ function setOverlay(mode: 'ready' | 'paused' | 'crashed'): void {
   description.textContent = mode === 'crashed'
     ? `${physics.snapshot(1).crashReason === 'police' ? t('policeCaught') + ' ' : ''}${t('crashedDescription', { distance: formatNumber(physics.distance), best: formatNumber(best) })} · ${t('ragdollsHit', { count: formatNumber(physics.snapshot(1).ragdollHitCount) })} · ${t('runXp', { xp: formatNumber(experience.runXp) })} · ${t('runCoins', { coins: formatNumber(player.runCoins) })}`
     : t(mode === 'ready' ? 'readyDescription' : 'pausedDescription');
-  primaryLabel.textContent = t(mode === 'ready' ? 'start' : mode === 'paused' ? 'resumeRun' : 'runAgain');
+  textIfChanged(menuPlayerScore, formatNumber(player.score));
+  htmlIfChanged(element('menu-best-distance'), formatDistance(best));
+  htmlIfChanged(element('menu-last-distance'), formatDistance(player.score));
+  primaryLabel.textContent = t(mode === 'ready' ? 'start' : mode === 'paused' ? (isCompactMenu() ? 'continueShort' : 'resumeRun') : 'runAgain');
   overlayFoot.innerHTML = t(`${prefix}Foot`);
   updateRestartUi();
   updatePauseButton();
 }
 
 function updateRestartUi(now = performance.now()): void {
+  if (status === 'paused') {
+    const seconds = Math.max(0, Math.ceil((resumeCountdownUntil - now) / 1000));
+    textIfChanged(primaryLabel, seconds > 0 ? t('resumeIn', { seconds: formatNumber(seconds) }) : t(isCompactMenu() ? 'continueShort' : 'resumeRun'));
+    const countingDown = resumeCountdownTimer !== undefined && seconds > 0;
+    resumeCountdownUi.hidden = !countingDown;
+    overlay.classList.toggle('is-visible', !countingDown);
+    if (countingDown) textIfChanged(resumeCountdownLabel, t('resumeIn', { seconds: formatNumber(seconds) }));
+    htmlIfChanged(overlayFoot, countingDown ? t('resumeCountdownHint') : t('pausedFoot'));
+    return;
+  }
+  resumeCountdownUi.hidden = true;
   const seconds = Math.max(0, Math.ceil((restartAvailableAt - now) / 1000));
   const locked = status === 'crashed' && seconds > 0;
   if (primaryButton.disabled !== locked) primaryButton.disabled = locked;
   if (status !== 'crashed') return;
   textIfChanged(primaryLabel, locked ? t('restartIn', { seconds: formatNumber(seconds) }) : t('runAgain'));
   htmlIfChanged(overlayFoot, locked ? '' : t('crashedFoot'));
+}
+
+function isCompactMenu(): boolean {
+  return window.matchMedia('(max-width: 900px), (pointer: coarse) and (orientation: landscape)').matches;
 }
 
 function updateLanguage(): void {
@@ -1007,6 +1078,13 @@ async function start(): Promise<void> {
   if (dialogBlocked()) return;
   if (touchLayout.editing || !armory.hidden || !recordDialog.hidden || !coinDialog.hidden || !accountDialog.hidden) return;
   if (status === 'loading' || status === 'error' || status === 'running') return;
+  if (status === 'paused' && !resumeCountdownComplete) {
+    clearHeld();
+    if (resumeCountdownTimer !== undefined) cancelResumeCountdown();
+    else beginResumeCountdown();
+    return;
+  }
+  if (resumeCountdownComplete) { resumeCountdownComplete = false; resumeCountdownUi.hidden = true; }
   if (status === 'crashed' && performance.now() < restartAvailableAt) return;
   const resuming = status === 'paused';
   if (!resuming && sync?.signedIn) {
@@ -1044,13 +1122,44 @@ async function start(): Promise<void> {
     clearHeld();
     aimDirection = 1;
   }
+  if (resuming) clearHeld();
   status = 'running';
+  crashMenuHidden = false;
+  audio.setMenuMusic(false);
+  crashMenuToggle.hidden = true;
+  watchCrashButton.hidden = true;
   overlay.classList.remove('is-visible');
   lastFrame = performance.now();
   primaryButton.blur();
   updatePauseButton();
   updateHud(physics.snapshot(1));
   void audio.unlock().then(() => audio.play(resuming ? 'resume' : 'start'));
+}
+
+function cancelResumeCountdown(): void {
+  if (resumeCountdownTimer !== undefined) window.clearInterval(resumeCountdownTimer);
+  resumeCountdownTimer = undefined;
+  resumeCountdownUntil = 0;
+  resumeCountdownComplete = false;
+  updateRestartUi();
+}
+
+function beginResumeCountdown(): void {
+  resumeCountdownUntil = performance.now() + 3000;
+  resumeCountdownTimer = window.setInterval(() => {
+    const blocked = status !== 'paused' || document.hidden || dialogBlocked() || touchLayout.editing ||
+      !armory.hidden || !recordDialog.hidden || !coinDialog.hidden || !accountDialog.hidden;
+    if (blocked) { cancelResumeCountdown(); return; }
+    if (performance.now() < resumeCountdownUntil) { updateRestartUi(); return; }
+    window.clearInterval(resumeCountdownTimer);
+    resumeCountdownTimer = undefined;
+    resumeCountdownUntil = 0;
+    resumeCountdownComplete = true;
+    resumeCountdownUi.hidden = true;
+    void start();
+  }, 100);
+  overlay.classList.remove('is-visible');
+  updateRestartUi();
 }
 
 function saveRunScore(): void {
@@ -1075,6 +1184,7 @@ function pause(): void {
 function crash(): void {
   if (status !== 'running') return;
   status = 'crashed';
+  crashMenuHidden = false;
   restartAvailableAt = performance.now() + RESTART_DELAY_SECONDS * 1000;
   impactPause.reset();
   explosionSlowMotion.reset();
@@ -1633,6 +1743,19 @@ window.addEventListener('blur', pause);
 window.addEventListener('pagehide', () => { saveRunScore(); void sync?.flush().catch(accountError); audio.suspend(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
 primaryButton.addEventListener('click', start);
+watchCrashButton.addEventListener('click', () => {
+  if (status !== 'crashed') return;
+  crashMenuHidden = true;
+  audio.setMenuMusic(false);
+  overlay.classList.remove('is-visible');
+  crashMenuToggle.hidden = false;
+});
+crashMenuToggle.addEventListener('click', () => {
+  if (status !== 'crashed') return;
+  crashMenuHidden = false;
+  setOverlay('crashed');
+});
+resumeCountdownUi.addEventListener('click', cancelResumeCountdown);
 pauseButton.addEventListener('click', () => { if (status === 'running') pause(); else if (status === 'paused') start(); });
 soundButton.addEventListener('click', toggleSound);
 languageButton.addEventListener('click', () => {

@@ -257,6 +257,36 @@ html[lang=fa] .weapon-unlock{font-size:11px}
 .app-credits a:hover{color:#c8ffef;text-decoration:underline}
 .app-credits a:focus-visible{outline:2px solid #a6f4df;outline-offset:4px;border-radius:2px}
 html[lang=fa] .app-credits{direction:rtl}
+.menu-layout{display:contents}
+.menu-stats-row,.menu-action-row{display:contents}
+.menu-stat-icon{display:none}
+#menu-missions-number{display:none}
+.account-avatar{display:none}
+.menu-keyboard-column{position:absolute;top:50%;right:clamp(28px,8vw,130px);display:flex;flex-direction:column;gap:9px;width:220px;padding:14px 16px;transform:translateY(-50%);border:1px solid #b8f7e52b;border-radius:10px;background:#122b40c9;color:#effff8;box-shadow:0 8px 24px #06152250}
+.menu-keyboard-column>strong{margin-bottom:3px;color:#9cf2dc;font-size:11px}
+.menu-keyboard-column>div{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:26px;font-size:10px;line-height:1.35}
+.menu-keyboard-column kbd{flex:0 0 auto;min-width:38px;padding:5px 7px;border:1px solid #ffffff60;border-radius:5px;background:#ffffff0b;color:#fff;text-align:center;font:inherit;font-size:9px}
+html[lang=fa] .menu-keyboard-column{right:auto;left:clamp(28px,8vw,130px);direction:rtl}
+.overlay .overlay-side,html[lang=fa] .overlay .overlay-side{display:none}
+.menu-player-score{display:flex;align-items:center;justify-content:space-between;gap:18px;max-width:350px;margin:-8px 0 14px;padding:8px 12px;border:1px solid #a6f4df35;border-radius:7px;background:#15334880;color:#bcefe0;font-size:11px;font-weight:750}
+.menu-player-score strong{color:#fff;font-size:16px;font-variant-numeric:tabular-nums}
+html[lang=fa] .menu-player-score{direction:rtl;font-size:13px}
+.menu-run-records{display:none;gap:9px;width:min(100%,350px);margin:10px auto 0}
+.menu-run-records>div{display:flex;flex:1;min-width:0;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid #a6f4df30;border-radius:7px;background:#15334880}
+.menu-run-records span{color:#a8d3c8;font-size:9px;font-weight:700}
+.menu-run-records strong{color:#fff;font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.menu-run-records strong small{color:#9ed9c8;font-size:9px}
+.menu-empty-column{display:none}
+.watch-crash-button{display:flex;align-items:center;justify-content:center;min-height:46px;margin:10px 0 0;padding:10px 16px;border:1px solid #a6f4df70;border-radius:7px;background:#143346a1;color:#d0f7e7;font-size:11px;font-weight:800;cursor:pointer}
+.watch-crash-button:hover{background:#1c4558}
+.watch-crash-button[hidden],.crash-menu-toggle[hidden]{display:none}
+.crash-menu-toggle{position:absolute;z-index:8;top:max(14px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);min-height:46px;padding:10px 18px;border:1px solid #b8f7e57a;border-radius:24px;background:#122b40e8;backdrop-filter:blur(8px);color:#effff8;font-size:11px;font-weight:850;cursor:pointer;box-shadow:0 8px 24px #06152270}
+.crash-menu-toggle:hover{background:#1c4558}
+.resume-countdown-ui{position:absolute;z-index:9;top:63%;left:50%;display:flex;flex-direction:column;align-items:center;gap:8px;min-width:min(82vw,360px);padding:17px 24px;transform:translate(-50%,-50%) rotate(-2deg);border:1px solid #b8f7e57a;border-radius:14px;background:#10283bd1;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);color:#f1fff8;text-align:center;cursor:pointer;box-shadow:0 12px 36px #06152270}
+.resume-countdown-ui span{font-size:clamp(16px,2.4vw,24px);font-weight:850;text-shadow:0 2px 14px #071522}
+.resume-countdown-ui small{color:#a6f4df;font-size:11px;font-weight:750}
+.resume-countdown-ui:hover{background:#17394edb}
+.resume-countdown-ui[hidden]{display:none}
 @media(max-width:700px){.brand .app-icon{width:26px;height:26px;border-radius:6px}}
 @media(max-height:580px){.app-credits{margin-top:10px;font-size:10px;gap:3px 12px}}
 @media(max-height:480px){html[lang=en] .overlay h1{font-size:clamp(36px,6vw,60px);margin:9px 0}}

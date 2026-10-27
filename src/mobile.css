@@ -5,11 +5,18 @@
 .coin-method-mobile { display: none; }
 
 @media (max-width: 900px), (pointer: coarse) and (orientation: landscape) {
-  :root { --hud-scale: .8; --hud-resource-width: 110px; --hud-weapon-width: 0px; --hud-edge: 18px; }
-  .topbar { height: 46px; padding: max(7px,env(safe-area-inset-top)) 18px 0; align-items: flex-start; }
-  .topbar-tools, .settings-controls, .hud { gap: 7px; }
-  .brand, html[lang=fa] .brand { font-size: 14px; gap: 6px; }
-  .brand .app-icon { width: 22px; height: 22px; border-radius: 5px; }
+  :root { --hud-scale: .8; --hud-resource-width: 110px; --hud-weapon-width: 0px; --hud-edge: 18px; --mobile-corner-gap: 40px; --mobile-menu-edge-gap: 24px; }
+  .topbar { height: 54px; padding: max(14px,env(safe-area-inset-top)) var(--mobile-corner-gap) 0; align-items: flex-start; }
+  .topbar-tools, .settings-controls, .hud { gap: 5px; }
+  .topbar-tools { margin-right: 51px; }
+  .settings-controls { flex-direction: row-reverse; }
+  .settings-controls > .icon-button, #pause-button { width: 46px; height: 46px; }
+  .settings-controls > .icon-button svg { width: 25px; height: 25px; }
+  .settings-controls > .language-button { min-height: 46px; padding: 0 12px; font-size: 13px; gap: 6px; }
+  #pause-button { position: absolute; top: max(14px,env(safe-area-inset-top)); right: var(--mobile-corner-gap); }
+  .brand, html[lang=fa] .brand { font-size: 16px; gap: 11px; }
+  .brand .app-icon { width: 54px; height: 54px; border-radius: 12px; }
+  .game-shell:has(#overlay:not(.is-visible)) .brand { display: none; }
   .brand-edition { display: none; }
   .hud-stat, html[lang=fa] .hud-stat { min-width: 45px; gap: 1px; }
   .hud-label, html[lang=fa] .hud-label { font-size: 7px; }
@@ -45,7 +52,7 @@
   .speed-panel strong, html[lang=fa] .speed-panel strong { font-size: 19px; }
   .speed-panel small, html[lang=fa] .speed-panel small { font-size: 7px; }
   .weapon-panel { display: none; }
-  .touch-controls { top: max(104px,env(safe-area-inset-top)); }
+  .touch-controls { top: max(104px,env(safe-area-inset-top)); left: max(var(--mobile-corner-gap),env(safe-area-inset-left)); right: max(var(--mobile-corner-gap),env(safe-area-inset-right)); bottom: max(var(--mobile-corner-gap),env(safe-area-inset-bottom)); }
   .touch-controls .touch-fire, .touch-controls .touch-boost { gap: 2px; }
   .touch-fire .touch-icon, .touch-boost .touch-icon { width: 36%; height: 36%; max-width: 27px; max-height: 27px; }
   .touch-meter { display: block; position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; transform: rotate(-90deg); }
@@ -183,4 +190,95 @@
 
 @media (prefers-reduced-motion: reduce) {
   .touch-meter-fill { transition: none; }
+}
+
+/* Compact menu columns keep controls visible without scrolling. */
+@media (max-width: 900px), (pointer: coarse) and (orientation: landscape) {
+  .overlay, html[lang] .overlay { justify-content: center; padding: max(var(--mobile-menu-edge-gap),calc(env(safe-area-inset-top) + 14px)) max(var(--mobile-menu-edge-gap),env(safe-area-inset-right)) max(var(--mobile-menu-edge-gap),env(safe-area-inset-bottom)) max(var(--mobile-menu-edge-gap),env(safe-area-inset-left)); }
+  #overlay:not(.is-compact) { background: linear-gradient(135deg,rgba(13,28,46,.72),rgba(13,28,46,.52)); }
+  #overlay:not(.is-compact) #primary-button { background: rgba(166,244,223,.56); border: 1px solid rgba(223,255,245,.62); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+  .overlay .menu-layout { display: flex; justify-content: center; align-items: center; gap: 0; width: 100%; max-height: 100%; }
+  .menu-empty-column { display: none; }
+  .overlay .menu-layout .overlay-card { width: min(100%,400px); max-width: 400px; max-height: none; overflow: visible; min-width: 0; padding: 0; }
+  .game-shell:has(#overlay.is-visible) .hud-stat, .game-shell:has(#overlay.is-visible) .hud-divider { display: none; }
+  .overlay:not(.is-compact) #eyebrow { display: none; }
+  .overlay:not(.is-compact) #overlay-title, .overlay:not(.is-compact) #overlay-description { display: none; }
+  .menu-keyboard-column { position: static; transform: none; display: flex; flex-direction: column; gap: 7px; width: auto; min-width: 0; padding: 12px 14px; border: 1px solid #b8f7e52b; border-radius: 10px; background: #122b40c9; color: #effff8; box-shadow: 0 8px 24px #06152250; width: 80%; margin-left: auto;}
+  .menu-keyboard-column > strong { margin-bottom: 3px; color: #9cf2dc; font-size: 10px; }
+  .menu-keyboard-column > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 23px; font-size: 9px; line-height: 1.3; }
+  .menu-keyboard-column kbd { flex: 0 0 auto; min-width: 34px; padding: 4px 6px; border: 1px solid #ffffff60; border-radius: 5px; background: #ffffff0b; color: #fff; text-align: center; font: inherit; font-size: 8px; }
+  html[lang=fa] .menu-keyboard-column { direction: rtl; }
+  html[lang=fa] .menu-keyboard-column > strong { font-size: 11px; }
+  html[lang=fa] .menu-keyboard-column > div { font-size: 10px; }
+  .menu-keyboard-column { display: none; }
+  .menu-stats-row { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); align-items: stretch; gap: 7px; width: 100%; margin: 3px 0 10px; }
+  .menu-player-score, .menu-coin-wallet, .menu-missions-button { display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; min-height: 39px; max-width: none; margin: 0; padding: 6px 7px; border: 1px solid #a6f4df4a; border-radius: 9px; background: #153348b8; color: #eafff7; }
+  .menu-player-score { direction: ltr; }
+  html[lang=fa] .menu-player-score { direction: rtl; font-size: 9px; }
+  .menu-player-score strong, .menu-coin-wallet strong, .menu-missions-button strong { font-size: 12px; line-height: 1; color: #fff; }
+  .menu-stat-icon, .menu-coin-wallet .coin-symbol { display: inline-grid; place-items: center; flex: 0 0 17px; width: 17px; height: 17px; color: #a6f4df; font-size: 16px; line-height: 1; }
+  .menu-coin-wallet .coin-symbol { color: #ffcc61; font-size: 14px; text-shadow: 0 0 8px #ffb43c80; }
+  .menu-missions-button .menu-stat-icon, #menu-missions-progress { display: none; }
+  #menu-missions-number { display: inline; font-variant-numeric: tabular-nums; }
+  .menu-stat-label, .coin-info-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
+  .menu-missions-button > span:last-child { display: none; }
+  .menu-action-row { display: flex; align-items: stretch; justify-content: center; gap: 10px; width: 100%; }
+  html[lang] .menu-action-row .primary-button { flex: 1 1 auto; width: auto; min-width: 0; min-height: 58px; height: 58px; justify-content: center; padding: 0 18px; font-size: 15px; letter-spacing: .04em; }
+  .menu-action-row .button-arrow { display: none; }
+  #account-button.account-button { position: fixed; right: max(var(--mobile-corner-gap),env(safe-area-inset-right)); bottom: max(var(--mobile-corner-gap),env(safe-area-inset-bottom)); z-index: 7; display: grid; place-items: center; flex: 0 0 42px; width: 42px; height: 42px; min-height: 42px; margin: 0; padding: 0; overflow: hidden; border: 1px solid rgba(166,244,223,.62); border-radius: 50%; background: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .account-avatar { display: block; width: 100%; height: 100%; overflow: hidden; border-radius: 50%; }
+  .account-avatar svg { display: block; width: 100%; height: 100%; }
+  #account-button-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
+  .watch-crash-button { width: 100%; }
+  .menu-stats-row .menu-player-score, .menu-stats-row .menu-coin-wallet, .menu-stats-row .menu-missions-button { min-height: 39px; max-width: none; margin: 0; padding: 6px 7px; }
+  .menu-stats-row .menu-player-score strong, .menu-stats-row .menu-coin-wallet strong, .menu-stats-row .menu-missions-button strong { font-size: 12px; }
+  .overlay .menu-stats-row .menu-player-score strong, .overlay .menu-stats-row .menu-coin-wallet strong, .overlay .menu-stats-row .menu-missions-button strong { font-size: 16px; }
+  html[lang=fa] .menu-stats-row .menu-player-score { font-size: 9px; }
+  .overlay .control-summary, .overlay .app-credits { display: none; }
+  html[lang] .overlay-description, html[lang] .overlay.is-compact .overlay-description { max-width: none; margin-bottom: 8px; font-size: 9px; line-height: 1.45; }
+  html[lang] .primary-button { width: 100%; min-height: 52px; height: 52px; font-size: 11px; }
+  .menu-coin-wallet { min-height: 38px; margin: 0 0 8px; padding: 7px 10px; font-size: 9px; }
+  .menu-coin-wallet strong { font-size: 15px; }
+  .menu-missions-button { min-height: 38px; margin: 0 0 9px; padding: 7px 10px; font-size: 11px; }
+  .overlay .menu-stats-row > .menu-player-score, .overlay .menu-stats-row > .menu-coin-wallet, .overlay .menu-stats-row > .menu-missions-button { width: 100%; min-width: 0; height: 59px; min-height: 59px; margin: 0; }
+  .overlay .menu-action-row #primary-button { min-height: 74px; height: 74px; }
+  .menu-run-records { display: flex; width: min(100%,420px); gap: 0; margin: 13px auto 0; }
+  .menu-run-records > div { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 5px 12px; border: 0; border-radius: 0; background: transparent; text-align: center; }
+  .menu-run-records > div + div { border-inline-start: 1px solid #ffffff24; }
+  .menu-run-records span { color: #bdd4d6; font-size: 8px; font-weight: 750; letter-spacing: .13em; }
+  html[lang=fa] .menu-run-records span { font-size: 10px; letter-spacing: 0; }
+  .menu-run-records strong { color: #f7fff9; font-size: 17px; font-weight: 850; line-height: 1.15; }
+  .menu-run-records strong small { color: #a6f4df; font-size: 9px; font-weight: 700; }
+  .account-button { min-height: 40px; padding: 8px 12px; font-size: 10px; }
+  .overlay-foot { margin-top: 6px; font-size: 8px; }
+  .overlay.is-game-over { backdrop-filter: blur(1.5px); }
+  .watch-crash-button { min-height: 40px; margin-top: 8px; padding: 8px 12px; font-size: 9px; }
+  .crash-menu-toggle { min-height: 42px; padding: 9px 14px; font-size: 9px; }
+  html[lang] .armory-close { min-height: 40px; padding: 8px 13px; font-size: 10px; }
+  .armory-tabs button { min-height: 36px; min-width: 84px; padding: 7px 14px; font-size: 9px; }
+  .weapon-card { min-height: 130px; padding: 13px 10px; gap: 7px; }
+  .weapon-card > svg { height: 39px; margin-bottom: 7px; }
+  html[lang] .weapon-card strong { font-size: 11px; }
+  html[lang] .weapon-upgrade-button { min-height: 42px; font-size: 9px; }
+}
+
+@media (max-width: 900px) and (max-height: 400px), (pointer: coarse) and (orientation: landscape) and (max-height: 400px) {
+  .overlay { padding-top: max(var(--mobile-menu-edge-gap),calc(env(safe-area-inset-top) + 14px)); padding-bottom: max(var(--mobile-menu-edge-gap),env(safe-area-inset-bottom)); }
+  .overlay .menu-layout { gap: 10px; }
+  .menu-keyboard-column { gap: 3px; padding: 7px 10px; }
+  .menu-keyboard-column > div { min-height: 18px; font-size: 8px; }
+  .menu-keyboard-column kbd { padding: 2px 4px; font-size: 7px; }
+  html[lang] .overlay h1, html[lang] .overlay.is-compact h1 { font-size: clamp(20px,4vh,32px); margin: 6px 0; }
+  html[lang=fa] .overlay h1, html[lang=fa] .overlay.is-compact h1 { font-size: clamp(19px,3.7vh,29px); }
+  html[lang] .overlay-description, html[lang] .overlay.is-compact .overlay-description { font-size: 8px; margin-bottom: 5px; }
+  .menu-player-score { min-height: 27px; margin-bottom: 5px; }
+  .menu-coin-wallet, .menu-missions-button { min-height: 31px; margin-bottom: 5px; padding-block: 4px; }
+  html[lang] .primary-button { min-height: 43px; height: 43px; }
+  .account-button { min-height: 34px; margin-top: 6px; }
+  .overlay-foot { display: none; }
+}
+
+@media (max-width: 600px) and (orientation: landscape) {
+  .overlay .menu-layout { grid-template-columns: minmax(0,1.1fr) minmax(22px,.2fr) minmax(128px,.8fr); gap: 8px; }
+  .menu-keyboard-column { padding-inline: 8px; }
 }
