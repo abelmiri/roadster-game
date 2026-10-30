@@ -318,3 +318,23 @@
 @media (prefers-reduced-motion: reduce) {
   .mobile-settings-card { animation: none; }
 }
+
+/* Pause menu: square restart button sits right of Continue. */
+@media (max-width: 900px), (pointer: coarse) and (orientation: landscape) {
+  .menu-action-row { direction: ltr; }
+  .menu-action-row .restart-button { flex: 0 0 58px; width: 58px; height: 58px; min-height: 58px; margin: 0; padding: 0; border: 1px solid #a6f4df70; border-radius: 9px; background: #153348b8; color: #a6f4df; box-shadow: inset 0 1px #ffffff0a; }
+  .menu-action-row .restart-button[hidden] { display: none; }
+  .overlay .menu-action-row .restart-button { flex-basis: 74px; width: 74px; height: 74px; min-height: 74px; }
+  .menu-action-row .restart-button svg { width: 30px; height: 30px; }
+  .restart-button #restart-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
+}
+
+/* Tablets: top-bar record/distance numbers at least 25% larger than phones. */
+@media (pointer: coarse) and (min-width: 700px) and (min-height: 560px) {
+  .hud { gap: 8px; }
+  .hud-stat, html[lang=fa] .hud-stat { min-width: 60px; }
+  .hud-label, html[lang=fa] .hud-label { font-size: 9px; }
+  .hud-stat strong, html[lang=fa] .hud-stat strong { font-size: 18px; }
+  .hud-stat small, html[lang=fa] .hud-stat small { font-size: 9px; }
+  .hud-divider { height: 32px; }
+}

@@ -64,6 +64,9 @@ app.innerHTML = `
           <button id="music-button" class="icon-button music-button" type="button" aria-pressed="true">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/><path class="music-slash" d="m3 3 18 18"/></svg>
           </button>
+          <button id="fullscreen-button" class="icon-button fullscreen-button" type="button" aria-pressed="false" hidden>
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+          </button>
           <button id="language-button" class="language-button" type="button"><span id="language-en" lang="en" dir="ltr">EN</span><span class="language-separator" aria-hidden="true">/</span><span id="language-fa" lang="fa" dir="rtl">فارسی</span></button>
         </div>
       </div>
@@ -186,6 +189,7 @@ app.innerHTML = `
         <div id="overlay-controls" class="control-summary"><div><span data-number="1"></span><strong data-i18n="jump"></strong><small data-i18n="jumpSummary"></small></div><div><span data-number="2"></span><strong data-i18n="suction"></strong><small data-i18n="suctionSummary"></small></div><div><span data-number="3"></span><strong data-i18n="boost"></strong><small data-i18n="boostSummary"></small></div></div>
         <div class="menu-action-row">
           <button id="primary-button" class="primary-button" type="button"><span id="primary-label"></span><span class="button-arrow" aria-hidden="true">↗</span></button>
+          <button id="restart-button" class="restart-button" type="button" hidden><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg><span id="restart-label"></span></button>
           <button id="account-button" class="account-button" type="button"><span class="account-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8.5" r="3.2" stroke="#a6f4df" stroke-width="1.35"/><path d="M5.8 19.2c.6-3.1 2.8-5 6.2-5s5.6 1.9 6.2 5" stroke="#a6f4df" stroke-width="1.35" stroke-linecap="round"/></svg></span><span id="account-button-label"></span></button>
         </div>
         <div class="menu-run-records">
@@ -312,6 +316,7 @@ const eyebrow = element<HTMLSpanElement>('eyebrow');
 const description = element<HTMLParagraphElement>('overlay-description');
 const controlsSummary = element<HTMLDivElement>('overlay-controls');
 const primaryButton = element<HTMLButtonElement>('primary-button');
+const restartButton = element<HTMLButtonElement>('restart-button');
 const primaryLabel = element<HTMLSpanElement>('primary-label');
 const menuPlayerScore = element<HTMLElement>('menu-player-score');
 const watchCrashButton = element<HTMLButtonElement>('watch-crash-button');
@@ -339,6 +344,7 @@ const settingsHud = element<HTMLDivElement>('topbar-hud');
 const gameShell = element<HTMLDivElement>('game-shell');
 const soundButton = element<HTMLButtonElement>('sound-button');
 const musicButton = element<HTMLButtonElement>('music-button');
+const fullscreenButton = element<HTMLButtonElement>('fullscreen-button');
 const languageButton = element<HTMLButtonElement>('language-button');
 function syncMobileSettingsPlacement(): void {
   const inMobileRun = status === 'running' && isCompactMenu();
@@ -881,6 +887,39 @@ function updateMusicButton(): void {
   musicButton.title = t(audio.musicOn ? 'muteMusicTitle' : 'unmuteMusicTitle');
 }
 
+type FullscreenDocument = Document & { webkitFullscreenElement?: Element | null; webkitFullscreenEnabled?: boolean; webkitExitFullscreen?: () => void };
+type FullscreenElement = HTMLElement & { webkitRequestFullscreen?: () => void };
+
+function isInstalledApp(): boolean {
+  return window.matchMedia('(display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui)').matches
+    || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+}
+
+function fullscreenActive(): boolean {
+  const doc = document as FullscreenDocument;
+  return Boolean(doc.fullscreenElement ?? doc.webkitFullscreenElement);
+}
+
+function updateFullscreenButton(): void {
+  const doc = document as FullscreenDocument;
+  const supported = Boolean(doc.fullscreenEnabled || doc.webkitFullscreenEnabled);
+  fullscreenButton.hidden = !supported || isInstalledApp();
+  const active = fullscreenActive();
+  fullscreenButton.setAttribute('aria-pressed', String(active));
+  fullscreenButton.setAttribute('aria-label', t(active ? 'exitFullscreen' : 'enterFullscreen'));
+  fullscreenButton.title = t(active ? 'exitFullscreen' : 'enterFullscreen');
+}
+
+function toggleFullscreen(): void {
+  const doc = document as FullscreenDocument;
+  const root = document.documentElement as FullscreenElement;
+  const result = fullscreenActive()
+    ? (doc.exitFullscreen?.() ?? doc.webkitExitFullscreen?.())
+    : (root.requestFullscreen?.() ?? root.webkitRequestFullscreen?.());
+  void Promise.resolve(result).catch(() => undefined).finally(updateFullscreenButton);
+  fullscreenButton.blur();
+}
+
 function updatePauseButton(): void {
   const paused = status === 'paused';
   pauseButton.classList.toggle('is-paused', paused);
@@ -1054,6 +1093,10 @@ function setOverlay(mode: 'ready' | 'paused' | 'crashed'): void {
   htmlIfChanged(element('menu-last-distance'), formatDistance(player.score));
   primaryLabel.textContent = t(mode === 'ready' ? 'start' : mode === 'paused' ? (isCompactMenu() ? 'continueShort' : 'resumeRun') : 'runAgain');
   overlayFoot.innerHTML = t(`${prefix}Foot`);
+  restartButton.hidden = mode !== 'paused';
+  restartButton.setAttribute('aria-label', t('restartRun'));
+  restartButton.title = t('restartRun');
+  textIfChanged(element('restart-label'), t('restartRun'));
   updateRestartUi();
   updatePauseButton();
 }
@@ -1126,6 +1169,7 @@ function updateLanguage(): void {
   element('language-fa').classList.toggle('is-active', getLanguage() === 'fa');
   updateAudioButton();
   updateMusicButton();
+  updateFullscreenButton();
   updatePauseButton();
   updateHud(physics?.snapshot(Math.min(1, accumulator / FIXED_STEP)));
   if (status === 'ready' || status === 'paused' || status === 'crashed') setOverlay(status);
@@ -1831,6 +1875,14 @@ window.addEventListener('blur', pause);
 window.addEventListener('pagehide', () => { saveRunScore(); void sync?.flush().catch(accountError); audio.suspend(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
 primaryButton.addEventListener('click', start);
+restartButton.addEventListener('click', () => {
+  if (status !== 'paused' || startPending) return;
+  saveRunScore();
+  cancelResumeCountdown();
+  status = 'crashed';
+  restartAvailableAt = 0;
+  void start();
+});
 watchCrashButton.addEventListener('click', () => {
   if (status !== 'crashed') return;
   crashMenuHidden = true;
@@ -1847,6 +1899,10 @@ resumeCountdownUi.addEventListener('click', cancelResumeCountdown);
 pauseButton.addEventListener('click', () => { if (status === 'running') pause(); else if (status === 'paused') start(); });
 soundButton.addEventListener('click', toggleSound);
 musicButton.addEventListener('click', toggleMusic);
+fullscreenButton.addEventListener('click', toggleFullscreen);
+document.addEventListener('fullscreenchange', updateFullscreenButton);
+document.addEventListener('webkitfullscreenchange', updateFullscreenButton);
+window.matchMedia('(display-mode: standalone)').addEventListener('change', updateFullscreenButton);
 languageButton.addEventListener('click', () => {
   setLanguage(getLanguage() === 'en' ? 'fa' : 'en');
   updateLanguage();

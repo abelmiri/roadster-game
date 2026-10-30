@@ -293,3 +293,8 @@ html[lang=fa] .menu-player-score{direction:rtl;font-size:13px}
 @media(max-height:580px){.app-credits{margin-top:10px;font-size:10px;gap:3px 12px}}
 @media(max-height:480px){html[lang=en] .overlay h1{font-size:clamp(36px,6vw,60px);margin:9px 0}}
 @media(max-height:370px){html[lang=en] .overlay h1{font-size:30px}html[lang=en] .overlay h1 br{display:none}html[lang=en] .overlay h1 em{margin-inline-start:.2em}}
+.restart-button{display:flex;align-items:center;justify-content:center;gap:10px;width:min(350px,100%);min-height:46px;margin-top:10px;padding:10px 16px;border:1px solid #a6f4df70;border-radius:7px;background:#143346a1;color:#d0f7e7;font-size:12px;font-weight:800;letter-spacing:.12em;cursor:pointer}
+.restart-button:hover{background:#1c4558}
+.restart-button svg{width:20px;height:20px}
+.restart-button[hidden]{display:none}
+.fullscreen-button[hidden]{display:none!important}
