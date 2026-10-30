@@ -16,3 +16,31 @@
 .account-inline{display:flex;gap:8px}
 .account-inline input{min-width:0;flex:1;padding:10px;border:1px solid #829da9;border-radius:5px;background:#edf9f5;color:#142c3b;font:inherit}
 #telegram-url{color:#a6f4df}
+
+/* One padding scale for every modal card (loaded last so it wins). */
+:root{--modal-pad:36px}
+@media(max-width:900px),(pointer:coarse) and (orientation:landscape){:root{--modal-pad:28px}}
+@media(max-height:580px){:root{--modal-pad:20px}}
+html .missions-card,html .purchase-card,html .armory-card,html .coin-dialog-card,html .record-card,html .account-card,html .mobile-settings-card{padding:var(--modal-pad)}
+
+/* Coin modal: back button + balance on the start side, texts opposite them. */
+html .coin-dialog-heading{flex-direction:row;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:18px}
+html .coin-dialog-bar{display:flex;flex:0 0 auto;align-items:center;gap:12px}
+html .coin-dialog-bar .coin-guide-balance{display:flex;align-items:center;gap:8px;min-width:0;padding:7px 14px;border-radius:12px;text-align:start}
+html .coin-dialog-bar .coin-guide-balance strong{margin:0;font-size:20px}
+html .coin-dialog-bar .coin-guide-balance > span,html .coin-dialog-bar .coin-guide-balance small{display:inline;font-size:10px}
+html .coin-dialog-heading > div:last-child{flex:1 1 0;min-width:0;max-width:520px}
+.coin-guide-intro{margin:8px 0 0;color:#c4d5dc;font-size:13px;line-height:1.9}
+@media(max-width:900px),(pointer:coarse) and (orientation:landscape){
+  html .coin-dialog-card{grid-template-columns:1fr}
+  html .coin-dialog-heading{grid-column:1/-1;gap:12px;margin-bottom:0}
+  html .coin-dialog-bar{gap:8px}
+  html .coin-dialog-bar .coin-guide-balance{padding:4px 10px;border-radius:9px}
+  html .coin-dialog-bar .coin-guide-balance strong{font-size:15px}
+  html .coin-dialog-bar .coin-guide-balance > span{font-size:8px}
+  html .coin-dialog-bar .coin-guide-balance small{display:none}
+  html .coin-guide-intro{display:none}
+}
+
+/* Coin modal: tighter padding on desktop; mobile keeps the shared scale. */
+@media(min-width:901px) and (hover:hover),(min-width:901px) and (pointer:fine){html .coin-dialog-card{padding:24px}}

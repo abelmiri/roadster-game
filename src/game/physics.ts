@@ -102,6 +102,8 @@ export interface GameSnapshot {
   boxRewardEvents: readonly BoxRewardEvent[];
   ragdolls: readonly RagdollSnapshot[];
   ragdollHitCount: number;
+  ragdollHitSerial: number;
+  ragdollRamSerial: number;
   ragdollGroundSerial: number;
   ragdollGroundEvents: readonly RagdollGroundEvent[];
   missionStats: MissionStats;
@@ -132,8 +134,7 @@ interface RoadSupport { y: number; angle: number; contacts: number }
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 const angleDelta = (from: number, to: number): number => Math.atan2(Math.sin(to - from), Math.cos(to - from));
-const GRAVITY = ROAD_GRAVITY;
-const BOX_MAX_HEALTH = 3;
+const BOX_MAX_HEALTH = 1;
 const DEBRIS_SHARD_CAPACITY = 96;
 
 export class GamePhysics {
@@ -152,6 +153,7 @@ export class GamePhysics {
   private readonly mannequinsShot = new Set<number>();
   private readonly mannequinsRammed = new Set<number>();
   ragdollHitSerial = 0;
+  ragdollRamSerial = 0;
   private ragdollGroundSerial = 0;
   private readonly ragdollGroundEvents: RagdollGroundEvent[] = [];
   private previous: [BodyPose, BodyPose, BodyPose];
@@ -234,7 +236,7 @@ export class GamePhysics {
     this.upgradeCar(loadout?.carUpgrades ?? {});
     this.selectVehicle(loadout?.vehicle ?? 'roadster');
     this.previousPoliceX = this.currentPoliceX = this.pursuit.x;
-    this.world = new RAPIER.World({ x: 0, y: -GRAVITY });
+    this.world = new RAPIER.World({ x: 0, y: -ROAD_GRAVITY });
     this.world.timestep = FIXED_STEP;
     this.events = new RAPIER.EventQueue(true);
 
@@ -467,6 +469,7 @@ export class GamePhysics {
         this.hitRagdolls.add(actor.spec.id);
         this.activatedRagdolls.add(actor.spec.id);
         this.ragdollHitSerial++;
+        this.ragdollRamSerial++;
       }
     }
   }
@@ -646,7 +649,7 @@ export class GamePhysics {
     this.wheelAngle -= active.speed * FIXED_STEP / CAR_WHEEL_RADIUS;
     this.syncWheels();
     this.suspension.update({ grounded: true,
-      normalAcceleration: active.speed * active.speed / radius + GRAVITY * (Math.cos(angle) - 1),
+      normalAcceleration: active.speed * active.speed / radius + ROAD_GRAVITY * (Math.cos(angle) - 1),
       roadAngularAcceleration: 0, forwardAcceleration: 0, suction: true }, FIXED_STEP);
     this.pursuit.update(FIXED_STEP, this.boostOn, { x: this.car.translation().x, speed: active.speed });
     this.currentPoliceX = this.pursuit.x;
@@ -1241,6 +1244,8 @@ export class GamePhysics {
       boxRewardSerial: this.boxRewards.serial, boxRewardEvents: this.boxRewards.events,
       ragdolls: Array.from(this.ragdolls.values(), actor => actor.snapshot(alpha)),
       ragdollHitCount: this.hitRagdolls.size,
+      ragdollHitSerial: this.ragdollHitSerial,
+      ragdollRamSerial: this.ragdollRamSerial,
       ragdollGroundSerial: this.ragdollGroundSerial,
       ragdollGroundEvents: this.ragdollGroundEvents,
       missionStats: { ...this.runMissions.stats },

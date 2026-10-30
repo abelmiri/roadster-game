@@ -7,6 +7,8 @@ interface RagdollView {
   parts: Record<RagdollPartName, THREE.Mesh>;
   flash: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
   shotSerial: number;
+  outfit: number;
+  alienFeatures: THREE.Object3D[];
 }
 
 interface BloodParticle { age: number; x: number; y: number; vx: number; vy: number; size: number }
@@ -26,6 +28,15 @@ export class RagdollVisuals {
   private readonly skin = new THREE.MeshStandardMaterial({ color: '#f3c9a8', roughness: .9 });
   private readonly pants = new THREE.MeshStandardMaterial({ color: '#526a85', roughness: .93 });
   private readonly lowerPants = new THREE.MeshStandardMaterial({ color: '#40566f', roughness: .93 });
+  /** Spacesuits: one solid colour per outfit, no separate skin tone or clothing split. */
+  private readonly suits = ['#e7e6e2', '#d9512c', '#2f6fb0', '#c7c4bb']
+    .map(color => new THREE.MeshStandardMaterial({ color, roughness: .55, metalness: .1 }));
+  private isMoon = false;
+  /** Little horns and eyes that mark the moon map's figures as aliens, not plain astronauts. */
+  private readonly hornGeometry = new THREE.ConeGeometry(.028, .22, 8);
+  private readonly hornMaterial = new THREE.MeshStandardMaterial({ color: '#f5f3f0', roughness: .7 });
+  private readonly eyeGeometry = new THREE.SphereGeometry(.045, 10, 8);
+  private readonly eyeMaterial = new THREE.MeshBasicMaterial({ color: '#0d1013' });
   private readonly bloodGeometry = new THREE.SphereGeometry(1, 5, 4);
   private readonly bloodMaterial = new THREE.MeshBasicMaterial({ color: '#c51e35', transparent: true, opacity: .95,
     depthWrite: false });
@@ -42,6 +53,12 @@ export class RagdollVisuals {
     this.group.add(this.blood);
   }
 
+  private materialFor(name: RagdollPartName, outfit: number): THREE.MeshStandardMaterial {
+    if (this.isMoon) return this.suits[outfit % RAGDOLL_OUTFIT_COUNT];
+    return name === 'torso' || name.endsWith('UpperArm') ? this.shirts[outfit % RAGDOLL_OUTFIT_COUNT]
+      : name.endsWith('Thigh') ? this.pants : name.endsWith('Shin') ? this.lowerPants : this.skin;
+  }
+
   private create(id: number, outfit: number): RagdollView {
     const group = new THREE.Group();
     group.name = `ragdoll-${id}`;
@@ -50,24 +67,42 @@ export class RagdollVisuals {
       const geometry = name === 'torso' ? this.torso : name === 'head' ? this.head
         : name.endsWith('UpperArm') ? this.upperArm : name.endsWith('Forearm') ? this.forearm
           : name.endsWith('Thigh') ? this.thigh : this.shin;
-      const material = name === 'torso' || name.endsWith('UpperArm')
-        ? this.shirts[outfit % RAGDOLL_OUTFIT_COUNT]
-        : name.endsWith('Thigh') ? this.pants : name.endsWith('Shin') ? this.lowerPants : this.skin;
-      const mesh = new THREE.Mesh(geometry, material);
+      const mesh = new THREE.Mesh(geometry, this.materialFor(name, outfit));
       mesh.name = name;
       mesh.position.z = 1.22;
       group.add(mesh);
       parts[name] = mesh;
     }
+    const alienFeatures: THREE.Object3D[] = [];
+    const leftHorn = new THREE.Mesh(this.hornGeometry, this.hornMaterial);
+    leftHorn.position.set(-.08, .22, .03);
+    const rightHorn = new THREE.Mesh(this.hornGeometry, this.hornMaterial);
+    rightHorn.position.set(.08, .22, .03);
+    const leftEye = new THREE.Mesh(this.eyeGeometry, this.eyeMaterial);
+    leftEye.position.set(-.08, .02, .17);
+    const rightEye = new THREE.Mesh(this.eyeGeometry, this.eyeMaterial);
+    rightEye.position.set(.08, .02, .17);
+    alienFeatures.push(leftHorn, rightHorn, leftEye, rightEye);
+    for (const feature of alienFeatures) { feature.visible = this.isMoon; parts.head.add(feature); }
     const flash = new THREE.Mesh(new THREE.RingGeometry(.37, .46, 24),
       new THREE.MeshBasicMaterial({ color: '#fff0a7', transparent: true, depthWrite: false }));
     flash.visible = false;
     flash.position.z = 1.5;
     group.add(flash);
     this.group.add(group);
-    const view = { group, parts, flash, shotSerial: 0 };
+    const view = { group, parts, flash, shotSerial: 0, outfit, alienFeatures };
     this.views.set(id, view);
     return view;
+  }
+
+  /** Switches new and currently visible figures between civilians and spacesuited astronauts. */
+  setMoon(isMoon: boolean): void {
+    if (isMoon === this.isMoon) return;
+    this.isMoon = isMoon;
+    for (const view of this.views.values()) {
+      for (const name of RAGDOLL_PARTS) view.parts[name].material = this.materialFor(name, view.outfit);
+      for (const feature of view.alienFeatures) feature.visible = isMoon;
+    }
   }
 
   update(states: readonly RagdollSnapshot[], delta = 1 / 60): void {
@@ -133,8 +168,10 @@ export class RagdollVisuals {
 
   dispose(): void {
     this.update([]);
-    for (const geometry of [this.torso, this.head, this.upperArm, this.forearm, this.thigh, this.shin]) geometry.dispose();
-    for (const material of [...this.shirts, this.skin, this.pants, this.lowerPants]) material.dispose();
+    for (const geometry of [this.torso, this.head, this.upperArm, this.forearm, this.thigh, this.shin,
+      this.hornGeometry, this.eyeGeometry]) geometry.dispose();
+    for (const material of [...this.shirts, ...this.suits, this.skin, this.pants, this.lowerPants,
+      this.hornMaterial, this.eyeMaterial]) material.dispose();
     this.bloodGeometry.dispose(); this.bloodMaterial.dispose();
     this.group.removeFromParent();
   }

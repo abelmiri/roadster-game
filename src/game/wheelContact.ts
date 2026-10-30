@@ -1,7 +1,10 @@
 import { CAR_AXLE_Y, CAR_SUSPENSION_TRAVEL, CAR_WHEEL_OFFSET, CAR_WHEEL_RADIUS } from './vehicle';
 import { AIR_JET_THRUST, AIR_JET_TURN_ACCELERATION, AIR_JET_MAX_SPIN } from './airJets';
 
-export const ROAD_GRAVITY = 22;
+export const EARTH_GRAVITY = 22;
+export const MOON_GRAVITY = 9;
+export let ROAD_GRAVITY = EARTH_GRAVITY;
+export function setRoadGravity(value: number): void { ROAD_GRAVITY = value; }
 export const SUCTION_ACCELERATION = 68;
 export const SUCTION_RANGE = 2.4;
 const INERTIA = 1.3;

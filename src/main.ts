@@ -1,6 +1,7 @@
 import RAPIER from '@dimforge/rapier2d-compat';
 import { FIXED_STEP, GamePhysics, type Controls, type GameSnapshot } from './game/physics';
-import { GameVisuals } from './game/visuals';
+import { GameVisuals, type GameMap } from './game/visuals';
+import { EARTH_GRAVITY, MOON_GRAVITY, setRoadGravity } from './game/wheelContact';
 import { GameAudio } from './game/audio';
 import { HudFeedback } from './game/hudFeedback';
 import { ExperienceProgress, LEVEL_XP } from './game/experience';
@@ -56,6 +57,7 @@ app.innerHTML = `
         </div>
         <div id="settings-controls" class="settings-controls">
           <button id="missions-button" class="icon-button" type="button" aria-haspopup="dialog" aria-controls="missions-dialog" aria-expanded="false"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5H5v16h14V5h-4M9 3h6v4H9zM8 12l2 2 5-4M8 18h7"/></svg></button>
+          <button id="map-button" class="icon-button" type="button" aria-haspopup="dialog" aria-controls="map-dialog" aria-expanded="false"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18M3 12h18"/></svg></button>
           <button id="touch-layout-button" class="icon-button touch-layout-button" type="button" aria-controls="touch-layout-editor" aria-expanded="false"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/></svg></button>
           <button id="armory-button" class="icon-button armory-button" type="button" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h9v7H4zM13 10h8v3h-8M7 15v4m-4 0h12M6 6h5"/></svg></button>
           <button id="sound-button" class="icon-button sound-button" type="button" aria-pressed="true">
@@ -225,8 +227,7 @@ app.innerHTML = `
     </button>
     <div id="coin-dialog" class="coin-dialog" role="dialog" aria-modal="true" aria-labelledby="coin-dialog-title" hidden>
       <div class="coin-dialog-card">
-        <div class="coin-dialog-heading"><div><span class="coin-eyebrow" data-i18n="coinGuideEyebrow"></span><h2 id="coin-dialog-title" data-i18n="coinGuideTitle"></h2></div><button id="coin-guide-close" class="armory-close" type="button" data-i18n="coinGuideClose"></button></div>
-        <div class="coin-guide-hero"><p data-i18n="coinGuideIntro"></p><div class="coin-guide-balance"><span data-i18n="coinBalance"></span><strong id="coin-guide-balance"></strong><small data-i18n="coins"></small></div></div>
+        <div class="coin-dialog-heading"><div class="coin-dialog-bar"><button id="coin-guide-close" class="armory-close" type="button" data-i18n="coinGuideClose"></button><div class="coin-guide-balance"><span data-i18n="coinBalance"></span><strong id="coin-guide-balance"></strong><small data-i18n="coins"></small></div></div><div><span class="coin-eyebrow" data-i18n="coinGuideEyebrow"></span><h2 id="coin-dialog-title" data-i18n="coinGuideTitle"></h2><p class="coin-guide-intro" data-i18n="coinGuideIntro"></p></div></div>
         <div id="coin-guide-tabs" class="armory-tabs" role="tablist"><button id="coin-tab-earn" type="button" role="tab" aria-controls="coin-earn-pane" aria-selected="true" data-i18n="coinEarnTab"></button><button id="coin-tab-buy" type="button" role="tab" aria-controls="coin-buy-pane" aria-selected="false" tabindex="-1" data-i18n="coinBuyTab"></button></div>
         <section id="coin-earn-pane" role="tabpanel" aria-labelledby="coin-tab-earn">
           <div class="coin-milestone-guide"><div class="coin-route-heading"><span class="coin-guide-symbol" aria-hidden="true">↗</span><div><h3 data-i18n="coinMilestoneTitle"></h3><p data-i18n="coinMilestoneDescription"></p></div></div><div class="coin-milestone-grid">${DISTANCE_COIN_REWARDS.map((_,index)=>`<div id="coin-milestone-${index}" class="coin-milestone"><span id="coin-milestone-distance-${index}"></span><strong id="coin-milestone-value-${index}"></strong><small id="coin-milestone-xp-${index}" class="coin-milestone-xp"></small></div>`).join('')}</div></div>
@@ -248,6 +249,22 @@ app.innerHTML = `
         <section id="mission-pane-active" role="tabpanel" aria-labelledby="mission-tab-active"><div class="mission-active-grid">${Array.from({length:3},(_,index)=>`<article id="active-mission-${index}" class="mission-active-card"><span id="mission-scope-${index}" class="mission-scope"></span><h3 id="mission-title-${index}"></h3><p id="mission-description-${index}"></p><div class="mission-progress"><strong id="mission-progress-${index}"></strong><span id="mission-reward-${index}"></span></div><div id="mission-meter-${index}" class="mission-meter" role="progressbar" aria-valuemin="0"><span id="mission-fill-${index}"></span></div><small id="mission-best-${index}"></small><button id="mission-collect-${index}" class="mission-collect" type="button" hidden disabled data-i18n="missionCollect"></button></article>`).join('')}</div><p id="mission-empty" class="mission-empty"></p><p class="mission-rules" data-i18n="missionRules"></p></section>
         <section id="mission-pane-history" role="tabpanel" aria-labelledby="mission-tab-history" hidden><div id="mission-history" class="mission-list"></div><p id="mission-history-empty" class="mission-empty" data-i18n="missionHistoryEmpty"></p></section>
         <section id="mission-pane-all" role="tabpanel" aria-labelledby="mission-tab-all" hidden><div id="mission-catalog" class="mission-list"></div></section>
+      </div>
+    </div>
+    <div id="map-dialog" class="missions-dialog map-dialog" role="dialog" aria-modal="true" aria-labelledby="map-title" hidden>
+      <div class="missions-card map-card"><div class="missions-heading"><div><span class="eyebrow" data-i18n="mapEyebrow"></span><h2 id="map-title" data-i18n="mapTitle"></h2></div><button id="map-close" class="armory-close" type="button" data-i18n="closeMap"></button></div>
+        <p class="missions-intro" data-i18n="mapHelp"></p>
+        <div class="map-grid">${(['earth','moon'] as const).map(id => `
+          <article id="map-option-${id}" class="map-option" data-map="${id}">
+            <span id="map-badge-${id}" class="map-option-badge" hidden data-i18n="mapCurrentBadge"></span>
+            <h3 data-i18n="map${id[0].toUpperCase()+id.slice(1)}Name"></h3>
+            <p data-i18n="map${id[0].toUpperCase()+id.slice(1)}Description"></p>
+            <ul class="map-option-stats">
+              <li data-i18n="map${id[0].toUpperCase()+id.slice(1)}Gravity"></li>
+              <li data-i18n="map${id[0].toUpperCase()+id.slice(1)}Terrain"></li>
+            </ul>
+            <button id="map-select-${id}" class="map-select" type="button" data-map="${id}"></button>
+          </article>`).join('')}</div>
       </div>
     </div>
     <div id="purchase-dialog" class="purchase-dialog" role="dialog" aria-modal="true" aria-labelledby="purchase-title" aria-describedby="purchase-details" hidden><div class="purchase-card"><span class="eyebrow" data-i18n="purchaseEyebrow"></span><h2 id="purchase-title" data-i18n="purchaseTitle"></h2><div id="purchase-preview" class="purchase-preview" aria-hidden="true"></div><h3 id="purchase-name"></h3><p id="purchase-details"></p><p id="purchase-before" class="purchase-before"></p><p id="purchase-after" class="purchase-after"></p><dl class="purchase-costs"><div><dt data-i18n="purchaseCost"></dt><dd id="purchase-cost"></dd></div><div><dt data-i18n="coinBalance"></dt><dd id="purchase-balance"></dd></div><div><dt data-i18n="purchaseRemaining"></dt><dd id="purchase-remaining"></dd></div></dl><p id="purchase-error" class="purchase-error" role="alert" hidden data-i18n="purchaseChanged"></p><div class="purchase-actions"><button id="purchase-cancel" type="button" data-i18n="purchaseCancel"></button><button id="purchase-confirm" type="button" data-i18n="purchaseConfirm"></button></div></div></div>
@@ -433,6 +450,15 @@ missionsDialog.hidden = true;
 let missionTab: 'active' | 'history' | 'all' = 'active';
 let missionOpener: HTMLButtonElement | null = null;
 let resumeAfterMissions = false;
+const mapDialog = element('map-dialog');
+const mapClose = element<HTMLButtonElement>('map-close');
+const mapButtons = ['map-button'].map(id=>element<HTMLButtonElement>(id));
+mapDialog.hidden = true;
+let mapOpener: HTMLButtonElement | null = null;
+let resumeAfterMap = false;
+let selectedMap: GameMap = 'earth';
+try { if (progressStorage?.getItem('roadster-map') === 'moon') selectedMap = 'moon'; } catch { /* Storage is optional. */ }
+setRoadGravity(selectedMap === 'moon' ? MOON_GRAVITY : EARTH_GRAVITY);
 let displayedMissionRevision = -1;
 let displayedMissionLanguage = '';
 let missionRewardTime = 0;
@@ -644,7 +670,7 @@ element('telegram-unlink').addEventListener('click', () => {
 const formatDistance = (meters: number): string => `${formatNumber(meters, 4)} <small>${t('meter')}</small>`;
 const districtKeys: MessageKey[] = ['districtMorning', 'districtDowntown', 'districtNight'];
 const weaponName = (id: string): string => t(`weapon${WEAPONS.findIndex(spec => spec.id === id)}` as MessageKey);
-const dialogBlocked = (): boolean => !purchaseDialog.hidden || !missionsDialog.hidden || !mobileSettingsDialog.hidden;
+const dialogBlocked = (): boolean => !purchaseDialog.hidden || !missionsDialog.hidden || !mapDialog.hidden || !mobileSettingsDialog.hidden;
 const missionName = (spec: MissionSpec): string => `${spec.title[getLanguage()]} · ${formatNumber(spec.target)}`;
 const missionValue = (spec: MissionSpec, value: number): string => spec.unit === 'seconds' ? formatDecimal(Math.floor(value * 10 + 1e-6) / 10) : formatNumber(value);
 let displayedMissionHistory = -1;
@@ -1156,6 +1182,9 @@ function updateLanguage(): void {
   element('missions-button').setAttribute('aria-label', t('missions'));
   element('missions-button').title = `${t('missions')} (J)`;
   element('missions-button').setAttribute('aria-keyshortcuts', 'J');
+  element('map-button').setAttribute('aria-label', t('map'));
+  element('map-button').title = t('map');
+  refreshMapDialog();
   touchLayoutButton.setAttribute('aria-label', t('touchLayout'));
   touchLayoutButton.title = t('touchLayout');
   touchLayout.updateLanguage();
@@ -1553,6 +1582,47 @@ function closeMissions(): void {
 }
 for (const button of missionButtons) button.addEventListener('click', () => openMissions(button));
 missionsClose.addEventListener('click', closeMissions);
+
+function refreshMapDialog(): void {
+  for (const id of ['earth', 'moon'] as const) {
+    const current = id === selectedMap;
+    element(`map-option-${id}`).classList.toggle('is-current', current);
+    element(`map-badge-${id}`).hidden = !current;
+    const select = element<HTMLButtonElement>(`map-select-${id}`);
+    select.disabled = current;
+    select.textContent = t(current ? 'mapSelected' : 'mapSelect');
+  }
+}
+function applyMap(map: GameMap): void {
+  if (map === selectedMap) return;
+  selectedMap = map;
+  try { progressStorage?.setItem('roadster-map', map); } catch { /* Storage is optional. */ }
+  setRoadGravity(map === 'moon' ? MOON_GRAVITY : EARTH_GRAVITY);
+  if (status !== 'loading' && status !== 'error') physics.world.gravity = { x: 0, y: -(map === 'moon' ? MOON_GRAVITY : EARTH_GRAVITY) };
+  visuals.setMap(map);
+  refreshMapDialog();
+}
+function openMap(opener: HTMLButtonElement): void {
+  if (status === 'loading' || status === 'error' || dialogBlocked() || !coinDialog.hidden || !recordDialog.hidden || touchLayout.editing) return;
+  resumeAfterMap = status === 'running';
+  if (resumeAfterMap) pause();
+  clearHeld(); jumpQueued = false; mapOpener = opener;
+  mapDialog.hidden = false; armory.inert = true; overlay.inert = true;
+  for (const button of mapButtons) button.setAttribute('aria-expanded', 'true');
+  refreshMapDialog(); mapClose.focus();
+}
+function closeMap(): void {
+  mapDialog.hidden = true; armory.inert = false; overlay.inert = false;
+  for (const button of mapButtons) button.setAttribute('aria-expanded', 'false');
+  clearHeld(); jumpQueued = false;
+  if (resumeAfterMap && status === 'paused') start();
+  mapOpener?.focus(); mapOpener = null; resumeAfterMap = false;
+}
+for (const button of mapButtons) button.addEventListener('click', () => openMap(button));
+mapClose.addEventListener('click', closeMap);
+for (const id of ['earth', 'moon'] as const) {
+  element(`map-select-${id}`).addEventListener('click', () => { applyMap(id); void audio.unlock().then(() => audio.play('click')); });
+}
 for (let index = 0; index < 3; index++) {
   element(`mission-collect-${index}`).addEventListener('click', () => {
     if (missionsDialog.hidden || missionTab !== 'active') return;
@@ -1560,7 +1630,7 @@ for (let index = 0; index < 3; index++) {
     const reward = active && player.collectMission(active.id);
     if (!reward) return;
     lastMissionRewards = [reward]; missionRewardTime = 4; missionNotice = 'missionRewardNotice';
-    awardCoins(reward.reward); audio.play('record');
+    awardCoins(reward.reward); void audio.unlock().then(() => audio.play('record'));
     refreshMissions(true); refreshArmory(); updateHud();
     void sync?.flush().catch(accountError);
     element('mission-tab-active').focus();
@@ -1785,6 +1855,15 @@ window.addEventListener('keydown', (event) => {
     }
     return;
   }
+  if (!mapDialog.hidden) {
+    if (event.code === 'Escape') { event.preventDefault(); if (!event.repeat) closeMap(); }
+    if (event.code === 'Tab') {
+      const last = element<HTMLButtonElement>(`map-select-${selectedMap === 'moon' ? 'earth' : 'moon'}`);
+      if (event.shiftKey && document.activeElement === mapClose) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); mapClose.focus(); }
+    }
+    return;
+  }
   if(!coinDialog.hidden) {
     if(event.code==='Escape') {event.preventDefault();if(!event.repeat)closeCoinGuide();}
     if(event.code==='Tab') {
@@ -1968,7 +2047,7 @@ function renderFrame(now: number): void {
       steps++;
       const impacted = physics.impactSerial > lastImpactSerial;
       const exploded = physics.explosionSerial > lastExplosionSerial;
-      const ragdollHit = physics.ragdollHitSerial > lastRagdollHitSerial;
+      const ragdollHit = physics.ragdollRamSerial > lastRagdollHitSerial;
       if (impacted) {
         lastImpactSerial = physics.impactSerial;
         audio.play('impact');
@@ -1977,7 +2056,7 @@ function renderFrame(now: number): void {
         lastExplosionSerial = physics.explosionSerial;
         audio.play('explosion');
       }
-      if (ragdollHit) lastRagdollHitSerial = physics.ragdollHitSerial;
+      if (ragdollHit) lastRagdollHitSerial = physics.ragdollRamSerial;
       // A fatal hit shows the menu immediately and starts the loose wreck;
       // it must not inherit hit stop or explosion slow motion from the living car.
       if (physics.crashed) { crash(); break; }
@@ -2020,8 +2099,12 @@ function renderFrame(now: number): void {
   if (!gained && simulating) rewardTime = Math.max(0, rewardTime - playDelta);
   const sceneDelta = status === 'crashed' ? delta * WRECK_TIME_SCALE : status === 'running' ? playDelta : delta;
   const cameraDelta = status === 'running' || status === 'crashed' ? wallDelta : 0;
+  // Hit stop reads as full strength; the fatal wreck keeps a softer version behind the menu.
+  const timeScale = Math.min(impactPause.timeScale, explosionSlowMotion.timeScale, ragdollSlowMotion.timeScale);
+  const slowMotion = status === 'crashed' ? .4
+    : status === 'running' || status === 'paused' ? Math.min(1, (1 - timeScale) / (1 - RAGDOLL_MIN_TIME_SCALE)) : 0;
   visuals.render(snapshot, physics, sceneDelta,
-    simulating || status === 'crashed', frozen, cameraDelta);
+    simulating || status === 'crashed', frozen, cameraDelta, slowMotion);
   audio.update(snapshot, simulating);
   if (simulating) {
     const warningDistance = Math.max(7, snapshot.speed * 0.85);
@@ -2076,6 +2159,7 @@ async function boot(): Promise<void> {
     visuals = new GameVisuals(sceneElement);
     visuals.setVehicle(player.selectedVehicle);
     visuals.setPaint(player.selectedPaint);
+    visuals.setMap(selectedMap);
     const snapshot = physics.snapshot(0);
     visuals.render(snapshot, physics, 0, false);
     updateHud(snapshot);

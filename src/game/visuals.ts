@@ -15,9 +15,10 @@ import { ImpactSparks } from './impactSparks';
 import { ImpactCamera, VIEW_HALF_HEIGHT, CAMERA_LOOK_AHEAD } from './impactCamera';
 import { DrivingCamera } from './drivingCamera';
 import { createRampBooster } from './rampBooster';
-import { createTerrainMaterial, createTerrainGeometry, createRoadCapGeometry } from './terrain';
+import { createTerrainMaterial, createMoonTerrainMaterial, createTerrainGeometry, createRoadCapGeometry, createRoadCapMaterial, createRoadGlowGeometry } from './terrain';
 import { StartDepot } from './startDepot';
 import { BackdropBlur } from './backdropBlur';
+import { SlowMotionEffect } from './slowMotionEffect';
 import { PoliceVisual } from './policeVisual';
 import { carVisibleDuringProtection } from './damage';
 import { CombatVisual, WeaponVisual } from './weaponVisual';
@@ -37,9 +38,18 @@ const THEMES: Theme[] = [
   { sky: '#18233f', haze: '#34416b', far: '#374368', middle: '#253755', near: '#172841', road: '#172338', roadSide: '#101a2b', stripe: '#65ddda', light: '#ffb790' },
 ];
 
+const MOON_THEME: Theme = {
+  sky: '#02040c', haze: '#0c1120', far: '#232833', middle: '#1a1e27', near: '#11141c',
+  road: '#9a978f', roadSide: '#55524c', stripe: '#dfe6ee', light: '#dfe6ee',
+};
+
 const ease = (t: number): number => t * t * (3 - 2 * t);
 const THEME_COLORS = THEMES.map(theme => Object.fromEntries(Object.entries(theme).map(([key, value]) =>
   [key, new THREE.Color(value)])) as Record<keyof Theme, THREE.Color>);
+const MOON_THEME_COLORS = Object.fromEntries(Object.entries(MOON_THEME).map(([key, value]) =>
+  [key, new THREE.Color(value)])) as Record<keyof Theme, THREE.Color>;
+
+export type GameMap = 'earth' | 'moon';
 
 interface ChunkView { group: THREE.Group; hazards: Map<string, THREE.Group> }
 interface CityMotion { mesh: THREE.Group; baseX: number; altitude: number; speed: number; phase: number }
@@ -78,9 +88,17 @@ export class GameVisuals {
   private readonly midMat = new THREE.MeshLambertMaterial({ color: THEMES[0].middle, flatShading: true });
   private readonly nearMat = new THREE.MeshLambertMaterial({ color: THEMES[0].near, flatShading: true });
   private readonly roadMat = new THREE.MeshLambertMaterial({ color: THEMES[0].road, flatShading: true });
+  private readonly roadCapMat = createRoadCapMaterial(THEMES[0].road);
   private readonly groundMat = createTerrainMaterial(THEMES[0].road);
+  private readonly moonGroundMat = createMoonTerrainMaterial(MOON_THEME.road);
   private readonly roadSideMat = new THREE.MeshLambertMaterial({ color: THEMES[0].roadSide, flatShading: true });
   private readonly stripeMat = new THREE.MeshBasicMaterial({ color: THEMES[0].stripe });
+  private readonly stripeGlowMat = new THREE.MeshBasicMaterial({
+    color: THEMES[0].stripe, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false,
+  });
+  private readonly edgeGlowMat = new THREE.MeshBasicMaterial({
+    color: '#79d5c8', vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+  });
   private readonly windowMat = new THREE.MeshBasicMaterial({ color: THEMES[0].light });
   private readonly poleMat = new THREE.MeshLambertMaterial({ color: '#334d62' });
   private readonly lampMat = new THREE.MeshBasicMaterial({ color: '#dffaf0' });
@@ -91,6 +109,9 @@ export class GameVisuals {
   private readonly sunMat = new THREE.MeshBasicMaterial({ color: '#fff4d9', transparent: true });
   private readonly moonMat = new THREE.MeshBasicMaterial({ color: '#cce5f6', transparent: true, opacity: 0 });
   private readonly starMat = new THREE.PointsMaterial({ color: '#e5f5ff', size: 0.07, transparent: true, opacity: 0, sizeAttenuation: false });
+  private readonly earthMat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false });
+  private readonly clouds: THREE.Mesh[] = [];
+  private currentMap: GameMap = 'earth';
   private readonly city = new CityBuildings(this.farMat, this.midMat, this.nearMat, this.windowMat);
   private readonly depot = new StartDepot();
   private readonly skyColor = new THREE.Color();
@@ -98,6 +119,8 @@ export class GameVisuals {
   private aspect = 1;
   private themeDistance = -1;
   private readonly carGroup = new THREE.Group();
+  private carGhost = false;
+  private readonly ghostBase = new Map<THREE.Material, { opacity: number; transparent: boolean; depthWrite: boolean }>();
   private carBody = createVehicleBody('roadster');
   private bodyDamage = new CarBodyDamage(this.carBody);
   private vehicle: CarModelId = 'roadster';
@@ -109,6 +132,7 @@ export class GameVisuals {
   private readonly debris = new ObstacleDebris();
   private readonly sparks = new ImpactSparks();
   private readonly blur = new BackdropBlur();
+  private readonly slowMotion = new SlowMotionEffect();
   private readonly police = new PoliceVisual();
   private readonly policeWreck = new PoliceVisual(true);
   private readonly policeSmoke = new CarSmoke();
@@ -126,6 +150,7 @@ export class GameVisuals {
   private sun!: THREE.Mesh;
   private moon!: THREE.Mesh;
   private stars!: THREE.Points;
+  private earth!: THREE.Mesh;
   private cameraX = 4;
   private cameraY = 2.3;
   private elapsed = 0;
@@ -190,7 +215,57 @@ export class GameVisuals {
       cloud.scale.set(1.7 + hash(i + 21) * 2.2, 0.23 + hash(i + 35) * 0.14, 1);
       cloud.position.set((hash(i + 18) - 0.5) * 95, 5.4 + hash(i + 37) * 5.8, -25);
       this.backdrop.add(cloud);
+      this.clouds.push(cloud);
     }
+
+    this.earth = new THREE.Mesh(new THREE.CircleGeometry(4.6, 64), this.earthMat);
+    this.earth.position.set(10, 9, -31);
+    this.earth.rotation.z = 0.4;
+    this.earthMat.onBeforeCompile = shader => {
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vEarthUv;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvEarthUv = position.xy / 4.6;');
+      shader.fragmentShader = shader.fragmentShader.replace('#include <common>', `#include <common>
+        varying vec2 vEarthUv;
+        float earthHash(vec2 p) {
+          vec3 q = fract(vec3(p.xyx) * 0.1031);
+          q += dot(q, q.yzx + 33.33);
+          return fract((q.x + q.y) * q.z);
+        }
+        float earthNoise(vec2 p) {
+          vec2 cell = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(earthHash(cell), earthHash(cell + vec2(1.0, 0.0)), f.x),
+            mix(earthHash(cell + vec2(0.0, 1.0)), earthHash(cell + vec2(1.0)), f.x), f.y);
+        }
+        float earthFbm(vec2 p) {
+          return earthNoise(p) * 0.5 + earthNoise(p * 2.07) * 0.3 + earthNoise(p * 4.3) * 0.2;
+        }`);
+      shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+        {
+          vec2 p = vEarthUv;
+          float r = length(p);
+          vec3 ocean = vec3(0.07, 0.22, 0.52);
+          vec3 shallow = vec3(0.14, 0.4, 0.6);
+          vec3 land = vec3(0.22, 0.42, 0.2);
+          vec3 desert = vec3(0.56, 0.47, 0.28);
+          vec3 ice = vec3(0.92, 0.95, 0.98);
+          float continents = earthFbm(p * 2.6 + 4.0);
+          vec3 surface = mix(ocean, shallow, smoothstep(0.42, 0.5, continents));
+          surface = mix(surface, land, smoothstep(0.5, 0.58, continents));
+          surface = mix(surface, desert, smoothstep(0.62, 0.72, continents) * step(0.5, continents));
+          surface = mix(surface, ice, smoothstep(0.82, 0.9, abs(p.y)));
+          float clouds = smoothstep(0.58, 0.82, earthFbm(p * 3.4 - 7.0 + vec2(continents * 0.6)));
+          surface = mix(surface, vec3(1.0), clouds * 0.55);
+          float terminator = smoothstep(-0.15, 0.85, p.x - p.y * 0.3);
+          surface *= mix(0.22, 1.08, terminator);
+          float limb = 1.0 - smoothstep(0.85, 1.0, r);
+          diffuseColor.rgb = surface;
+          diffuseColor.a = limb;
+        }`);
+    };
+    this.earthMat.customProgramCacheKey = () => 'roadster-earth-globe-v1';
+    this.backdrop.add(this.earth);
+    this.earth.visible = false;
   }
 
   private createCityMotion(): void {
@@ -255,10 +330,12 @@ export class GameVisuals {
 
   private roadSection(start: number, end: number, group: THREE.Group): void {
     const samples = Math.max(2, Math.ceil((end - start) / 0.35));
-    const road = new THREE.Mesh(createTerrainGeometry(start, end), [this.groundMat, this.roadSideMat]);
+    const ground = this.currentMap === 'moon' ? this.moonGroundMat : this.groundMat;
+    const road = new THREE.Mesh(createTerrainGeometry(start, end), [ground, this.roadSideMat]);
     road.position.z = -0.75;
     group.add(road);
-    group.add(new THREE.Mesh(createRoadCapGeometry(start, end), this.roadMat));
+    group.add(new THREE.Mesh(createRoadCapGeometry(start, end), this.roadCapMat));
+    group.add(new THREE.Mesh(createRoadGlowGeometry(start, end), this.edgeGlowMat));
 
     const linePoints: THREE.Vector3[] = [];
     for (let i = 0; i <= samples; i++) {
@@ -269,6 +346,9 @@ export class GameVisuals {
     group.add(edge);
 
     for (let x = Math.ceil(start / 3.5) * 3.5; x < end - 0.6; x += 3.5) {
+      const glow = box(1.5, 0.11, 0.1, this.stripeGlowMat);
+      glow.position.set(x, roadHeight(x) + 0.16, 0.72);
+      group.add(glow);
       const marker = box(1.0, 0.045, 0.11, this.stripeMat);
       marker.position.set(x, roadHeight(x) + 0.16, 0.74);
       group.add(marker);
@@ -410,6 +490,26 @@ export class GameVisuals {
   }
 
   private updateTheme(distance: number): void {
+    if (this.currentMap === 'moon') {
+      if (this.themeDistance === -2) return;
+      this.themeDistance = -2;
+      const moon = MOON_THEME_COLORS;
+      this.renderer.setClearColor(moon.sky);
+      this.farMat.color.copy(moon.far);
+      this.midMat.color.copy(moon.middle);
+      this.nearMat.color.copy(moon.near);
+      this.roadMat.color.copy(moon.road);
+      this.roadCapMat.color.copy(moon.road);
+      this.roadSideMat.color.copy(moon.roadSide);
+      this.hazeColor.copy(moon.haze);
+      this.stripeMat.color.copy(moon.stripe);
+      this.stripeGlowMat.color.copy(moon.stripe);
+      this.windowMat.color.copy(moon.light);
+      this.starMat.opacity = 0.95;
+      this.moonMat.opacity = 0;
+      this.sunMat.opacity = 0;
+      return;
+    }
     if (distance === this.themeDistance) return;
     this.themeDistance = distance;
     const district = getDistrict(distance);
@@ -423,10 +523,12 @@ export class GameVisuals {
     this.midMat.color.lerpColors(a.middle, b.middle, t);
     this.nearMat.color.lerpColors(a.near, b.near, t);
     this.roadMat.color.lerpColors(a.road, b.road, t);
+    this.roadCapMat.color.lerpColors(a.road, b.road, t);
     this.groundMat.color.lerpColors(a.road, b.road, t);
     this.roadSideMat.color.lerpColors(a.roadSide, b.roadSide, t);
     this.hazeColor.lerpColors(a.haze, b.haze, t);
     this.stripeMat.color.lerpColors(a.stripe, b.stripe, t);
+    this.stripeGlowMat.color.lerpColors(a.stripe, b.stripe, t);
     this.windowMat.color.lerpColors(a.light, b.light, t);
     const night = index === 2 ? 1 : next === 2 ? t : 0;
     this.starMat.opacity = night * 0.9;
@@ -436,6 +538,11 @@ export class GameVisuals {
 
   private updateBackdrop(): void {
     const span = 150;
+    if (this.currentMap === 'moon') {
+      this.earth.position.set(this.cameraX + 14, this.cameraY + 10, -31);
+      this.stars.position.set(this.cameraX, this.cameraY, 0);
+      return;
+    }
     this.city.update(this.cameraX);
     for (const vehicle of this.traffic) {
       let x = vehicle.baseX + this.cameraX * 0.42 + this.elapsed * vehicle.speed;
@@ -457,6 +564,27 @@ export class GameVisuals {
     this.stars.position.set(this.cameraX, this.cameraY, 0);
   }
 
+  setMap(map: GameMap): void {
+    if (map === this.currentMap) return;
+    this.currentMap = map;
+    const moon = map === 'moon';
+    this.city.group.visible = !moon;
+    for (const vehicle of this.traffic) vehicle.mesh.visible = !moon;
+    for (const drone of this.backgroundDrones) drone.mesh.visible = !moon;
+    for (const cloud of this.clouds) cloud.visible = !moon;
+    this.sun.visible = !moon;
+    this.moon.visible = !moon;
+    this.earth.visible = moon;
+    this.depot.group.visible = !moon;
+    this.ragdolls.setMoon(moon);
+    this.themeDistance = -1;
+    for (const view of this.chunks.values()) disposeGroup(view.group);
+    this.chunks.clear();
+    for (const group of this.loops.values()) disposeGroup(group);
+    this.loops.clear();
+    this.updateTheme(this.themeDistance);
+  }
+
   setPaint(id: string): void { this.paint = id; this.bodyDamage.setPaint(id); }
 
   setVehicle(id: CarModelId): void {
@@ -474,7 +602,27 @@ export class GameVisuals {
     this.armor.setRoofLift(model.roofLift);
   }
 
-  render(snapshot: GameSnapshot, physics: GamePhysics, delta: number, running = true, impactFrozen = false, wallDelta = delta): void {
+  private setCarGhost(ghost: boolean): void {
+    if (ghost === this.carGhost) return;
+    this.carGhost = ghost;
+    const apply = (root: THREE.Object3D): void => root.traverse(object => {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.material || this.shield.group === object || object.parent === this.shield.group) return;
+      for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+        let base = this.ghostBase.get(material);
+        if (!base) { base = { opacity: material.opacity, transparent: material.transparent, depthWrite: material.depthWrite }; this.ghostBase.set(material, base); }
+        material.opacity = ghost ? base.opacity * 0.25 : base.opacity;
+        material.transparent = ghost ? true : base.transparent;
+        material.depthWrite = ghost ? false : base.depthWrite;
+        material.needsUpdate = true;
+      }
+    });
+    apply(this.carGroup);
+    this.wheelGroups.forEach(apply);
+  }
+
+  render(snapshot: GameSnapshot, physics: GamePhysics, delta: number, running = true, impactFrozen = false, wallDelta = delta,
+    slowMotion = 0): void {
     const sceneDelta = impactFrozen ? 0 : delta;
     this.elapsed += sceneDelta;
     if (running) this.policeTime += delta;
@@ -494,12 +642,11 @@ export class GameVisuals {
     this.armor.update(snapshot, delta, running, physics.generator);
     this.shield.update(snapshot.shieldRemaining, sceneDelta, running && !impactFrozen, snapshot.crashed);
     const carVisible = snapshot.shieldRemaining > 0 || carVisibleDuringProtection(snapshot.invincibilityRemaining, impactFrozen || !running || snapshot.crashed);
-    this.carGroup.visible = carVisible;
+    this.setCarGhost(!carVisible);
     snapshot.wheels.forEach((pose, index) => {
       const wheel = this.wheelGroups[index];
       wheel.position.set(pose.x, pose.y, 1.55);
       wheel.rotation.z = pose.angle;
-      wheel.visible = carVisible;
     });
     this.fanGlow.visible = snapshot.suctionActive;
     this.smoke.update(snapshot, delta, running, snapshot.crashed ? 2 : 1);
@@ -524,7 +671,7 @@ export class GameVisuals {
     this.drivingCamera.update({ speed: snapshot.speed, height: snapshot.car.y - roadY,
       verticalSpeed: physics.car.linvel().y, grounded: snapshot.grounded, loopView, crashed: snapshot.crashed }, drivingDelta);
     this.impactCamera.update(snapshot.sparkEvents, snapshot.sparkSerial, snapshot.crashed, wallDelta,
-      running || impactFrozen, snapshot.crashPosition ?? snapshot.car);
+      running || impactFrozen, snapshot.crashPosition ?? snapshot.car, snapshot.ragdollRamSerial);
     const baseViewHeight = this.drivingCamera.halfHeight;
     const nextHeight = baseViewHeight / this.impactCamera.zoom;
     if (Math.abs(nextHeight - this.viewHeight) > 0.00001) {
@@ -547,7 +694,10 @@ export class GameVisuals {
     this.camera.position.set(this.cameraX, this.cameraY, 36);
     this.depot.update(this.cameraX, this.viewHeight * this.aspect, this.elapsed);
     this.updateBackdrop();
-    this.blur.render(this.renderer, this.scene, this.camera, this.backdrop, this.worldGroup, this.hazeColor, this.elapsed);
+    const slowing = this.slowMotion.update(slowMotion, wallDelta);
+    this.blur.render(this.renderer, this.scene, this.camera, this.backdrop, this.worldGroup, this.hazeColor, this.elapsed,
+      slowing ? this.slowMotion.target : null);
+    if (slowing) this.slowMotion.render(this.renderer, this.camera, snapshot.crashPosition ?? snapshot.car, this.elapsed);
 
     if (running && wallDelta > 1 / 50) this.slowFrames++;
     else this.slowFrames = Math.max(0, this.slowFrames - 1);
@@ -566,6 +716,7 @@ export class GameVisuals {
       this.qualityReduced ? 1 : 1.5, Math.sqrt(pixelBudget / (width * height)))));
     this.renderer.setSize(width, height, false);
     this.blur.resize(this.renderer);
+    this.slowMotion.resize(this.renderer);
     const halfHeight = this.viewHeight;
     const halfWidth = halfHeight * width / height;
     this.camera.left = -halfWidth;
@@ -595,7 +746,13 @@ export class GameVisuals {
     this.shield.dispose(); this.randomBoxes.dispose(); this.ragdolls.dispose(); this.ragdollGroundEffects.dispose();
     this.healthHitPopups.dispose();
     this.blur.dispose();
+    this.slowMotion.dispose();
     this.groundMat.dispose();
+    this.moonGroundMat.dispose();
+    this.earthMat.dispose();
+    this.roadCapMat.dispose();
+    this.stripeGlowMat.dispose();
+    this.edgeGlowMat.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

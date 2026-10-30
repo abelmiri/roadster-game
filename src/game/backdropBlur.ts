@@ -51,14 +51,15 @@ export class BackdropBlur {
   }
 
   render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera,
-    city: THREE.Group, world: THREE.Group, haze: THREE.Color, time: number): void {
+    city: THREE.Group, world: THREE.Group, haze: THREE.Color, time: number,
+    output: THREE.WebGLRenderTarget | null = null): void {
     this.material.uniforms.hazeTint.value.copy(haze);
     this.material.uniforms.hazeOrigin.value.set(camera.position.x*.018,camera.position.y*.018);
     this.material.uniforms.time.value=time;
     world.visible = false;
     renderer.setRenderTarget(this.target);
     renderer.render(scene, camera);
-    renderer.setRenderTarget(null);
+    renderer.setRenderTarget(output);
     renderer.render(this.scene, this.camera);
     city.visible = false;
     world.visible = true;
