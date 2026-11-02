@@ -111,6 +111,7 @@ export class GameVisuals {
   private readonly sunMat = new THREE.MeshBasicMaterial({ color: '#fff4d9', transparent: true });
   private readonly moonMat = new THREE.MeshBasicMaterial({ color: '#cce5f6', transparent: true, opacity: 0 });
   private readonly starMat = new THREE.PointsMaterial({ color: '#e5f5ff', size: 0.07, transparent: true, opacity: 0, sizeAttenuation: false });
+  private readonly galaxyMat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, opacity: 0.78 });
   private readonly earthMat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false });
   private readonly clouds: THREE.Mesh[] = [];
   private currentMap: GameMap = 'earth';
@@ -152,6 +153,7 @@ export class GameVisuals {
   private sun!: THREE.Mesh;
   private moon!: THREE.Mesh;
   private stars!: THREE.Points;
+  private galaxy!: THREE.Mesh;
   private earth!: THREE.Mesh;
   private cameraX = 4;
   private cameraY = 2.3;
@@ -203,14 +205,51 @@ export class GameVisuals {
     this.moon.position.z = -28;
     this.backdrop.add(this.sun, this.moon);
 
+    // Keep the sky in camera space so altitude and zoom cannot reveal its edges.
     const positions: number[] = [];
-    for (let i = 0; i < 90; i++) {
-      positions.push((hash(i + 400) - 0.5) * 90, hash(i + 1000) * 13 - 1, -27);
+    for (let i = 0; i < 260; i++) {
+      positions.push((hash(i + 400) - 0.5) * 2.4, (hash(i + 1000) - 0.5) * 2.4, -27);
     }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     this.stars = new THREE.Points(geometry, this.starMat);
     this.backdrop.add(this.stars);
+
+    const galaxyCanvas = document.createElement('canvas');
+    galaxyCanvas.width = 1024;
+    galaxyCanvas.height = 512;
+    const ctx = galaxyCanvas.getContext('2d');
+    if (ctx) {
+      // Layer faint, wide clouds and a brighter core into a continuous Milky Way band.
+      for (let i = 0; i < 170; i++) {
+        const x = hash(i + 2100) * galaxyCanvas.width;
+        const centerY = galaxyCanvas.height * (0.52 - 0.28 * (x / galaxyCanvas.width - 0.5));
+        const y = centerY + (hash(i + 2300) - 0.5) * 125;
+        const radius = 24 + hash(i + 2500) * 94;
+        const glow = ctx.createRadialGradient(x, y, 0, x, y, radius);
+        const core = 1 - Math.abs(x / galaxyCanvas.width - 0.52);
+        const tint = i % 4 === 0 ? '142,115,178' : '110,153,203';
+        glow.addColorStop(0, `rgba(${tint},${(0.018 + core * 0.038).toFixed(3)})`);
+        glow.addColorStop(1, `rgba(${tint},0)`);
+        ctx.fillStyle = glow;
+        ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+      }
+      for (let i = 0; i < 950; i++) {
+        const x = hash(i + 2900) * galaxyCanvas.width;
+        const centerY = galaxyCanvas.height * (0.52 - 0.28 * (x / galaxyCanvas.width - 0.5));
+        const y = centerY + (hash(i + 3900) - 0.5) * 180;
+        const radius = hash(i + 4900) > 0.985 ? 1.5 : 0.6;
+        ctx.fillStyle = `rgba(210,225,255,${(0.06 + hash(i + 5900) * 0.3).toFixed(3)})`;
+        ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    const galaxyTexture = new THREE.CanvasTexture(galaxyCanvas);
+    galaxyTexture.colorSpace = THREE.SRGBColorSpace;
+    this.galaxyMat.map = galaxyTexture;
+    this.galaxy = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.galaxyMat);
+    this.galaxy.position.z = -32;
+    this.galaxy.visible = false;
+    this.backdrop.add(this.galaxy);
 
     const cloudMat = new THREE.MeshBasicMaterial({ color: '#fff4e4', transparent: true, opacity: 0.25, depthWrite: false });
     for (let i = 0; i < 10; i++) {
@@ -541,9 +580,12 @@ export class GameVisuals {
 
   private updateBackdrop(): void {
     const span = 150;
+    this.stars.position.set(this.cameraX, this.cameraY, 0);
+    this.stars.scale.set(this.viewHeight * this.aspect, this.viewHeight, 1);
+    this.galaxy.position.set(this.cameraX, this.cameraY, -32);
+    this.galaxy.scale.set(this.viewHeight * this.aspect * 1.3, this.viewHeight * 1.3, 1);
     if (this.currentMap === 'moon') {
       this.earth.position.set(this.cameraX + 14, this.cameraY + 10, -31);
-      this.stars.position.set(this.cameraX, this.cameraY, 0);
       return;
     }
     this.city.update(this.cameraX);
@@ -564,7 +606,6 @@ export class GameVisuals {
     }
     this.sun.position.set(this.cameraX + 11, this.cameraY + 5.3, -29);
     this.moon.position.set(this.cameraX + 11, this.cameraY + 5.3, -28);
-    this.stars.position.set(this.cameraX, this.cameraY, 0);
   }
 
   setMap(map: GameMap): void {
@@ -578,6 +619,7 @@ export class GameVisuals {
     this.sun.visible = !moon;
     this.moon.visible = !moon;
     this.earth.visible = moon;
+    this.galaxy.visible = moon;
     this.depot.group.visible = !moon;
     this.ragdolls.setMoon(moon);
     this.themeDistance = -1;
@@ -760,6 +802,10 @@ export class GameVisuals {
     this.groundMat.dispose();
     this.moonGroundMat.dispose();
     this.earthMat.dispose();
+    this.galaxyMat.map?.dispose();
+    this.galaxyMat.dispose();
+    this.galaxy.geometry.dispose();
+    this.stars.geometry.dispose();
     this.roadCapMat.dispose();
     this.stripeGlowMat.dispose();
     this.edgeGlowMat.dispose();
