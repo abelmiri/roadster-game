@@ -29,6 +29,8 @@ export interface TrackChunk {
 
 export interface LoopSpec { id: number; entryX: number; radius: number }
 const loops: LoopSpec[] = [];
+let lastLoop: LoopSpec | undefined;
+let loopTrimX = -Infinity;
 export interface RagdollSpec {
   id: number; siteId: number; memberIndex: number; groupSize: number;
   x: number; y: number; outfit: number; pose: 'standing' | 'sitting' | 'hanging' | 'looking';
@@ -40,10 +42,15 @@ export const RAGDOLL_OUTFIT_COUNT = 4;
 const RAGDOLL_GROUP_GAP = 2.2;
 const ragdollSites: number[] = [];
 const ragdollSpawns: RagdollSpec[] = [];
+let lastRagdollSite: number | undefined;
+let nextRagdollSiteId = 0;
+let nextRagdollId = 0;
+let ragdollTrimX = -Infinity;
 let ragdollPlacementTrack: TrackGenerator | undefined;
 let gapSpectatorTrack: TrackGenerator | undefined;
 const gapSpectators: RagdollSpec[] = [];
 let gapSpectatorsGeneratedThrough = -1;
+let spectatorTrimX = -Infinity;
 
 export const RAMP_UNLOCK_DISTANCE = 800;
 const RAMP_UNLOCK_X = 7 + RAMP_UNLOCK_DISTANCE;
@@ -59,12 +66,14 @@ export const RAMP_BOOSTER_LENGTH = 5;
 export interface RampSpec { id: number; start: number; end: number; takeoffX: number; boosterX: number; rise: number }
 interface RampProfile extends RampSpec { baseStart: number; baseEnd: number; slopeStart: number; slopeEnd: number }
 const ramps: RampProfile[] = [];
+let lastRamp: RampProfile | undefined;
+let rampTrimX = -Infinity;
 
 /** Stable procedural spacing, including when chunks are visited out of order. */
 function ensureLoops(end: number): void {
-  while (!loops.length || loops[loops.length - 1].entryX < end + 30) {
-    const id = loops.length;
-    const previous = id ? loops[id - 1].entryX : 7;
+  while (!lastLoop || lastLoop.entryX < end + 30) {
+    const id = lastLoop ? lastLoop.id + 1 : 0;
+    const previous = lastLoop?.entryX ?? 7;
     let entryX = previous + 200 + Math.floor(hash(id + 770) * 201);
     const ramp = rampsBetween(entryX - RAMP_LANDING - 20, entryX + RAMP_APPROACH + 20)[0];
     if (ramp) {
@@ -73,7 +82,8 @@ function ensureLoops(end: number): void {
       const before = ramp.start - RAMP_APPROACH - 21;
       entryX = before >= previous + 200 ? before : ramp.end + RAMP_LANDING + 21;
     }
-    loops.push({ id, entryX, radius: 5.6 + hash(id + 811) * 0.4 });
+    lastLoop = { id, entryX, radius: 5.6 + hash(id + 811) * 0.4 };
+    loops.push(lastLoop);
   }
 }
 
@@ -89,6 +99,7 @@ function firstLoopAt(start: number): number {
 }
 
 export function loopsBetween(start: number, end: number): LoopSpec[] {
+  if (start < loopTrimX) { loops.length = 0; lastLoop = undefined; loopTrimX = -Infinity; }
   ensureLoops(end);
   const low = firstLoopAt(start);
   const result: LoopSpec[] = [];
@@ -98,14 +109,15 @@ export function loopsBetween(start: number, end: number): LoopSpec[] {
 
 function ensureRamps(end: number): void {
   if (end < RAMP_UNLOCK_X + RAMP_MIN_SPACING) return;
-  while (!ramps.length || ramps[ramps.length - 1].start <= end) {
-    const id = ramps.length;
-    const previous = id ? ramps[id - 1].start : RAMP_UNLOCK_X;
+  while (!lastRamp || lastRamp.start <= end) {
+    const id = lastRamp ? lastRamp.id + 1 : 0;
+    const previous = lastRamp?.start ?? RAMP_UNLOCK_X;
     const start = previous + RAMP_MIN_SPACING + Math.floor(hash(id + 1201) * (RAMP_MAX_SPACING - RAMP_MIN_SPACING + 1));
     const rampEnd = start + RAMP_LENGTH;
-    ramps.push({ id, start, end: rampEnd, takeoffX: start + RAMP_RUN_UP, boosterX: start + RAMP_RUN_UP - 3,
+    lastRamp = { id, start, end: rampEnd, takeoffX: start + RAMP_RUN_UP, boosterX: start + RAMP_RUN_UP - 3,
       rise: 8 + hash(id + 1259) * 1.5, baseStart: baseHeight(start), baseEnd: baseHeight(rampEnd),
-      slopeStart: baseSlope(start), slopeEnd: baseSlope(rampEnd) });
+      slopeStart: baseSlope(start), slopeEnd: baseSlope(rampEnd) };
+    ramps.push(lastRamp);
   }
 }
 
@@ -121,6 +133,7 @@ function firstRampAt(start: number): number {
 }
 
 export function rampsBetween(start: number, end: number): RampSpec[] {
+  if (start < rampTrimX) { ramps.length = 0; lastRamp = undefined; rampTrimX = -Infinity; }
   ensureRamps(end);
   const first = firstRampAt(start - RAMP_LENGTH);
   const result: RampSpec[] = [];
@@ -130,6 +143,7 @@ export function rampsBetween(start: number, end: number): RampSpec[] {
 
 export function rampAt(x: number): RampProfile | undefined {
   if (x < RAMP_UNLOCK_X + RAMP_MIN_SPACING) return undefined;
+  if (x - RAMP_LENGTH < rampTrimX) { ramps.length = 0; lastRamp = undefined; rampTrimX = -Infinity; }
   ensureRamps(x);
   const ramp = ramps[firstRampAt(x - RAMP_LENGTH)];
   return ramp && x >= ramp.start && x <= ramp.end ? ramp : undefined;
@@ -221,6 +235,7 @@ export interface RoadSample { height: number; slope: number }
 /** Shared allocation-free sample for suspension contacts. */
 export function sampleRoad(x: number, result: RoadSample): void {
   if (x < 0) { result.height = baseHeight(0); result.slope = 0; return; }
+  if (x - 17 < loopTrimX) { loops.length = 0; lastLoop = undefined; loopTrimX = -Infinity; }
   ensureLoops(x + 17);
   const loop = loops[firstLoopAt(x - 17)];
   const height = baseHeight(x);
@@ -256,9 +271,9 @@ export function hash(seed: number): number {
 
 function ensureRagdolls(end: number): void {
   if (!ragdollPlacementTrack) ragdollPlacementTrack = new TrackGenerator();
-  while (!ragdollSites.length || ragdollSites[ragdollSites.length - 1] < end) {
-    const siteId = ragdollSites.length;
-    const previous = siteId ? ragdollSites[siteId - 1] : 7;
+  while (lastRagdollSite === undefined || lastRagdollSite < end) {
+    const siteId = nextRagdollSiteId++;
+    const previous = lastRagdollSite ?? 7;
     const target = previous + 340 + hash(siteId + 2077) * 120;
     const groupRoll = hash(siteId + 3419);
     const count = groupRoll < .16 ? 3 : groupRoll < .43 ? 2 : 1;
@@ -289,8 +304,9 @@ function ensureRagdolls(end: number): void {
       if (placed) break;
     }
     ragdollSites.push(center);
+    lastRagdollSite = center;
     for (const [memberIndex, x] of memberXs(center, size).entries()) {
-      const id = ragdollSpawns.length;
+      const id = nextRagdollId++;
       ragdollSpawns.push({ id, siteId, memberIndex, groupSize: size, x, y: roadHeight(x), pose: 'standing',
         outfit: Math.floor(hash(id + 6291) * RAGDOLL_OUTFIT_COUNT) });
     }
@@ -301,6 +317,10 @@ function ensureRagdolls(end: number): void {
 /** Two or three spectators straddle each procedural gap, sitting or peering in. */
 export function gapSpectatorsBetween(start: number, end: number): RagdollSpec[] {
   if (end < 0 || end < start) return [];
+  if (start < spectatorTrimX) {
+    gapSpectators.length = 0; gapSpectatorsGeneratedThrough = -1;
+    gapSpectatorTrack = undefined; spectatorTrimX = -Infinity;
+  }
   if (!gapSpectatorTrack) gapSpectatorTrack = new TrackGenerator();
   const through = Math.floor(end / CHUNK_LENGTH);
   for (let index = gapSpectatorsGeneratedThrough + 1; index <= through; index++) {
@@ -344,6 +364,11 @@ export function gapSpectatorsBetween(start: number, end: number): RagdollSpec[] 
 
 export function ragdollsBetween(start: number, end: number): RagdollSpec[] {
   if (end < 0 || end < start) return [];
+  if (start < ragdollTrimX) {
+    ragdollSites.length = 0; ragdollSpawns.length = 0;
+    lastRagdollSite = undefined; nextRagdollSiteId = 0; nextRagdollId = 0;
+    ragdollPlacementTrack = undefined; ragdollTrimX = -Infinity;
+  }
   ensureRagdolls(end);
   let low = 0;
   let high = ragdollSpawns.length;
@@ -357,6 +382,42 @@ export function ragdollsBetween(start: number, end: number): RagdollSpec[] {
     result.push(ragdollSpawns[index]);
   }
   return result;
+}
+
+/** Release procedural records once the car and camera have passed them. */
+export function trimTrackCaches(beforeX: number): void {
+  if (!Number.isFinite(beforeX) || beforeX <= 0) return;
+  const loopBefore = beforeX - 50;
+  const rampBefore = beforeX - RAMP_LANDING - RAMP_LENGTH - 100;
+  const ragdollBefore = beforeX - 150;
+  const spectatorBefore = beforeX - 150;
+  while (loops.length && loops[0].entryX < loopBefore) loops.shift();
+  while (ramps.length && ramps[0].end < rampBefore) ramps.shift();
+  while (ragdollSites.length && ragdollSites[0] < ragdollBefore) ragdollSites.shift();
+  while (ragdollSpawns.length && ragdollSpawns[0].x < ragdollBefore) ragdollSpawns.shift();
+  while (gapSpectators.length && gapSpectators[0].x < spectatorBefore) gapSpectators.shift();
+  ragdollPlacementTrack?.trim(Math.floor(ragdollBefore / CHUNK_LENGTH));
+  gapSpectatorTrack?.trim(Math.floor(spectatorBefore / CHUNK_LENGTH));
+  loopTrimX = Math.max(loopTrimX, loopBefore);
+  rampTrimX = Math.max(rampTrimX, rampBefore);
+  ragdollTrimX = Math.max(ragdollTrimX, ragdollBefore);
+  spectatorTrimX = Math.max(spectatorTrimX, spectatorBefore);
+}
+
+/** A new run no longer needs any of the previous run's generated scenery. */
+export function resetTrackCaches(): void {
+  loops.length = 0; lastLoop = undefined; loopTrimX = -Infinity;
+  ramps.length = 0; lastRamp = undefined; rampTrimX = -Infinity;
+  ragdollSites.length = 0; ragdollSpawns.length = 0;
+  lastRagdollSite = undefined; nextRagdollSiteId = 0; nextRagdollId = 0;
+  ragdollPlacementTrack = undefined; ragdollTrimX = -Infinity;
+  gapSpectators.length = 0; gapSpectatorsGeneratedThrough = -1;
+  gapSpectatorTrack = undefined; spectatorTrimX = -Infinity;
+}
+
+export function trackCacheSizes(): { loops: number; ramps: number; ragdolls: number; spectators: number } {
+  return { loops: loops.length, ramps: ramps.length, ragdolls: ragdollSpawns.length,
+    spectators: gapSpectators.length };
 }
 
 /** The same continuous curve drives the visible road and its physics collider. */

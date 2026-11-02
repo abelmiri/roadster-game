@@ -160,6 +160,7 @@ export class GameVisuals {
   private earth!: THREE.Mesh;
   private cameraX = 4;
   private cameraY = 2.3;
+  private cameraResetPending = false;
   private elapsed = 0;
   private policeTime = 0;
   private qualityLevel = 0;
@@ -735,6 +736,9 @@ export class GameVisuals {
 
   setPaint(id: string): void { this.paint = id; this.bodyDamage.setPaint(id); }
 
+  /** Place the next run directly at its start instead of streaming the return trip. */
+  resetCameraForRun(): void { this.cameraResetPending = true; }
+
   setVehicle(id: CarModelId): void {
     if (id === this.vehicle) return;
     this.bodyDamage.dispose();
@@ -833,8 +837,14 @@ export class GameVisuals {
     targetY += (focus.y - targetY) * amount;
     const cameraDelta = drivingDelta + Math.max(0, wallDelta - drivingDelta) * amount;
     const tracking = 1 - Math.exp(-cameraDelta * (4.2 + amount * 10));
-    this.cameraX += (targetX - this.cameraX) * tracking;
-    this.cameraY += (targetY - this.cameraY) * tracking;
+    if (this.cameraResetPending) {
+      this.cameraX = targetX;
+      this.cameraY = targetY;
+      this.cameraResetPending = false;
+    } else {
+      this.cameraX += (targetX - this.cameraX) * tracking;
+      this.cameraY += (targetY - this.cameraY) * tracking;
+    }
     this.camera.position.set(this.cameraX, this.cameraY, 36);
     const viewLeft = this.cameraX + this.camera.left;
     const viewRight = this.cameraX + this.camera.right;

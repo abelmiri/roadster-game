@@ -1,6 +1,6 @@
 import RAPIER from '@dimforge/rapier2d-compat';
 import type { Collider, EventQueue, RigidBody, World } from '@dimforge/rapier2d-compat';
-import { CHUNK_LENGTH, START_APRON_X, BOX_UNLOCK_DISTANCE, TrackGenerator, roadHeight, roadSlope, sampleRoad, loopsBetween, loopGeometry, rampAt, ragdollsBetween, gapSpectatorsBetween, RAMP_BOOSTER_LENGTH, hash, type LoopSpec, type HazardSpec, type TrackChunk } from './track';
+import { CHUNK_LENGTH, START_APRON_X, BOX_UNLOCK_DISTANCE, TrackGenerator, roadHeight, roadSlope, sampleRoad, loopsBetween, loopGeometry, rampAt, ragdollsBetween, gapSpectatorsBetween, trimTrackCaches, RAMP_BOOSTER_LENGTH, hash, type LoopSpec, type HazardSpec, type TrackChunk } from './track';
 import { CAR_AXLE_Y, CAR_BODY_CLEARANCE, CAR_WHEEL_OFFSET, CAR_WHEEL_RADIUS, sprungBodyPose } from './vehicle';
 import { VehicleSuspension } from './suspension';
 import { WheelContactPhysics, ROAD_GRAVITY, type ContactBody } from './wheelContact';
@@ -457,6 +457,7 @@ export class GamePhysics {
       this.hazardViewTime = -1;
     }
     this.generator.trim(first);
+    trimTrackCaches(first * CHUNK_LENGTH);
   }
 
   private syncRagdolls(x: number): void {

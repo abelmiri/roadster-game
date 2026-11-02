@@ -14,7 +14,7 @@ import { ALL_CAR_PAINTS, CAR_PAINT_PRICE } from './game/carPaint';
 import type { BoxReward } from './game/randomBox';
 import { MISSIONS, missionSpec, type MissionSpec } from './game/missions';
 import { purchaseQuote, confirmPurchase, purchaseWeaponStats, purchaseCarStats, type PurchaseIntent, type PurchaseQuote } from './game/purchases';
-import { loopsBetween } from './game/track';
+import { loopsBetween, resetTrackCaches } from './game/track';
 import { ImpactPause, IMPACT_DAMAGE, IMPACT_PAUSE_SECONDS, ExplosionSlowMotion, RAGDOLL_SLOWDOWN_SECONDS, RAGDOLL_RECOVERY_SECONDS, RAGDOLL_MIN_TIME_SCALE, RESTART_DELAY_SECONDS, WRECK_TIME_SCALE } from './game/damage';
 import { WeaponLoadout, WEAPONS, MAX_WEAPON_UPGRADE, weaponSpec, weaponUpgradeCost, type AimDirection } from './game/weapons';
 import { weaponIcon } from './game/weaponIcon';
@@ -1259,9 +1259,11 @@ async function start(): Promise<void> {
     restartAvailableAt = 0;
     primaryButton.disabled = false;
     physics.dispose();
+    resetTrackCaches();
     physics = new GamePhysics(7, { id: loadout.selected, xp: experience.total, upgrades: player.weaponUpgrades,
       ownedWeapons: WEAPONS.filter(spec => player.ownsWeapon(spec.id)).map(spec => spec.id),
       carUpgrades: player.carUpgrades, vehicle: player.selectedVehicle });
+    visuals.resetCameraForRun();
     audio.reset();
     accumulator = 0;
     holdInterpolation = false;
