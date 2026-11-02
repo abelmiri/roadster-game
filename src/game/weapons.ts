@@ -9,15 +9,16 @@ export interface WeaponSpec {
 }
 
 /** Ammo is per weapon per run; changing equipment never refills it. */
+const RANGE_INCREASE = 1.15;
 export const WEAPONS: readonly WeaponSpec[] = [
-  { id: 'machine-gun', name: 'MACHINE GUN', power: 1, xp: 0, price: 0, ammo: 80, interval: .18, turnSeconds: .55, damage: 1, speed: 62, range: 38, radius: .07, splash: 0, barrels: 1, muzzle: 1.5, color: '#ffe2a1' },
-  { id: 'twin-gun', name: 'TWIN GUN', power: 2, xp: 200, price: 1000, ammo: 100, interval: .23, turnSeconds: .60, damage: 1, speed: 66, range: 40, radius: .07, splash: 0, barrels: 2, muzzle: 1.5, color: '#ffe2a1' },
-  { id: 'gatling-gun', name: 'GATLING GUN', power: 3, xp: 500, price: 2000, ammo: 150, interval: .065, turnSeconds: .75, damage: 1, speed: 72, range: 40, radius: .07, splash: 0, barrels: 1, muzzle: 1.6, color: '#ffd16b' },
-  { id: 'cannon', name: 'CANNON', power: 4, xp: 900, price: 3000, ammo: 16, interval: .75, turnSeconds: .85, damage: 5, speed: 52, range: 42, radius: .14, splash: 1.3, barrels: 1, muzzle: 1.5, color: '#ffbd6b' },
-  { id: 'rocket-launcher', name: 'ROCKET LAUNCHER', power: 5, xp: 1400, price: 4000, ammo: 12, interval: .70, turnSeconds: .95, damage: 6, speed: 36, range: 44, radius: .16, splash: 2.3, barrels: 1, muzzle: 1.05, color: '#ff8d68' },
-  { id: 'missile-launcher', name: 'MISSILE LAUNCHER', power: 5, xp: 2000, price: 5000, ammo: 10, interval: .85, turnSeconds: .80, damage: 7, speed: 34, range: 48, radius: .16, splash: 1.5, barrels: 1, muzzle: 1.25, color: '#ffb395' },
-  { id: 'laser-gun', name: 'LASER GUN', power: 6, xp: 2800, price: 6000, ammo: 50, interval: .15, turnSeconds: .65, damage: 2, speed: 0, range: 44, radius: .10, splash: 0, barrels: 1, muzzle: 1.3, color: '#66f8ee' },
-  { id: 'plasma-cannon', name: 'PLASMA CANNON', power: 6, xp: 3800, price: 7000, ammo: 18, interval: .42, turnSeconds: .90, damage: 10, speed: 44, range: 46, radius: .28, splash: 2.8, barrels: 1, muzzle: 1.6, color: '#e98bff' },
+  { id: 'machine-gun', name: 'MACHINE GUN', power: 1, xp: 0, price: 0, ammo: 80, interval: .18, turnSeconds: .55, damage: 1, speed: 62, range: 43.7 * RANGE_INCREASE, radius: .07, splash: 0, barrels: 1, muzzle: 1.5, color: '#ffe2a1' },
+  { id: 'twin-gun', name: 'TWIN GUN', power: 2, xp: 200, price: 1000, ammo: 100, interval: .23, turnSeconds: .60, damage: 1, speed: 66, range: 46 * RANGE_INCREASE, radius: .07, splash: 0, barrels: 2, muzzle: 1.5, color: '#ffe2a1' },
+  { id: 'gatling-gun', name: 'GATLING GUN', power: 3, xp: 500, price: 2000, ammo: 150, interval: .065, turnSeconds: .75, damage: 1, speed: 72, range: 46 * RANGE_INCREASE, radius: .07, splash: 0, barrels: 1, muzzle: 1.6, color: '#ffd16b' },
+  { id: 'cannon', name: 'CANNON', power: 4, xp: 900, price: 3000, ammo: 16, interval: .75, turnSeconds: .85, damage: 5, speed: 52, range: 48.3 * RANGE_INCREASE, radius: .14, splash: 1.3, barrels: 1, muzzle: 1.5, color: '#ffbd6b' },
+  { id: 'rocket-launcher', name: 'ROCKET LAUNCHER', power: 5, xp: 1400, price: 4000, ammo: 12, interval: .70, turnSeconds: .95, damage: 6, speed: 36, range: 50.6 * RANGE_INCREASE, radius: .16, splash: 2.3, barrels: 1, muzzle: 1.05, color: '#ff8d68' },
+  { id: 'missile-launcher', name: 'MISSILE LAUNCHER', power: 5, xp: 2000, price: 5000, ammo: 10, interval: .85, turnSeconds: .80, damage: 7, speed: 34, range: 55.2 * RANGE_INCREASE, radius: .16, splash: 1.5, barrels: 1, muzzle: 1.25, color: '#ffb395' },
+  { id: 'laser-gun', name: 'LASER GUN', power: 6, xp: 2800, price: 6000, ammo: 50, interval: .15, turnSeconds: .65, damage: 2, speed: 0, range: 50.6 * RANGE_INCREASE, radius: .10, splash: 0, barrels: 1, muzzle: 1.3, color: '#66f8ee' },
+  { id: 'plasma-cannon', name: 'PLASMA CANNON', power: 6, xp: 3800, price: 7000, ammo: 18, interval: .42, turnSeconds: .90, damage: 10, speed: 44, range: 52.9 * RANGE_INCREASE, radius: .28, splash: 2.8, barrels: 1, muzzle: 1.6, color: '#e98bff' },
 ];
 
 export const MAX_WEAPON_UPGRADE = 5;
@@ -63,7 +64,7 @@ export class WeaponLoadout {
   private canSelect(id: string, xp: number): boolean { return canEquip(id, xp) && this.ownsWeapon(id); }
 }
 
-export interface CombatTarget { id: string; kind: 'hazard' | 'police' | 'box' | 'ragdoll'; x: number; y: number; radius: number; health: number }
+export interface CombatTarget { id: string; kind: 'hazard' | 'police' | 'box' | 'ragdoll'; x: number; y: number; radius: number; health: number; vx?: number; vy?: number }
 export interface WeaponPose { x: number; y: number; angle: number; vx: number; vy: number }
 export interface Projectile {
   id: number; weapon: WeaponId; upgradeLevel: number; x: number; y: number; previousX: number; previousY: number;
@@ -98,6 +99,20 @@ function intersection(x: number, y: number, dx: number, dy: number, target: Comb
   if (d < 0) return null;
   const t = (-b - Math.sqrt(d)) / a;
   return t >= 0 && t <= 1 ? t : null;
+}
+
+/** Earliest positive time for a projectile to meet a moving target. */
+function interceptTime(dx: number, dy: number, vx: number, vy: number, speed: number): number | null {
+  const a = vx * vx + vy * vy - speed * speed;
+  const b = 2 * (dx * vx + dy * vy);
+  const c = dx * dx + dy * dy;
+  if (Math.abs(a) < 1e-9) return b < 0 ? -c / b : null;
+  const discriminant = b * b - 4 * a * c;
+  if (discriminant < 0) return null;
+  const root = Math.sqrt(discriminant);
+  const first = (-b - root) / (2 * a);
+  const second = (-b + root) / (2 * a);
+  return first > 0 && second > 0 ? Math.min(first, second) : first > 0 ? first : second > 0 ? second : null;
 }
 
 /** Fixed-step combat has no rigid bodies, so recoil cannot destabilize driving. */
@@ -167,6 +182,10 @@ export class VehicleWeapon {
     // A small automatic elevation correction makes roof-mounted shots useful
     // against road barriers and drones, while the player controls front/back.
     const c = Math.cos(pose.angle); const s = Math.sin(pose.angle);
+    const forwardSpeed = pose.vx * c + pose.vy * s;
+    // Keep rear-facing projectiles travelling backward even when the car is
+    // faster than the weapon's nominal muzzle speed.
+    const launchSpeed = spec.speed > 0 ? spec.speed + Math.max(0, -forwardSpeed * this.direction) : 0;
     const mountHeight = WEAPON_MOUNT.y + WEAPON_MOUNT.pivotY + this.mountLift;
     const mountX = pose.x + WEAPON_MOUNT.x * c - mountHeight * s;
     const mountY = pose.y + WEAPON_MOUNT.x * s + mountHeight * c;
@@ -176,21 +195,38 @@ export class VehicleWeapon {
       const dx = target.x - mountX; const dy = target.y - mountY;
       const forward = (dx * c + dy * s) * this.direction;
       const elevationRange = target.kind === 'box' ? .9 : .5;
-      const availableRange = spec.range + Math.max(0, pose.vx * this.direction) * .6;
+      const availableRange = spec.range + Math.max(0, forwardSpeed * this.direction) * .6;
       return target.health > 0 && forward > 2 && forward < availableRange && Math.abs(-dx * s + dy * c) < forward * elevationRange + .5;
     }).sort((a, b) => Math.hypot(a.x - mountX, a.y - mountY) - Math.hypot(b.x - mountX, b.y - mountY))
       .find(target => this.sweep(sight, target.x - mountX, target.y - mountY, targets, floorHeight).target?.id === target.id);
     let aimX = aimed ? aimed.x - mountX : 0;
     let aimY = aimed ? aimed.y - mountY : 0;
-    // Floating boxes remain reachable on downhill waves: compensate for the
-    // car's inherited projectile velocity and allow a steeper barrel elevation.
-    if (aimed?.kind === 'box' && spec.speed > 0) {
-      const flight = Math.hypot(aimX, aimY) / (spec.speed + Math.max(0, pose.vx * this.direction));
-      aimX -= pose.vx * flight; aimY -= pose.vy * flight;
+    // Every physical shot inherits the car's velocity. Solve in the car's
+    // moving frame, including the target's motion, instead of aiming at its
+    // current position. The laser is instantaneous and needs no lead.
+    if (aimed && spec.speed > 0) {
+      const relativeVx = (aimed.vx ?? 0) - pose.vx;
+      const relativeVy = (aimed.vy ?? 0) - pose.vy;
+      const firstFlight = interceptTime(aimX, aimY, relativeVx, relativeVy, launchSpeed);
+      if (firstFlight !== null) {
+        // Shots leave from the muzzle, not the turret pivot. One correction
+        // removes most close-range error without iterative per-frame work.
+        const firstX = aimX + relativeVx * firstFlight;
+        const firstY = aimY + relativeVy * firstFlight;
+        const length = Math.hypot(firstX, firstY);
+        const muzzleX = length > 0 ? firstX / length * spec.muzzle : 0;
+        const muzzleY = length > 0 ? firstY / length * spec.muzzle : 0;
+        const flight = interceptTime(aimX - muzzleX, aimY - muzzleY, relativeVx, relativeVy, launchSpeed) ?? firstFlight;
+        aimX += relativeVx * flight;
+        aimY += relativeVy * flight;
+      }
     }
-    const pitchLimit = aimed?.kind === 'box' ? .8 : .45;
+    const pitchLimit = aimed?.kind === 'box' || Math.abs(forwardSpeed) > 20 ? .8 : .45;
     const desiredPitch = aimed ? clamp(Math.atan2(-aimX * s + aimY * c, Math.abs(aimX * c + aimY * s)), -pitchLimit, pitchLimit) : 0;
     this.pitch += (desiredPitch - this.pitch) * (1 - Math.exp(-dt * 18));
+    if (controls.fire && aimed && Math.abs(forwardSpeed) > 20 && this.yaw === destination) {
+      this.pitch = desiredPitch;
+    }
 
     if (controls.fire && this.yaw === destination && this.cooldown <= 1e-9 && this.ammoFor(this.id) > 0 && this.projectiles.length < 64) {
       const count = Math.min(spec.barrels, this.ammoFor(this.id));
@@ -202,9 +238,9 @@ export class VehicleWeapon {
         const angle = pose.angle + (this.direction === 1 ? this.pitch : Math.PI - this.pitch) + (i - (count - 1) / 2) * .016;
         const ux = Math.cos(angle); const uy = Math.sin(angle);
         const x = mountX + ux * spec.muzzle; const y = mountY + uy * spec.muzzle;
-        const range = spec.range + Math.max(0, pose.vx * this.direction) * .6;
+        const range = spec.range + Math.max(0, forwardSpeed * this.direction) * .6;
         const shot: Projectile = { id: ++this.serial, weapon: this.id, upgradeLevel: level, x, y, previousX: x, previousY: y,
-          vx: ux * spec.speed + pose.vx, vy: uy * spec.speed + pose.vy,
+          vx: ux * launchSpeed + pose.vx, vy: uy * launchSpeed + pose.vy,
           age: 0, lifetime: this.id === 'laser-gun' ? .075 : 2.4, distance: 0, range,
           targetId: this.id === 'missile-launcher' ? aimed?.id : undefined };
         if (this.id === 'laser-gun') {
@@ -212,7 +248,7 @@ export class VehicleWeapon {
           shot.beamEndX = x + ux * range * hit.t;
           shot.beamEndY = y + uy * range * hit.t;
           if (hit.target) this.damage(hit.target, spec.damage, spec, shot.beamEndX, shot.beamEndY,
-            ux * spec.speed + pose.vx, uy * spec.speed + pose.vy, targets, onDamage, onImpact);
+            ux, uy, targets, onDamage, onImpact);
           else if (hit.t < 1) {
             this.effect(shot.beamEndX, shot.beamEndY, .2, false, spec.color);
             this.reportImpact(shot.beamEndX, shot.beamEndY, ux, uy, 'terrain', false, onImpact);

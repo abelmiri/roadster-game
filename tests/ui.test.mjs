@@ -32,7 +32,7 @@ const stubs = {
     }
   }`,
   visuals: `export class GameVisuals {setVehicle(id){globalThis.vehicle=id} setPaint(id){globalThis.paint=id} render(s,p,dt,running,frozen,wallDelta){globalThis.lastRender={dt,running,frozen,wallDelta,health:s.health}}}`,
-  audio: `export class GameAudio {muted=false;unlock(){return Promise.resolve()} toggleMuted(){return this.muted=!this.muted}
+  audio: `export class GameAudio {muted=false;unlock(){return Promise.resolve()} toggleMuted(){return this.muted=!this.muted} setBackgrounded(value){globalThis.audioBackgrounded=value}
     play(event){globalThis.sounds.push(event)} update(s,r){globalThis.audioRunning=r} suspend(){} reset(){} }`,
   rapier: 'export default {init:()=>Promise.resolve()}',
   css: '',

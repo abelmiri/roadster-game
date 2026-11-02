@@ -60,9 +60,12 @@ function box(w: number, h: number, d: number, material: THREE.Material): THREE.M
 }
 
 function disposeGroup(group: THREE.Object3D): void {
+  const geometries = new Set<THREE.BufferGeometry>();
   group.traverse((child) => {
-    if (child instanceof THREE.Mesh || child instanceof THREE.Line) child.geometry.dispose();
+    if (child instanceof THREE.InstancedMesh) child.dispose();
+    if (child instanceof THREE.Mesh || child instanceof THREE.Line) geometries.add(child.geometry);
   });
+  for (const geometry of geometries) geometry.dispose();
   group.removeFromParent();
 }
 
@@ -109,7 +112,7 @@ export class GameVisuals {
   private readonly cyanMat = new THREE.MeshBasicMaterial({ color: '#5cebdc' });
   private readonly coralMat = new THREE.MeshBasicMaterial({ color: '#ff806d' });
   private readonly sunMat = new THREE.MeshBasicMaterial({ color: '#fff4d9', transparent: true });
-  private readonly moonMat = new THREE.MeshBasicMaterial({ color: '#cce5f6', transparent: true, opacity: 0 });
+  private readonly moonMat = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, depthWrite: false });
   private readonly starMat = new THREE.PointsMaterial({ color: '#e5f5ff', size: 0.07, transparent: true, opacity: 0, sizeAttenuation: false });
   private readonly galaxyMat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, opacity: 0.78 });
   private readonly earthMat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false });
@@ -159,8 +162,11 @@ export class GameVisuals {
   private cameraY = 2.3;
   private elapsed = 0;
   private policeTime = 0;
-  private qualityReduced = false;
-  private slowFrames = 0;
+  private qualityLevel = 0;
+  private measuredFrames = 0;
+  private measuredTime = 0;
+  private fastWindows = 0;
+  private readonly mobileGpu = window.matchMedia('(pointer: coarse)').matches;
 
   constructor(private readonly host: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
@@ -201,8 +207,48 @@ export class GameVisuals {
     const disc = new THREE.CircleGeometry(1.45, 48);
     this.sun = new THREE.Mesh(disc, this.sunMat);
     this.sun.position.z = -29;
-    this.moon = new THREE.Mesh(new THREE.CircleGeometry(0.92, 40), this.moonMat);
+    this.moon = new THREE.Mesh(new THREE.CircleGeometry(1.15, 64), this.moonMat);
     this.moon.position.z = -28;
+    this.moonMat.onBeforeCompile = shader => {
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vMoonUv;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMoonUv = position.xy / 1.15;');
+      shader.fragmentShader = shader.fragmentShader.replace('#include <common>', `#include <common>
+        varying vec2 vMoonUv;
+        float moonCrater(vec2 p, vec2 center, float radius) {
+          float d = length((p - center) / radius);
+          float basin = 1.0 - smoothstep(0.36, 0.92, d);
+          float rim = smoothstep(0.68, 0.83, d) * (1.0 - smoothstep(0.96, 1.13, d));
+          return rim * 0.15 - basin * 0.18;
+        }`);
+      shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+        {
+          vec2 p = vMoonUv;
+          float r2 = dot(p, p);
+          vec3 normal = vec3(p, sqrt(max(0.0, 1.0 - r2)));
+          float maria = 0.0;
+          maria += 0.23 * exp(-dot((p - vec2(-0.33, 0.20)) * vec2(2.1, 3.3),
+                                   (p - vec2(-0.33, 0.20)) * vec2(2.1, 3.3)));
+          maria += 0.19 * exp(-dot((p - vec2(0.19, 0.32)) * vec2(3.2, 2.5),
+                                   (p - vec2(0.19, 0.32)) * vec2(3.2, 2.5)));
+          maria += 0.16 * exp(-dot((p - vec2(0.11, -0.25)) * vec2(2.6, 3.5),
+                                   (p - vec2(0.11, -0.25)) * vec2(2.6, 3.5)));
+          float detail = sin(p.x * 27.0 + sin(p.y * 13.0) * 1.8)
+                       * sin(p.y * 23.0 - p.x * 7.0) * 0.025;
+          float craters = 0.0;
+          for (int i = 0; i < 20; i++) {
+            float seed = float(i);
+            vec2 center = vec2(sin(seed * 16.7 + 0.4), sin(seed * 39.1 + 2.1)) * 0.78;
+            float radius = 0.055 + 0.105 * fract(sin(seed * 71.3 + 4.2) * 43758.5);
+            craters += moonCrater(p, center, radius);
+          }
+          float light = 0.48 + 0.52 * max(0.0, dot(normal, normalize(vec3(-0.45, 0.48, 0.78))));
+          float tone = clamp(0.77 - maria + detail + craters, 0.34, 0.96) * light;
+          diffuseColor.rgb = vec3(tone * 0.96, tone * 0.98, tone * 1.04);
+          diffuseColor.a *= 1.0 - smoothstep(0.975, 1.0, sqrt(r2));
+        }`);
+    };
+    this.moonMat.customProgramCacheKey = () => 'roadster-earth-sky-moon-v1';
     this.backdrop.add(this.sun, this.moon);
 
     // Keep the sky in camera space so altitude and zoom cannot reveal its edges.
@@ -216,31 +262,57 @@ export class GameVisuals {
     this.backdrop.add(this.stars);
 
     const galaxyCanvas = document.createElement('canvas');
-    galaxyCanvas.width = 1024;
-    galaxyCanvas.height = 512;
+    galaxyCanvas.width = 2048;
+    galaxyCanvas.height = 1024;
     const ctx = galaxyCanvas.getContext('2d');
     if (ctx) {
-      // Layer faint, wide clouds and a brighter core into a continuous Milky Way band.
-      for (let i = 0; i < 170; i++) {
-        const x = hash(i + 2100) * galaxyCanvas.width;
-        const centerY = galaxyCanvas.height * (0.52 - 0.28 * (x / galaxyCanvas.width - 0.5));
-        const y = centerY + (hash(i + 2300) - 0.5) * 125;
-        const radius = 24 + hash(i + 2500) * 94;
+      const width = galaxyCanvas.width;
+      const height = galaxyCanvas.height;
+      const bandY = (x: number): number => {
+        const t = x / width;
+        return height * (0.72 - 0.43 * t + 0.055 * Math.sin(t * Math.PI * 2));
+      };
+      // A broad diagonal cloud bank with varied color and a dark central dust lane.
+      for (let i = 0; i < 380; i++) {
+        const x = hash(i + 2100) * width;
+        const y = bandY(x) + (hash(i + 2300) - 0.5) * 370;
+        const radius = 70 + hash(i + 2500) * 190;
         const glow = ctx.createRadialGradient(x, y, 0, x, y, radius);
-        const core = 1 - Math.abs(x / galaxyCanvas.width - 0.52);
-        const tint = i % 4 === 0 ? '142,115,178' : '110,153,203';
-        glow.addColorStop(0, `rgba(${tint},${(0.018 + core * 0.038).toFixed(3)})`);
+        const tint = i % 5 < 2 ? '79,154,193' : i % 5 === 2 ? '129,104,169' : '67,91,164';
+        glow.addColorStop(0, `rgba(${tint},${(0.025 + hash(i + 2700) * 0.055).toFixed(3)})`);
         glow.addColorStop(1, `rgba(${tint},0)`);
         ctx.fillStyle = glow;
         ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
       }
-      for (let i = 0; i < 950; i++) {
-        const x = hash(i + 2900) * galaxyCanvas.width;
-        const centerY = galaxyCanvas.height * (0.52 - 0.28 * (x / galaxyCanvas.width - 0.5));
-        const y = centerY + (hash(i + 3900) - 0.5) * 180;
-        const radius = hash(i + 4900) > 0.985 ? 1.5 : 0.6;
-        ctx.fillStyle = `rgba(210,225,255,${(0.06 + hash(i + 5900) * 0.3).toFixed(3)})`;
+      for (let i = 0; i < 90; i++) {
+        const x = hash(i + 6100) * width;
+        const y = bandY(x) + (hash(i + 6200) - 0.5) * 105;
+        const radius = 30 + hash(i + 6300) * 100;
+        const lane = ctx.createRadialGradient(x, y, 0, x, y, radius);
+        lane.addColorStop(0, 'rgba(2,5,16,0.12)');
+        lane.addColorStop(1, 'rgba(2,5,16,0)');
+        ctx.fillStyle = lane;
+        ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+      }
+      for (let i = 0; i < 2100; i++) {
+        const x = hash(i + 2900) * width;
+        const inBand = hash(i + 3100) < 0.72;
+        const y = inBand ? bandY(x) + (hash(i + 3900) - 0.5) * 350 : hash(i + 3900) * height;
+        const radius = hash(i + 4900) > 0.97 ? 2.2 : 0.7 + hash(i + 5100) * 0.8;
+        ctx.fillStyle = `rgba(220,232,255,${(0.17 + hash(i + 5900) * 0.6).toFixed(3)})`;
         ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
+      }
+      for (let i = 0; i < 22; i++) {
+        const x = hash(i + 7100) * width;
+        const y = hash(i + 7200) * height;
+        const halo = ctx.createRadialGradient(x, y, 0, x, y, 20);
+        halo.addColorStop(0, 'rgba(215,236,255,0.55)');
+        halo.addColorStop(0.15, 'rgba(173,209,255,0.22)');
+        halo.addColorStop(1, 'rgba(173,209,255,0)');
+        ctx.fillStyle = halo;
+        ctx.fillRect(x - 20, y - 20, 40, 40);
+        ctx.fillStyle = 'rgba(240,248,255,0.85)';
+        ctx.beginPath(); ctx.arc(x, y, 1.8, 0, Math.PI * 2); ctx.fill();
       }
     }
     const galaxyTexture = new THREE.CanvasTexture(galaxyCanvas);
@@ -269,18 +341,11 @@ export class GameVisuals {
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvEarthUv = position.xy / 4.6;');
       shader.fragmentShader = shader.fragmentShader.replace('#include <common>', `#include <common>
         varying vec2 vEarthUv;
-        float earthHash(vec2 p) {
-          vec3 q = fract(vec3(p.xyx) * 0.1031);
-          q += dot(q, q.yzx + 33.33);
-          return fract((q.x + q.y) * q.z);
-        }
-        float earthNoise(vec2 p) {
-          vec2 cell = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
-          return mix(mix(earthHash(cell), earthHash(cell + vec2(1.0, 0.0)), f.x),
-            mix(earthHash(cell + vec2(0.0, 1.0)), earthHash(cell + vec2(1.0)), f.x), f.y);
-        }
-        float earthFbm(vec2 p) {
-          return earthNoise(p) * 0.5 + earthNoise(p * 2.07) * 0.3 + earthNoise(p * 4.3) * 0.2;
+        float earthPattern(vec2 p) {
+          vec2 q = p + 0.18 * vec2(sin(p.y * 2.7 + p.x), cos(p.x * 2.3 - p.y));
+          return 0.5 + 0.20 * sin(q.x * 1.9 + sin(q.y * 2.8) * 1.2)
+                     + 0.14 * sin(q.y * 2.4 - q.x * 1.1)
+                     + 0.08 * sin(dot(q, vec2(3.7, 1.6)) + sin(q.x * 2.1));
         }`);
       shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
         {
@@ -291,21 +356,23 @@ export class GameVisuals {
           vec3 land = vec3(0.22, 0.42, 0.2);
           vec3 desert = vec3(0.56, 0.47, 0.28);
           vec3 ice = vec3(0.92, 0.95, 0.98);
-          float continents = earthFbm(p * 2.6 + 4.0);
-          vec3 surface = mix(ocean, shallow, smoothstep(0.42, 0.5, continents));
-          surface = mix(surface, land, smoothstep(0.5, 0.58, continents));
-          surface = mix(surface, desert, smoothstep(0.62, 0.72, continents) * step(0.5, continents));
+          float continents = earthPattern(p * 2.4 + vec2(1.3, -0.7));
+          vec3 surface = mix(ocean, shallow, smoothstep(0.40, 0.49, continents));
+          surface = mix(surface, land, smoothstep(0.51, 0.57, continents));
+          surface = mix(surface, desert, smoothstep(0.69, 0.77, continents));
           surface = mix(surface, ice, smoothstep(0.82, 0.9, abs(p.y)));
-          float clouds = smoothstep(0.58, 0.82, earthFbm(p * 3.4 - 7.0 + vec2(continents * 0.6)));
-          surface = mix(surface, vec3(1.0), clouds * 0.55);
-          float terminator = smoothstep(-0.15, 0.85, p.x - p.y * 0.3);
-          surface *= mix(0.22, 1.08, terminator);
-          float limb = 1.0 - smoothstep(0.85, 1.0, r);
+          float cloudBands = sin(p.y * 18.0 + sin(p.x * 8.0) * 1.2 + p.x * 5.0);
+          float clouds = smoothstep(0.44, 0.87, cloudBands) * (0.55 + 0.45 * sin(p.x * 11.0 + p.y * 3.0));
+          surface = mix(surface, vec3(0.88, 0.95, 1.0), clouds * 0.38);
+          float terminator = smoothstep(-0.68, 0.38, p.x - p.y * 0.24);
+          surface *= mix(0.13, 1.16, terminator);
+          surface += vec3(0.08, 0.21, 0.36) * smoothstep(0.72, 0.98, r);
+          float limb = 1.0 - smoothstep(0.96, 1.0, r);
           diffuseColor.rgb = surface;
           diffuseColor.a = limb;
         }`);
     };
-    this.earthMat.customProgramCacheKey = () => 'roadster-earth-globe-v1';
+    this.earthMat.customProgramCacheKey = () => 'roadster-earth-globe-v2';
     this.backdrop.add(this.earth);
     this.earth.visible = false;
   }
@@ -387,13 +454,24 @@ export class GameVisuals {
     const edge = new THREE.Line(new THREE.BufferGeometry().setFromPoints(linePoints), this.edgeMat);
     group.add(edge);
 
-    for (let x = Math.ceil(start / 3.5) * 3.5; x < end - 0.6; x += 3.5) {
-      const glow = box(1.5, 0.11, 0.1, this.stripeGlowMat);
-      glow.position.set(x, roadHeight(x) + 0.16, 0.72);
-      group.add(glow);
-      const marker = box(1.0, 0.045, 0.11, this.stripeMat);
-      marker.position.set(x, roadHeight(x) + 0.16, 0.74);
-      group.add(marker);
+    const stripes: { x: number; y: number }[] = [];
+    for (let x = Math.ceil(start / 3.5) * 3.5; x < end - 0.6; x += 3.5)
+      stripes.push({ x, y: roadHeight(x) + 0.16 });
+    if (stripes.length) {
+      const transform = new THREE.Object3D();
+      for (const [width, height, depth, z, material] of [
+        [1.5, 0.11, 0.1, 0.72, this.stripeGlowMat],
+        [1.0, 0.045, 0.11, 0.74, this.stripeMat],
+      ] as const) {
+        const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(width, height, depth), material, stripes.length);
+        for (let i = 0; i < stripes.length; i++) {
+          transform.position.set(stripes[i].x, stripes[i].y, z);
+          transform.updateMatrix();
+          mesh.setMatrixAt(i, transform.matrix);
+        }
+        mesh.computeBoundingSphere();
+        group.add(mesh);
+      }
     }
   }
 
@@ -450,18 +528,37 @@ export class GameVisuals {
       }
     }
 
+    const postGeometry = new THREE.BoxGeometry(1, 1, 1);
+    const postParts = new THREE.InstancedMesh(postGeometry, this.poleMat, 6);
+    const lamps = new THREE.InstancedMesh(postGeometry, this.lampMat, 3);
+    postParts.count = 0;
+    lamps.count = 0;
+    const postTransform = new THREE.Object3D();
     for (let i = 0; i < 3; i++) {
       const x = spec.start + 5 + i * 9 + hash(spec.index * 31 + i) * 2;
       if (spec.gap && x > spec.gap.start - 1 && x < spec.gap.end + 1) continue;
-      const pole = box(0.08, 3.6, 0.08, this.poleMat);
-      pole.position.set(x, roadHeight(x) + 1.8, -2.1);
-      group.add(pole);
-      const arm = box(0.86, 0.07, 0.07, this.poleMat);
-      arm.position.set(x + 0.40, roadHeight(x) + 3.55, -2.1);
-      group.add(arm);
-      const lamp = box(0.36, 0.08, 0.23, this.lampMat);
-      lamp.position.set(x + 0.78, roadHeight(x) + 3.49, -2.0);
-      group.add(lamp);
+      const y = roadHeight(x);
+      postTransform.position.set(x, y + 1.8, -2.1);
+      postTransform.scale.set(0.08, 3.6, 0.08);
+      postTransform.updateMatrix();
+      postParts.setMatrixAt(postParts.count++, postTransform.matrix);
+      postTransform.position.set(x + 0.40, y + 3.55, -2.1);
+      postTransform.scale.set(0.86, 0.07, 0.07);
+      postTransform.updateMatrix();
+      postParts.setMatrixAt(postParts.count++, postTransform.matrix);
+      postTransform.position.set(x + 0.78, y + 3.49, -2.0);
+      postTransform.scale.set(0.36, 0.08, 0.23);
+      postTransform.updateMatrix();
+      lamps.setMatrixAt(lamps.count++, postTransform.matrix);
+    }
+    if (postParts.count) {
+      postParts.computeBoundingSphere();
+      lamps.computeBoundingSphere();
+      group.add(postParts, lamps);
+    } else {
+      postParts.dispose();
+      lamps.dispose();
+      postGeometry.dispose();
     }
 
     const hazards = new Map<string, THREE.Group>();
@@ -511,12 +608,18 @@ export class GameVisuals {
       const stripe = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.025, 5, 120), this.cyanMat);
       stripe.position.z = 0.14; group.add(stripe);
     }
+    const markerGeometry = new THREE.BoxGeometry(0.14, 0.045, 0.025);
+    const markers = new THREE.InstancedMesh(markerGeometry, this.stripeMat, 16);
+    const markerTransform = new THREE.Object3D();
     for (let i = 0; i < 16; i++) {
       const a = i * Math.PI / 8;
-      const marker = box(0.14, 0.045, 0.025, this.stripeMat);
-      marker.position.set(Math.cos(a) * (spec.radius + 0.19), Math.sin(a) * (spec.radius + 0.19), 0.16);
-      marker.rotation.z = a + Math.PI / 2; group.add(marker);
+      markerTransform.position.set(Math.cos(a) * (spec.radius + 0.19), Math.sin(a) * (spec.radius + 0.19), 0.16);
+      markerTransform.rotation.z = a + Math.PI / 2;
+      markerTransform.updateMatrix();
+      markers.setMatrixAt(i, markerTransform.matrix);
     }
+    markers.computeBoundingSphere();
+    group.add(markers);
     group.position.set(center.x, center.y, 0);
     this.worldGroup.add(group);
     return group;
@@ -750,11 +853,29 @@ export class GameVisuals {
       slowing ? this.slowMotion.target : null);
     if (slowing) this.slowMotion.render(this.renderer, this.camera, snapshot.crashPosition ?? snapshot.car, this.elapsed);
 
-    if (running && wallDelta > 1 / 50) this.slowFrames++;
-    else this.slowFrames = Math.max(0, this.slowFrames - 1);
-    if (!this.qualityReduced && this.slowFrames > 80) {
-      this.qualityReduced = true;
-      this.resize();
+    if (running && wallDelta > 0 && wallDelta < 0.25) {
+      this.measuredFrames++;
+      this.measuredTime += wallDelta;
+      if (this.measuredFrames >= 100) {
+        const fps = this.measuredFrames / this.measuredTime;
+        this.measuredFrames = 0;
+        this.measuredTime = 0;
+        if (fps < 45 && this.qualityLevel < 2) {
+          this.qualityLevel++;
+          this.fastWindows = 0;
+          this.resize();
+        } else if (fps >= 48.5 && this.qualityLevel > 0) {
+          if (++this.fastWindows >= 5) {
+            this.qualityLevel--;
+            this.fastWindows = 0;
+            this.resize();
+          }
+        } else this.fastWindows = 0;
+      }
+    } else {
+      this.measuredFrames = 0;
+      this.measuredTime = 0;
+      this.fastWindows = 0;
     }
   }
 
@@ -762,9 +883,10 @@ export class GameVisuals {
     const width = this.host.clientWidth || window.innerWidth;
     const height = this.host.clientHeight || window.innerHeight;
     this.aspect = width / height;
-    const pixelBudget = this.qualityReduced ? 1_800_000 : 3_000_000;
+    const pixelBudget = (this.mobileGpu ? [1_200_000, 900_000, 700_000] :
+      [2_400_000, 1_600_000, 1_100_000])[this.qualityLevel];
     this.renderer.setPixelRatio(Math.max(0.5, Math.min(window.devicePixelRatio || 1,
-      this.qualityReduced ? 1 : 1.5, Math.sqrt(pixelBudget / (width * height)))));
+      this.mobileGpu ? 1.25 : 1.5, Math.sqrt(pixelBudget / (width * height)))));
     this.renderer.setSize(width, height, false);
     this.blur.resize(this.renderer);
     this.slowMotion.resize(this.renderer);
@@ -801,6 +923,8 @@ export class GameVisuals {
     this.slowMotion.dispose();
     this.groundMat.dispose();
     this.moonGroundMat.dispose();
+    this.moon.geometry.dispose();
+    this.moonMat.dispose();
     this.earthMat.dispose();
     this.galaxyMat.map?.dispose();
     this.galaxyMat.dispose();

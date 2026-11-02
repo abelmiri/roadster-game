@@ -134,6 +134,12 @@ interface RoadSupport { y: number; angle: number; contacts: number }
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 const angleDelta = (from: number, to: number): number => Math.atan2(Math.sin(to - from), Math.cos(to - from));
+function readBodyPose(body: RigidBody, result: BodyPose): void {
+  const position = body.translation();
+  result.x = position.x;
+  result.y = position.y;
+  result.angle = body.rotation();
+}
 const BOX_MAX_HEALTH = 1;
 const DEBRIS_SHARD_CAPACITY = 96;
 
@@ -294,11 +300,12 @@ export class GamePhysics {
     this.previous = this.current.map((pose) => ({ ...pose })) as [BodyPose, BodyPose, BodyPose];
   }
 
-  private readPoses(): [BodyPose, BodyPose, BodyPose] {
-    return [this.car, ...this.wheels].map((body) => {
-      const position = body.translation();
-      return { x: position.x, y: position.y, angle: body.rotation() };
-    }) as [BodyPose, BodyPose, BodyPose];
+  private readPoses(target?: [BodyPose, BodyPose, BodyPose]): [BodyPose, BodyPose, BodyPose] {
+    if (!target) target = [{ x: 0, y: 0, angle: 0 }, { x: 0, y: 0, angle: 0 }, { x: 0, y: 0, angle: 0 }];
+    readBodyPose(this.car, target[0]);
+    readBodyPose(this.wheels[0], target[1]);
+    readBodyPose(this.wheels[1], target[2]);
+    return target;
   }
 
   /** Reference pose for spawning, police and magnetic-loop joins. Ordinary
@@ -309,19 +316,28 @@ export class GamePhysics {
     let contacts = 0;
     let y = 0;
     for (let iteration = 0; iteration < 3; iteration++) {
-      const points = [-CAR_WHEEL_OFFSET, CAR_WHEEL_OFFSET].map((offset) => {
-        const wheelX = x + offset * Math.cos(angle) - CAR_AXLE_Y * Math.sin(angle);
-        return { offset, x: wheelX, h: roadHeight(wheelX), valid: this.generator.hasRoad(wheelX) };
-      }).filter((point) => point.valid);
-      contacts = points.length;
+      const sin = Math.sin(angle);
+      const cos = Math.cos(angle);
+      const leftX = x - CAR_WHEEL_OFFSET * cos - CAR_AXLE_Y * sin;
+      const rightX = x + CAR_WHEEL_OFFSET * cos - CAR_AXLE_Y * sin;
+      const leftHeight = roadHeight(leftX);
+      const rightHeight = roadHeight(rightX);
+      const leftValid = this.generator.hasRoad(leftX);
+      const rightValid = this.generator.hasRoad(rightX);
+      contacts = Number(leftValid) + Number(rightValid);
       if (!contacts) return null;
       if (contacts === 2) {
-        angle = Math.atan2(points[1].h - points[0].h, points[1].x - points[0].x) + angleOffset;
+        angle = Math.atan2(rightHeight - leftHeight, rightX - leftX) + angleOffset;
       } else {
-        angle = Math.atan(roadSlope(points[0].x)) + angleOffset;
+        angle = Math.atan(roadSlope(leftValid ? leftX : rightX)) + angleOffset;
       }
-      y = Math.max(...points.map((point) => point.h + CAR_WHEEL_RADIUS * Math.hypot(1, roadSlope(point.x)) -
-        point.offset * Math.sin(angle) - CAR_AXLE_Y * Math.cos(angle)));
+      const bodySin = Math.sin(angle);
+      const bodyCos = Math.cos(angle);
+      const leftY = leftValid ? leftHeight + CAR_WHEEL_RADIUS * Math.hypot(1, roadSlope(leftX)) +
+        CAR_WHEEL_OFFSET * bodySin - CAR_AXLE_Y * bodyCos : -Infinity;
+      const rightY = rightValid ? rightHeight + CAR_WHEEL_RADIUS * Math.hypot(1, roadSlope(rightX)) -
+        CAR_WHEEL_OFFSET * bodySin - CAR_AXLE_Y * bodyCos : -Infinity;
+      y = Math.max(leftY, rightY);
     }
     return { y, angle, contacts };
   }
@@ -411,9 +427,14 @@ export class GamePhysics {
   /** Include the actual camera view, even when a high jump widens it far beyond the car. */
   setViewBounds(left: number, right: number): void {
     if (!Number.isFinite(left) || !Number.isFinite(right) || right < left) return;
-    this.viewBounds = { left, right };
-    const parts = [this.car, ...this.wheels].map(part => part.translation().x);
-    this.ensureChunks(Math.max(...parts), Math.min(...parts));
+    if (this.viewBounds) {
+      this.viewBounds.left = left;
+      this.viewBounds.right = right;
+    } else this.viewBounds = { left, right };
+    const carX = this.car.translation().x;
+    const frontX = this.wheels[0].translation().x;
+    const rearX = this.wheels[1].translation().x;
+    this.ensureChunks(Math.max(carX, frontX, rearX), Math.min(carX, frontX, rearX));
   }
 
   private ensureChunks(x: number, rearX = x): void {
@@ -683,7 +704,7 @@ export class GamePhysics {
       this.syncWheels();
     }
     this.updateWeapon(controls);
-    this.current = this.readPoses();
+    this.readPoses(this.current);
     return true;
   }
 
@@ -721,22 +742,33 @@ export class GamePhysics {
     for (const chunk of this.chunks.values()) for (const hazard of chunk.hazards) {
       if (hazard.health <= 0) continue;
       active.set(hazard.spec.id, hazard);
-      targets.push({ id: hazard.spec.id, kind: 'hazard', x: hazard.x, y: hazard.y, radius: .65, health: hazard.health });
+      const phase = hazard.spec.phase;
+      const drone = hazard.spec.kind === 'drone';
+      const pulsePhase = this.time * 2.9 + phase;
+      targets.push({ id: hazard.spec.id, kind: 'hazard', x: hazard.x, y: hazard.y, radius: .65, health: hazard.health,
+        vx: drone ? Math.cos(this.time * .9 + phase) * .58 * .9 : 0,
+        vy: drone ? Math.cos(this.time * 2.1 + phase) * .35 * 2.1
+          : hazard.spec.kind === 'pulse' && Math.sin(pulsePhase) > 0 ? Math.cos(pulsePhase) * .50 * 2.9 : 0 });
     }
     const boxes = new Map(this.randomBoxStates.map(box => [box.id, box]));
     for (const box of boxes.values()) targets.push({ id: box.id, kind: 'box', x: box.x, y: box.y,
-      radius: .58, health: this.boxHealth.get(box.id) ?? BOX_MAX_HEALTH });
+      radius: .58, health: this.boxHealth.get(box.id) ?? BOX_MAX_HEALTH,
+      vy: box.airborne ? Math.cos(this.time * 1.5 + box.phase) * .045 * 1.5 : 0 });
     for (const actor of this.ragdolls.values()) {
       for (const part of RAGDOLL_PARTS) {
-        const position = actor.bodies[part].translation();
+        const body = actor.bodies[part];
+        const position = body.translation();
+        const velocity = actor.hit ? body.linvel() : null;
         const radius = part === 'torso' ? .56 : part === 'head' ? .34 : .3;
         targets.push({ id: `ragdoll-${actor.spec.id}:${part}`, kind: 'ragdoll',
-          x: position.x, y: position.y, radius, health: 1 });
+          x: position.x, y: position.y, vx: velocity?.x ?? 0, vy: velocity?.y ?? 0, radius, health: 1 });
       }
     }
     if (!this.pursuit.disabled && this.pursuit.visibility > .5) {
+      const policeVx = clamp((this.pursuit.x - this.previousPoliceX) / FIXED_STEP, -100, 100);
       targets.push({ id: 'police', kind: 'police', x: this.pursuit.x,
         y: (this.roadSupport(this.pursuit.x)?.y ?? roadHeight(this.pursuit.x) + CAR_BODY_CLEARANCE) + .20,
+        vx: policeVx, vy: roadSlope(this.pursuit.x) * policeVx,
         radius: .95, health: this.policeHealth });
     }
     const p = this.car.translation();
@@ -958,7 +990,9 @@ export class GamePhysics {
     this.previousPoliceX = this.currentPoliceX;
     this.previousSuspensionOffset = this.suspension.offset;
     this.previousSuspensionPitch = this.suspension.pitch;
-    this.previous = this.current.map((pose) => ({ ...pose })) as [BodyPose, BodyPose, BodyPose];
+    const nextPoses = this.previous;
+    this.previous = this.current;
+    this.current = nextPoses;
     this.time += FIXED_STEP;
     this.ageSparks();
     for (const [id, event] of this.healthHitEvents) {
@@ -985,7 +1019,7 @@ export class GamePhysics {
       this.runMissions.stats.roofHits = 1;
       this.crashed = true;
       this.beginWreck();
-      this.current = this.readPoses();
+      this.readPoses(this.current);
       return;
     }
     if (!this.roadContact.hasContact(before)) this.isGrounded = false;
@@ -1091,7 +1125,7 @@ export class GamePhysics {
       this.airborneFlips = 0;
     }
     if (this.crashed) this.beginWreck();
-    this.current = this.readPoses();
+    this.readPoses(this.current);
   }
 
   get impactSerial(): number { return this.damage.impactSerial; }
@@ -1144,13 +1178,17 @@ export class GamePhysics {
   stepWreck(): void {
     if (!this.crashed) return;
     this.beginWreck();
-    this.previous = this.current.map(pose => ({ ...pose })) as [BodyPose, BodyPose, BodyPose];
+    const nextPoses = this.previous;
+    this.previous = this.current;
+    this.current = nextPoses;
     this.time += FIXED_STEP;
     this.ageSparks();
     this.advancePoliceWreck();
     for (const event of this.breakEvents) event.age += FIXED_STEP;
-    const partXs = [this.car, ...this.wheels].map(part => part.translation().x);
-    this.ensureChunks(Math.max(...partXs), Math.min(...partXs));
+    const carX = this.car.translation().x;
+    const frontX = this.wheels[0].translation().x;
+    const rearX = this.wheels[1].translation().x;
+    this.ensureChunks(Math.max(carX, frontX, rearX), Math.min(carX, frontX, rearX));
     for (const actor of this.ragdolls.values()) actor.beforeStep(FIXED_STEP);
     this.advanceDebrisShards(FIXED_STEP);
     this.updateHazards();
@@ -1178,7 +1216,7 @@ export class GamePhysics {
     const p = this.car.translation();
     const v = this.car.linvel();
     this.weapon.step(FIXED_STEP, {}, { ...p, angle: this.car.rotation(), vx: v.x, vy: v.y }, [], () => {}, roadHeight);
-    this.current = this.readPoses();
+    this.readPoses(this.current);
   }
 
   get distance(): number {

@@ -33,6 +33,7 @@ const MENU_MUSIC_URL = new URL('../../assets/music/Saints Row_ The Third [Soundt
 export class GameAudio {
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
+  private focusGain: GainNode | null = null;
   private noise: AudioBuffer | null = null;
   private loops: SoundLoops | null = null;
   private menuMusicGain: GainNode | null = null;
@@ -43,6 +44,7 @@ export class GameAudio {
   private readonly voices = new Set<AudioScheduledSourceNode>();
   private readonly parameterTargets = new WeakMap<AudioParam, number>();
   private silent = false;
+  private backgrounded = false;
   private disposed = false;
   private running = false;
   private musicEnabled = true;
@@ -63,6 +65,16 @@ export class GameAudio {
   get muted(): boolean { return this.silent; }
   get musicOn(): boolean { return this.musicEnabled; }
   get needsUnlock(): boolean { return !this.context || this.context.state === 'suspended'; }
+
+  /** Fade the full mix, including music, when the browser loses focus. */
+  setBackgrounded(backgrounded: boolean): void {
+    if (this.backgrounded === backgrounded) return;
+    this.backgrounded = backgrounded;
+    if (this.focusGain) this.target(this.focusGain.gain, backgrounded ? 0 : 1, 0.08);
+    if (!backgrounded && this.menuMusicActive && this.context?.state === 'suspended') {
+      void this.context.resume().then(() => this.startMenuMusic()).catch(() => {});
+    }
+  }
 
   /** Must be called from a pointer or keyboard event, including on Safari. */
   async unlock(): Promise<void> {
@@ -141,13 +153,17 @@ export class GameAudio {
     this.context = context;
     const output = context.createGain();
     output.gain.value = 0.62;
+    const focusGain = context.createGain();
+    focusGain.gain.value = this.backgrounded ? 0 : 1;
+    this.focusGain = focusGain;
     const limiter = context.createDynamicsCompressor();
     limiter.threshold.value = -17;
     limiter.knee.value = 14;
     limiter.ratio.value = 4;
     limiter.attack.value = 0.006;
     limiter.release.value = 0.16;
-    output.connect(limiter);
+    output.connect(focusGain);
+    focusGain.connect(limiter);
     limiter.connect(context.destination);
     const master = context.createGain();
     master.gain.value = this.silent ? 0 : 1;
@@ -499,6 +515,7 @@ export class GameAudio {
     if (this.context) void this.context.close().catch(() => {});
     this.context = null;
     this.master = null;
+    this.focusGain = null;
     this.loops = null;
     this.noise = null;
   }

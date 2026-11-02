@@ -15,6 +15,26 @@ const pose = {x:0,y:0,angle:0,vx:0,vy:0};
 function advance(weapon, seconds, controls={}, targets=[], onDamage=()=>{}) {
   for(let i=0;i<Math.round(seconds*120);i++) weapon.step(1/120,controls,pose,targets,onDamage);
 }
+test('every weapon gains 15 percent range, including upgraded equipment',()=>{
+  const previousRanges=[43.7,46,46,48.3,50.6,55.2,50.6,52.9];
+  for(const [index,spec] of WEAPONS.entries()){
+    assert.ok(Math.abs(spec.range-previousRanges[index]*1.15)<1e-9,spec.id);
+    for(let level=1;level<=5;level++)assert.equal(weaponSpec(spec.id,level).range,spec.range);
+  }
+  for(const id of ['machine-gun','laser-gun']){
+    const oldRange=previousRanges[WEAPONS.findIndex(spec=>spec.id===id)];
+    const inRange={id:'near',kind:'hazard',x:oldRange+4,y:1.08,radius:.2,health:10};
+    const weapon=new VehicleWeapon(id);
+    weapon.step(1/120,{fire:true},pose,[inRange],()=>{},()=>-100);
+    advance(weapon,1.2,{},[inRange]);
+    assert.ok(inRange.health<10,`${id} did not reach beyond its old range`);
+    const outOfRange={id:'far',kind:'hazard',x:weaponSpec(id).range+5,y:1.08,radius:.2,health:10};
+    const second=new VehicleWeapon(id);
+    second.step(1/120,{fire:true},pose,[outOfRange],()=>{},()=>-100);
+    advance(second,1.2,{},[outOfRange]);
+    assert.equal(outOfRange.health,10,`${id} exceeded its new range`);
+  }
+});
 test('all eight reference weapons unlock at exact XP boundaries; equipment persists and invalid saves recover',()=>{
   assert.equal(WEAPONS.length,8);
   assert.deepEqual(WEAPONS.map(spec=>spec.xp),[0,200,500,900,1400,2000,2800,3800]);
@@ -113,6 +133,45 @@ test('laser hits instantly; rockets/plasma splash nearby targets without damagin
       {id:'far',kind:'hazard',x:17,y:1.08,radius:.3,health:3}];
     advance(weapon,.35,{fire:true},targets);
     assert.equal(targets[0].health,0,id);assert.equal(targets[1].health,0,id);assert.equal(targets[2].health,3,id);
+  }
+});
+test('all weapons hit an elevated target while driving or boosting at high speed',()=>{
+  for(const speed of [27,60])for(const spec of WEAPONS){
+    const weapon=new VehicleWeapon(spec.id);
+    const target={id:'drone',kind:'hazard',x:13,y:4.2,radius:.4,health:100};
+    const movingPose={x:0,y:0,angle:0,vx:speed,vy:0};
+    for(let frame=0;frame<120;frame++){
+      movingPose.x=speed*frame/120;
+      weapon.step(1/120,{fire:frame===0},movingPose,[target],()=>{},()=>-100);
+    }
+    assert.ok(target.health<100,`${spec.id} at ${speed} m/s missed`);
+  }
+});
+test('non-homing shots lead a moving airborne target at high speed',()=>{
+  for(const spec of WEAPONS.filter(spec=>spec.id!=='missile-launcher'&&spec.id!=='laser-gun')){
+    const weapon=new VehicleWeapon(spec.id);
+    const target={id:'drone',kind:'hazard',x:30,y:3.2,vx:-2,vy:3,radius:.38,health:100};
+    const movingPose={x:0,y:0,angle:0,vx:60,vy:0};
+    for(let frame=0;frame<120;frame++){
+      movingPose.x=60*frame/120;
+      target.x=30+target.vx*frame/120;
+      target.y=3.2+target.vy*frame/120;
+      weapon.step(1/120,{fire:frame===0},movingPose,[target],()=>{},()=>-100);
+    }
+    assert.ok(target.health<100,`${spec.id} did not lead the moving target`);
+  }
+});
+test('rear-facing weapons still lead targets when the car outruns slow projectiles',()=>{
+  for(const speed of [27,60])for(const spec of WEAPONS){
+    const weapon=new VehicleWeapon(spec.id);
+    const target={id:'rear',kind:'hazard',x:-13,y:3.2,radius:.4,health:100};
+    const movingPose={x:0,y:0,angle:0,vx:speed,vy:0};
+    for(let frame=0;frame<150;frame++)weapon.step(1/120,{aim:-1},movingPose,[target],()=>{},()=>-100);
+    for(let frame=0;frame<300;frame++){
+      movingPose.x=speed*frame/120;
+      weapon.step(1/120,{fire:frame===0,aim:-1},movingPose,[target],()=>{},()=>-100);
+    }
+    assert.ok(target.health<100,`${spec.id} missed the rear target at ${speed} m/s`);
   }
 });
 test('missiles steer toward a moving target and release the lock after its destruction',()=>{

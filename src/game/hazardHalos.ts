@@ -40,20 +40,26 @@ export class HazardHalos {
     left: number, right: number): void {
     // Preserve a visible ring on small screens as the world shrinks during a jump.
     const diameter = Math.max(3.6, 2 * halfHeight / Math.max(1, viewportHeight) * 30);
-    const visible = hazards.filter(hazard => hazard.x + diameter / 2 >= left && hazard.x - diameter / 2 <= right);
-    if (visible.length > this.mesh.instanceMatrix.count) {
+    let visibleCount = 0;
+    for (const hazard of hazards) {
+      if (hazard.x + diameter / 2 >= left && hazard.x - diameter / 2 <= right) visibleCount++;
+    }
+    if (visibleCount > this.mesh.instanceMatrix.count) {
       this.mesh.removeFromParent();
       this.mesh.dispose();
-      this.mesh = this.createMesh(Math.max(visible.length, this.mesh.instanceMatrix.count * 2));
+      this.mesh = this.createMesh(Math.max(visibleCount, this.mesh.instanceMatrix.count * 2));
     }
-    this.mesh.count = visible.length;
-    visible.forEach((hazard, index) => {
+    this.mesh.count = visibleCount;
+    if (!visibleCount) return;
+    let index = 0;
+    for (const hazard of hazards) {
+      if (hazard.x + diameter / 2 < left || hazard.x - diameter / 2 > right) continue;
       // Behind the obstacle's front face, so the glow does not wash out its silhouette.
       this.pose.position.set(hazard.x, hazard.y, 0.9);
       this.pose.scale.set(diameter, diameter, 1);
       this.pose.updateMatrix();
-      this.mesh.setMatrixAt(index, this.pose.matrix);
-    });
+      this.mesh.setMatrixAt(index++, this.pose.matrix);
+    }
     this.mesh.instanceMatrix.needsUpdate = true;
   }
 

@@ -17,6 +17,10 @@ npm run dev
 
 Open the URL Vite prints. Development mode shows a small translucent FPS counter at the top, refreshed twice per second. It is omitted from production. For a production bundle, run `npm run build`. Run the simulation checks with `npm test`.
 
+Rendering uses a half-resolution city blur, batched road stripes, and an adaptive pixel budget. Active play is paced to 60 FPS while physics retains its fixed 120 Hz step. Touch devices start with a smaller pixel budget to limit GPU load; sustained slow frames lower it further, and sustained smooth play restores detail. Paused menus draw at about 15 FPS (30 FPS for the animated crash view), while hidden tabs skip drawing.
+
+Switching away from the browser or hiding its tab pauses the run and fades out music and effects. Returning restores audio, while the run stays paused until resumed.
+
 ## Account and cloud save
 
 The **Account & Sync** button on the ready or game-over menu connects the game to [Roadster API](https://github.com/abelmiri/roadster-api). The default endpoint is `https://roadster-api.vercel.app`; set `VITE_ROADSTER_API_URL` before building to use another deployment. The client checks `/health` before Passkey registration or login. Production Passkeys require the game origin and RP ID configured on the API; localhost Passkeys are separate from production Passkeys.
@@ -80,7 +84,7 @@ Desktop HUD readouts and meters retain their 25% enlargement; mobile uses the co
 
 ## Weapons
 
-The roof turret turns through 180° before firing in the new direction. Turning takes 550–950 ms depending on the weapon and uses simulation time, so pause and impact freeze preserve it. Small automatic elevation adjustments help target road hazards and drones. Bullets use swept collision checks; terrain blocks shots. Weapon recoil is visual and cannot upset the suspension.
+The roof turret turns through 180° before firing in the new direction. Turning takes 550–950 ms depending on the weapon and uses simulation time, so pause and impact freeze preserve it. Automatic elevation leads moving targets and compensates for the car's velocity, including at high speed. Rear-facing projectiles retain useful backward travel when the car outruns their nominal muzzle speed. Bullets use swept collision checks; terrain blocks shots. Weapon recoil is visual and cannot upset the suspension.
 
 Lifetime weapon unlocks require 200 / 500 / 900 / 1,400 / 2,000 / 2,800 / 3,800 XP after the starter, and XP is never spent. The starter Machine Gun is free (0 XP, 80 rounds). Each later gun requires XP and a one-time coin purchase: Twin Gun (200 XP, 1,000 coins, 100 rounds), Gatling Gun (500 XP, 2,000 coins, 150 rounds), Cannon (900 XP, 3,000 coins, 16 rounds), Rocket Launcher (1,400 XP, 4,000 coins, 12 rounds), Missile Launcher (2,000 XP, 5,000 coins, 10 rounds), Laser Gun (2,800 XP, 6,000 coins, 50 charges), and Plasma Cannon (3,800 XP, 7,000 coins, 18 rounds). Twin volleys spend two rounds. Heavy weapons deal splash damage, missiles track their target, and the laser hits instantly. Models, icons, projectiles, muzzle flashes, impacts, and firing sounds are original.
 

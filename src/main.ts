@@ -504,6 +504,9 @@ let visuals: GameVisuals;
 let accumulator = 0;
 let holdInterpolation = false;
 let lastFrame = performance.now();
+let lastHudFrame = -Infinity;
+let nextFrameAt = -Infinity;
+let lastFrameMode = '';
 let restartAvailableAt = 0;
 let crashMenuHidden = false;
 let resumeCountdownUntil = 0;
@@ -1231,6 +1234,7 @@ function clearHeld(): void {
 
 async function start(): Promise<void> {
   if (startPending) return;
+  if (document.hidden || !windowFocused || !(document.hasFocus?.() ?? true)) return;
   if (dialogBlocked()) return;
   if (touchLayout.editing || !armory.hidden || !recordDialog.hidden || !coinDialog.hidden || !accountDialog.hidden) return;
   if (status === 'loading' || status === 'error' || status === 'running') return;
@@ -1249,6 +1253,7 @@ async function start(): Promise<void> {
     catch (error) { accountError(error); openAccount(); return; }
     finally { startPending = false; primaryButton.disabled = false; }
   }
+  if (document.hidden || !windowFocused || !(document.hasFocus?.() ?? true)) return;
   if (status === 'ready') { player.resetRun(); player.beginMissionRun(); refreshMissions(true); }
   if (status === 'crashed') {
     restartAvailableAt = 0;
@@ -1965,9 +1970,29 @@ window.addEventListener('keyup', (event) => {
   if (action) held[action].delete(`key-${event.code}`);
   if (action === 'frontJet' || action === 'rearJet') syncAirJetButtons();
 });
-window.addEventListener('blur', pause);
-window.addEventListener('pagehide', () => { saveRunScore(); void sync?.flush().catch(accountError); audio.suspend(); });
-document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+let windowFocused = true;
+function syncBrowserFocus(event?: Event): void {
+  if (event?.type === 'blur' || event?.type === 'pagehide') windowFocused = false;
+  else if (event?.type === 'focus' || event?.type === 'pageshow') windowFocused = true;
+  const backgrounded = document.hidden || !windowFocused || !(document.hasFocus?.() ?? true);
+  audio.setBackgrounded(backgrounded);
+  if (backgrounded) {
+    if (resumeCountdownTimer !== undefined) cancelResumeCountdown();
+    pause();
+  }
+}
+window.addEventListener('blur', syncBrowserFocus);
+window.addEventListener('focus', syncBrowserFocus);
+window.addEventListener('pagehide', () => {
+  windowFocused = false;
+  audio.setBackgrounded(true);
+  saveRunScore();
+  void sync?.flush().catch(accountError);
+  audio.suspend();
+});
+window.addEventListener('pageshow', syncBrowserFocus);
+document.addEventListener('visibilitychange', syncBrowserFocus);
+syncBrowserFocus();
 primaryButton.addEventListener('click', start);
 restartButton.addEventListener('click', () => {
   if (status !== 'paused' || startPending) return;
@@ -2026,6 +2051,19 @@ function fail(key: 'bootError' | 'runtimeError'): void {
 }
 
 function frame(now: number): void {
+  // Keep a 60 FPS presentation cadence independent of faster displays.
+  // Simulation still uses its fixed 120 Hz physics step for stable handling.
+  const mode = status === 'running' && mobileSettingsDialog.hidden ? 'play'
+    : status === 'crashed' ? 'crash' : 'menu';
+  const interval = mode === 'play' ? 1000 / 60 : mode === 'crash' ? 1000 / 30 : 1000 / 15;
+  if (mode !== lastFrameMode) { nextFrameAt = now; lastFrameMode = mode; }
+  if (document.hidden || now + 0.5 < nextFrameAt) {
+    if (document.hidden) lastFrame = now;
+    requestAnimationFrame(frame);
+    return;
+  }
+  if (now - nextFrameAt > interval) nextFrameAt = now;
+  nextFrameAt += interval;
   try { renderFrame(now); }
   catch (error) {
     console.error('Roadster frame failed', error);
@@ -2146,7 +2184,10 @@ function renderFrame(now: number): void {
   const district = Math.min(2, Math.floor(snapshot.distance / 360));
   if (district !== currentDistrict && simulating) audio.play('district');
   currentDistrict = district;
-  updateHud(snapshot);
+  if (now - lastHudFrame >= 1000 / 30 || status !== 'running') {
+    updateHud(snapshot);
+    lastHudFrame = now;
+  }
   document.body.classList.toggle('fans-on', snapshot.suctionActive);
   requestAnimationFrame(frame);
 }

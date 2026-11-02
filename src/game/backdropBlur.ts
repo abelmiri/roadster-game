@@ -3,8 +3,10 @@ import * as THREE from 'three';
 /** Blur and atmospheric haze affect only the half-resolution city pass. */
 export class BackdropBlur {
   private readonly target = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: true });
+  private readonly blurred = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false, colorSpace: THREE.SRGBColorSpace });
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.Camera();
+  private readonly presentation = new THREE.Scene();
   private readonly material = new THREE.ShaderMaterial({
     depthTest: false, depthWrite: false,
     uniforms: { city: { value: this.target.texture }, texel: { value: new THREE.Vector2(1, 1) },
@@ -39,14 +41,17 @@ export class BackdropBlur {
       }`,
   });
   private readonly quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.material);
+  private readonly presentationQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2),
+    new THREE.MeshBasicMaterial({ map: this.blurred.texture, depthTest: false, depthWrite: false }));
 
-  constructor() { this.scene.add(this.quad); }
+  constructor() { this.scene.add(this.quad); this.presentation.add(this.presentationQuad); }
 
   resize(renderer: THREE.WebGLRenderer): void {
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
     const width = Math.max(1, Math.round(size.x * 0.5));
     const height = Math.max(1, Math.round(size.y * 0.5));
     this.target.setSize(width, height);
+    this.blurred.setSize(width, height);
     this.material.uniforms.texel.value.set(1.85 / width, 1.85 / height);
   }
 
@@ -59,8 +64,12 @@ export class BackdropBlur {
     world.visible = false;
     renderer.setRenderTarget(this.target);
     renderer.render(scene, camera);
-    renderer.setRenderTarget(output);
+    // The expensive blur and procedural haze run at the backdrop's native
+    // half resolution. Only a simple textured quad is drawn at screen size.
+    renderer.setRenderTarget(this.blurred);
     renderer.render(this.scene, this.camera);
+    renderer.setRenderTarget(output);
+    renderer.render(this.presentation, this.camera);
     city.visible = false;
     world.visible = true;
     renderer.autoClear = false;
@@ -70,5 +79,10 @@ export class BackdropBlur {
     city.visible = true;
   }
 
-  dispose(): void { this.target.dispose(); this.quad.geometry.dispose(); this.material.dispose(); }
+  dispose(): void {
+    this.target.dispose(); this.blurred.dispose();
+    this.quad.geometry.dispose(); this.material.dispose();
+    this.presentationQuad.geometry.dispose();
+    (this.presentationQuad.material as THREE.Material).dispose();
+  }
 }
