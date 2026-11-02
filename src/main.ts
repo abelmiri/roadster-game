@@ -52,27 +52,25 @@ app.innerHTML = `
           <div class="hud-stat"><span id="distance-title" class="hud-label" data-i18n="distance"></span><strong id="distance"></strong></div>
           <div class="hud-divider"></div>
           <div class="hud-stat"><span class="hud-label" data-i18n="best"></span><strong id="best"></strong><small id="best-player" class="best-player"></small></div>
-          <button id="pause-button" class="icon-button" type="button"><span class="pause-icon" aria-hidden="true"></span></button>
-          <button id="mobile-settings-button" class="icon-button mobile-settings-button" type="button" aria-haspopup="dialog" aria-controls="mobile-settings-dialog" aria-expanded="false" hidden><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
+          <button id="pause-button" class="icon-button" type="button"><span class="button-icon" aria-hidden="true"><svg class="pause-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false"><g class="pause-bars"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></g><path class="resume-triangle" d="m8 4 12 8-12 8Z"/></svg></span></button>
+          <button id="mobile-settings-button" class="icon-button mobile-settings-button" type="button" aria-haspopup="dialog" aria-controls="mobile-settings-dialog" aria-expanded="false" hidden><span class="button-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></span></button>
         </div>
         <div id="settings-controls" class="settings-controls">
-          <button id="missions-button" class="icon-button" type="button" aria-haspopup="dialog" aria-controls="missions-dialog" aria-expanded="false"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5H5v16h14V5h-4M9 3h6v4H9zM8 12l2 2 5-4M8 18h7"/></svg></button>
-          <button id="map-button" class="icon-button" type="button" aria-haspopup="dialog" aria-controls="map-dialog" aria-expanded="false"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18M3 12h18"/></svg></button>
-          <button id="touch-layout-button" class="icon-button touch-layout-button" type="button" aria-controls="touch-layout-editor" aria-expanded="false"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/></svg></button>
-          <button id="armory-button" class="icon-button armory-button" type="button" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h9v7H4zM13 10h8v3h-8M7 15v4m-4 0h12M6 6h5"/></svg></button>
-          <button id="sound-button" class="icon-button sound-button" type="button" aria-pressed="true">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4 6 8H3v8h3l5 4Z"/><path class="sound-waves" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/><path class="sound-slash" d="m15 9 6 6m0-6-6 6"/></svg>
-          </button>
-          <button id="music-button" class="icon-button music-button" type="button" aria-pressed="true">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/><path class="music-slash" d="m3 3 18 18"/></svg>
-          </button>
-          <button id="fullscreen-button" class="icon-button fullscreen-button" type="button" aria-pressed="false" hidden>
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
-          </button>
+          <button id="missions-button" class="icon-button" type="button" aria-haspopup="dialog" aria-controls="missions-dialog" aria-expanded="false"><span class="button-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 5H5v16h14V5h-4M9 3h6v4H9zM8 12l2 2 5-4M8 18h7"/></svg></span></button>
+          <button id="map-button" class="icon-button" type="button" aria-haspopup="dialog" aria-controls="map-dialog" aria-expanded="false"><span class="button-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18M3 12h18"/></svg></span></button>
+          <button id="touch-layout-button" class="icon-button touch-layout-button" type="button" aria-controls="touch-layout-editor" aria-expanded="false"><span class="button-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/></svg></span></button>
+          <button id="armory-button" class="icon-button armory-button" type="button" aria-haspopup="dialog" aria-expanded="false"><span class="button-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 8h9v7H4zM13 10h8v3h-8M7 15v4m-4 0h12M6 6h5"/></svg></span></button>
+          <button id="sound-button" class="icon-button sound-button" type="button" aria-pressed="true"><span class="button-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M11 4 6 8H3v8h3l5 4Z"/><path class="sound-waves" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/><path class="sound-slash" d="m15 9 6 6m0-6-6 6"/></svg></span></button>
+          <button id="music-button" class="icon-button music-button" type="button" aria-pressed="true"><span class="button-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/><path class="music-slash" d="m3 3 18 18"/></svg></span></button>
           <button id="language-button" class="language-button" type="button"><span id="language-en" lang="en" dir="ltr">EN</span><span class="language-separator" aria-hidden="true">/</span><span id="language-fa" lang="fa" dir="rtl">فارسی</span></button>
         </div>
       </div>
     </header>
+          <button id="fullscreen-button" class="icon-button fullscreen-button" type="button" aria-pressed="false" hidden><span class="button-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path class="fullscreen-enter" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><path class="fullscreen-exit" d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></span></button>
+    <div id="fullscreen-help" class="fullscreen-help" role="status" hidden>
+      <p id="fullscreen-help-message"></p>
+      <button id="fullscreen-help-close" type="button" data-i18n="closeSettings"></button>
+    </div>
     <div id="mobile-settings-dialog" class="mobile-settings-dialog" hidden>
       <button id="mobile-settings-backdrop" class="mobile-settings-backdrop" type="button" aria-label="Close settings"></button>
       <section class="mobile-settings-card" role="dialog" aria-modal="true" aria-labelledby="mobile-settings-title">
@@ -115,13 +113,13 @@ app.innerHTML = `
     </div>
     <div class="keyboard-guide" aria-hidden="true"><span><kbd lang="en" dir="ltr" data-i18n="spaceKey"></kbd><span data-i18n="jumpGuide"></span></span><span><kbd lang="en" dir="ltr">↓</kbd><span data-i18n="suction"></span></span><span><kbd lang="en" dir="ltr" data-i18n="shiftKey"></kbd><span data-i18n="airBoost"></span></span><span><kbd lang="en" dir="ltr">← / →</kbd><span data-i18n="turnWeapon"></span></span><span><kbd lang="en" dir="ltr">F</kbd><span data-i18n="fire"></span></span><span><kbd lang="en" dir="ltr">1–8</kbd><span data-i18n="selectWeapon"></span></span><span><kbd lang="en" dir="ltr">G</kbd><span data-i18n="armory"></span></span><span><kbd lang="en" dir="ltr">Z / X</kbd><span data-i18n="airJets"></span></span></div>
     <div id="touch-controls" class="touch-controls">
-      <button id="touch-fire" class="touch-button touch-fire" type="button"><svg class="touch-meter" viewBox="0 0 100 100" aria-hidden="true"><circle class="touch-meter-track" cx="50" cy="50" r="46"/><circle id="touch-ammo-ring" class="touch-meter-fill" cx="50" cy="50" r="46" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0"/></svg>${touchIcon('fire')}<span class="touch-meter-value" id="touch-ammo-value" aria-hidden="true"></span><span class="touch-meter-label" data-i18n="fire"></span></button>
-      <button id="touch-suction" class="touch-button touch-suction" type="button">${touchIcon('suction')}<span data-i18n="suction"></span></button>
-      <button id="touch-aim" class="touch-button touch-aim" type="button">${touchIcon('aim')}</button>
-      <button id="touch-boost" class="touch-button touch-boost" type="button"><svg class="touch-meter" viewBox="0 0 100 100" aria-hidden="true"><circle class="touch-meter-track" cx="50" cy="50" r="46"/><circle id="touch-boost-ring" class="touch-meter-fill" cx="50" cy="50" r="46" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0"/></svg>${touchIcon('boost')}<span class="touch-meter-value" id="touch-boost-value" aria-hidden="true"></span><span class="touch-meter-label" data-i18n="boost"></span></button>
-      <button id="touch-front-jet" class="touch-button touch-front-jet" type="button">${touchIcon('front-jet')}<span data-i18n="frontJet"></span></button>
-      <button id="touch-rear-jet" class="touch-button touch-rear-jet" type="button">${touchIcon('rear-jet')}<span data-i18n="rearJet"></span></button>
-      <button id="touch-jump" class="touch-button touch-jump" type="button">${touchIcon('jump')}<span data-i18n="jump"></span></button>
+      <button id="touch-fire" class="touch-button touch-fire" type="button"><svg class="touch-meter" viewBox="0 0 100 100" aria-hidden="true"><circle class="touch-meter-track" cx="50" cy="50" r="46"/><circle id="touch-ammo-ring" class="touch-meter-fill" cx="50" cy="50" r="46" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0"/></svg><span class="touch-button-content">${touchIcon('fire')}<span class="touch-meter-value" id="touch-ammo-value" aria-hidden="true"></span><span class="touch-meter-label" data-i18n="fire"></span></span></button>
+      <button id="touch-suction" class="touch-button touch-suction" type="button"><span class="touch-button-content">${touchIcon('suction')}<span data-i18n="suction"></span></span></button>
+      <button id="touch-aim" class="touch-button touch-aim" type="button"><span class="touch-button-content">${touchIcon('aim')}</span></button>
+      <button id="touch-boost" class="touch-button touch-boost" type="button"><svg class="touch-meter" viewBox="0 0 100 100" aria-hidden="true"><circle class="touch-meter-track" cx="50" cy="50" r="46"/><circle id="touch-boost-ring" class="touch-meter-fill" cx="50" cy="50" r="46" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0"/></svg><span class="touch-button-content">${touchIcon('boost')}<span class="touch-meter-value" id="touch-boost-value" aria-hidden="true"></span><span class="touch-meter-label" data-i18n="boost"></span></span></button>
+      <button id="touch-front-jet" class="touch-button touch-front-jet" type="button"><span class="touch-button-content">${touchIcon('front-jet')}<span data-i18n="frontJet"></span></span></button>
+      <button id="touch-rear-jet" class="touch-button touch-rear-jet" type="button"><span class="touch-button-content">${touchIcon('rear-jet')}<span data-i18n="rearJet"></span></span></button>
+      <button id="touch-jump" class="touch-button touch-jump" type="button"><span class="touch-button-content">${touchIcon('jump')}<span data-i18n="jump"></span></span></button>
     </div>
     <div id="touch-layout-editor" class="touch-layout-editor" role="region" aria-labelledby="touch-layout-title" hidden>
       <div class="touch-layout-heading"><strong id="touch-layout-title" data-i18n="touchLayout"></strong><span data-i18n="touchLayoutHelp"></span></div>
@@ -927,23 +925,40 @@ function fullscreenActive(): boolean {
 }
 
 function updateFullscreenButton(): void {
-  const doc = document as FullscreenDocument;
-  const supported = Boolean(doc.fullscreenEnabled || doc.webkitFullscreenEnabled);
-  fullscreenButton.hidden = !supported || isInstalledApp();
+  fullscreenButton.hidden = isInstalledApp() && !fullscreenActive();
   const active = fullscreenActive();
   fullscreenButton.setAttribute('aria-pressed', String(active));
   fullscreenButton.setAttribute('aria-label', t(active ? 'exitFullscreen' : 'enterFullscreen'));
   fullscreenButton.title = t(active ? 'exitFullscreen' : 'enterFullscreen');
 }
 
-function toggleFullscreen(): void {
+function showFullscreenHelp(key: 'fullscreenUnavailable' | 'fullscreenFailed'): void {
+  pause();
+  element('fullscreen-help-message').textContent = t(key);
+  element('fullscreen-help').hidden = false;
+}
+
+async function toggleFullscreen(): Promise<void> {
   const doc = document as FullscreenDocument;
   const root = document.documentElement as FullscreenElement;
-  const result = fullscreenActive()
-    ? (doc.exitFullscreen?.() ?? doc.webkitExitFullscreen?.())
-    : (root.requestFullscreen?.() ?? root.webkitRequestFullscreen?.());
-  void Promise.resolve(result).catch(() => undefined).finally(updateFullscreenButton);
-  fullscreenButton.blur();
+  element('fullscreen-help').hidden = true;
+  try {
+    if (fullscreenActive()) {
+      if (doc.fullscreenElement && doc.exitFullscreen) await doc.exitFullscreen();
+      else await doc.webkitExitFullscreen?.();
+    } else if (doc.fullscreenEnabled && root.requestFullscreen) {
+      await root.requestFullscreen();
+    } else if (doc.webkitFullscreenEnabled && root.webkitRequestFullscreen) {
+      await root.webkitRequestFullscreen();
+    } else {
+      showFullscreenHelp('fullscreenUnavailable');
+    }
+  } catch {
+    showFullscreenHelp('fullscreenFailed');
+  } finally {
+    updateFullscreenButton();
+    fullscreenButton.blur();
+  }
 }
 
 function updatePauseButton(): void {
@@ -1979,6 +1994,10 @@ pauseButton.addEventListener('click', () => { if (status === 'running') pause();
 soundButton.addEventListener('click', toggleSound);
 musicButton.addEventListener('click', toggleMusic);
 fullscreenButton.addEventListener('click', toggleFullscreen);
+element('fullscreen-help-close').addEventListener('click', () => {
+  element('fullscreen-help').hidden = true;
+  fullscreenButton.focus();
+});
 document.addEventListener('fullscreenchange', updateFullscreenButton);
 document.addEventListener('webkitfullscreenchange', updateFullscreenButton);
 window.matchMedia('(display-mode: standalone)').addEventListener('change', updateFullscreenButton);

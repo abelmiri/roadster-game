@@ -289,7 +289,7 @@
 @media (max-width: 900px), (pointer: coarse) and (orientation: landscape) {
   .topbar-tools { margin-right: 51px; }
   .game-shell.is-mobile-settings-mode .topbar-tools { margin-right: 102px; }
-  #mobile-settings-button { position: absolute; top: max(14px,env(safe-area-inset-top)); right: calc(var(--mobile-corner-gap) + 54px); display: grid; place-items: center; width: 46px; height: 46px; border-color: #ffffff66; background: #26374662; backdrop-filter: blur(12px); }
+  #mobile-settings-button { position: absolute; top: max(14px,env(safe-area-inset-top)); right: calc(var(--mobile-corner-gap) + 54px); display: block; width: 46px; height: 46px; border-color: #ffffff66; background: #26374662; backdrop-filter: blur(12px); }
   #mobile-settings-button[hidden] { display: none; }
   #mobile-settings-button svg { width: 23px; height: 23px; }
   .mobile-settings-dialog { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: max(18px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left)); isolation: isolate; }
@@ -305,10 +305,11 @@
   .mobile-settings-hint { margin: 8px 0 20px; color: #b7cbd0; font-size: 10px; line-height: 1.7; }
   html[lang=fa] .mobile-settings-hint { font-size: 11px; }
   .mobile-settings-actions .settings-controls { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; width: 100%; direction: rtl; }
-  .mobile-settings-actions .settings-controls > .icon-button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; width: 100%; height: 76px; padding: 8px 5px; border: 1px solid #b5eade25; border-radius: 15px; background: linear-gradient(150deg,#ffffff0c,#ffffff04); color: #eefbf7; box-shadow: inset 0 1px #ffffff0a; transition: transform .16s ease,border-color .16s ease,background .16s ease; }
+  .mobile-settings-actions .settings-controls > .icon-button { display: block; width: 100%; height: 76px; padding: 10px 5px; border: 1px solid #b5eade25; border-radius: 15px; background: linear-gradient(150deg,#ffffff0c,#ffffff04); color: #eefbf7; box-shadow: inset 0 1px #ffffff0a; transition: transform .16s ease,border-color .16s ease,background .16s ease; }
   .mobile-settings-actions .settings-controls > .icon-button:hover, .mobile-settings-actions .settings-controls > .icon-button:focus-visible { transform: translateY(-2px); border-color: #9debd48a; background: linear-gradient(145deg,#a6f4df1b,#ffffff09); }
+  .mobile-settings-actions .button-icon { position: static; width: 25px; height: 25px; margin: 0 auto 7px; transform: none; }
   .mobile-settings-actions .settings-controls > .icon-button svg { flex: 0 0 auto; width: 25px; height: 25px; }
-  .mobile-settings-actions .settings-controls > .icon-button::after { content: attr(aria-label); max-width: 100%; overflow: hidden; color: #bfd5d3; font-size: 8px; font-weight: 750; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-settings-actions .settings-controls > .icon-button::after { display: block; content: attr(aria-label); max-width: 100%; overflow: hidden; color: #bfd5d3; font-size: 8px; font-weight: 750; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
   html[lang=fa] .mobile-settings-actions .settings-controls > .icon-button::after { font-size: 9px; }
   .mobile-settings-actions .settings-controls > .language-button { grid-column: 1 / -1; display: flex; min-height: 47px; height: 47px; justify-content: center; gap: 8px; border-color: #a6f4df35; border-radius: 13px; background: #a6f4df0c; color: #e9fff8; font-size: 12px; }
   .mobile-settings-actions .settings-controls > .language-button:hover { background: #a6f4df18; }
@@ -337,4 +338,11 @@
   .hud-stat strong, html[lang=fa] .hud-stat strong { font-size: 18px; }
   .hud-stat small, html[lang=fa] .hud-stat small { font-size: 9px; }
   .hud-divider { height: 32px; }
+}
+
+@media (max-width: 900px), (pointer: coarse) and (orientation: landscape) {
+  #fullscreen-button { left: max(var(--mobile-corner-gap),env(safe-area-inset-left)); bottom: max(var(--mobile-corner-gap),env(safe-area-inset-bottom)); width: 44px; height: 44px; }
+  #fullscreen-button svg { width: 24px; height: 24px; }
+  .game-shell:has(#fullscreen-button:not([hidden])) .touch-controls { left: calc(max(var(--mobile-corner-gap),env(safe-area-inset-left)) + 58px); }
+  .fullscreen-help { left: max(var(--mobile-corner-gap),env(safe-area-inset-left)); bottom: calc(max(var(--mobile-corner-gap),env(safe-area-inset-bottom)) + 54px); width: min(360px,calc(100vw - 2 * var(--mobile-corner-gap) - env(safe-area-inset-left) - env(safe-area-inset-right))); }
 }

@@ -204,6 +204,7 @@ export class GamePhysics {
   private loopCompletions = 0;
   private obstaclesDestroyed = 0;
   private hazardViewTime = -1;
+  private viewBounds: { left: number; right: number } | null = null;
   private hazardView: { id: string; kind: HazardSpec['kind']; x: number; y: number; phase: number }[] = [];
   private breakSerial = 0;
   private readonly breakEvents: BreakEvent[] = [];
@@ -404,22 +405,35 @@ export class GamePhysics {
     });
 
     this.chunks.set(index, { spec, roads, hazards });
+    this.hazardViewTime = -1;
+  }
+
+  /** Include the actual camera view, even when a high jump widens it far beyond the car. */
+  setViewBounds(left: number, right: number): void {
+    if (!Number.isFinite(left) || !Number.isFinite(right) || right < left) return;
+    this.viewBounds = { left, right };
+    const parts = [this.car, ...this.wheels].map(part => part.translation().x);
+    this.ensureChunks(Math.max(...parts), Math.min(...parts));
   }
 
   private ensureChunks(x: number, rearX = x): void {
-    const first = Math.max(0, Math.floor((rearX - 40) / CHUNK_LENGTH));
-    const last = Math.floor((x + 95) / CHUNK_LENGTH);
+    // One extra chunk at each view edge prevents seams during movement and resizing.
+    const left = Math.min(rearX - 40, this.viewBounds ? this.viewBounds.left - CHUNK_LENGTH : Infinity);
+    const right = Math.max(x + 95, this.viewBounds ? this.viewBounds.right + CHUNK_LENGTH : -Infinity);
+    const first = Math.max(0, Math.floor(left / CHUNK_LENGTH));
+    const last = Math.floor(right / CHUNK_LENGTH);
     for (let index = first; index <= last; index++) {
       if (!this.chunks.has(index)) this.addChunk(index);
     }
     for (const [index, chunk] of this.chunks) {
-      if (index >= first) continue;
+      if (index >= first && index <= last) continue;
       for (const road of chunk.roads) this.world.removeCollider(road, true);
       for (const hazard of chunk.hazards) {
         this.hazardColliders.delete(hazard.collider.handle);
         this.world.removeRigidBody(hazard.body);
       }
       this.chunks.delete(index);
+      this.hazardViewTime = -1;
     }
     this.generator.trim(first);
   }

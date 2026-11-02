@@ -9,9 +9,10 @@ let CityBuildings, ObstacleDebris, CarBodyDamage, createRoadsterBody;
 let CarArmorVisual, carGarageIcon;
 let RagdollVisuals;
 let RagdollGroundEffects;
+let HazardHalos;
 before(async () => {
   const outdir = path.resolve('node_modules/.cache/roadster-scene-tests');
-  await build({ entryPoints: ['src/game/cityBuildings.ts', 'src/game/obstacleDebris.ts', 'src/game/carBodyDamage.ts', 'src/game/roadsterModel.ts', 'src/game/carArmor.ts', 'src/game/carGarageIcon.ts', 'src/game/ragdollVisuals.ts', 'src/game/ragdollGroundEffects.ts'], bundle: true,
+  await build({ entryPoints: ['src/game/cityBuildings.ts', 'src/game/obstacleDebris.ts', 'src/game/carBodyDamage.ts', 'src/game/roadsterModel.ts', 'src/game/carArmor.ts', 'src/game/carGarageIcon.ts', 'src/game/ragdollVisuals.ts', 'src/game/ragdollGroundEffects.ts', 'src/game/hazardHalos.ts'], bundle: true,
     platform: 'node', format: 'esm', outdir, outExtension: { '.js': '.mjs' }, external: ['three'] });
   ({ CityBuildings } = await import(pathToFileURL(path.join(outdir, 'cityBuildings.mjs')).href));
   ({ ObstacleDebris } = await import(pathToFileURL(path.join(outdir, 'obstacleDebris.mjs')).href));
@@ -21,6 +22,7 @@ before(async () => {
   ({ carGarageIcon } = await import(pathToFileURL(path.join(outdir, 'carGarageIcon.mjs')).href));
   ({ RagdollVisuals } = await import(pathToFileURL(path.join(outdir, 'ragdollVisuals.mjs')).href));
   ({ RagdollGroundEffects } = await import(pathToFileURL(path.join(outdir, 'ragdollGroundEffects.mjs')).href));
+  ({ HazardHalos } = await import(pathToFileURL(path.join(outdir, 'hazardHalos.mjs')).href));
 });
 
 test('ragdoll ground contacts kick up dust and hard landings scatter red droplets', () => {
@@ -235,4 +237,40 @@ test('the skyline uses five instance batches and only uploads matrices when buil
     }
     assert.equal(batches.reduce((total, mesh) => total + mesh.count, 0), count, 'wrapping allocated new instances');
   } finally { city.dispose(); for (const material of materials) material.dispose(); }
+});
+
+
+test('hazard halos retain screen visibility at high altitude and follow live obstacle positions', () => {
+  const halos = new HazardHalos();
+  try {
+    const hazards = [{ x: 2830, y: 4 }, { x: 2840, y: 7 }];
+    halos.update(hazards, 13, 390, 2800, 2900);
+    const mesh = halos.group.children[0];
+    assert.equal(mesh.count, 2);
+    assert.deepEqual(positions(mesh).map(({ x, y }) => ({ x, y })), hazards);
+    const matrix = new Matrix4();
+    mesh.getMatrixAt(0, matrix);
+    assert.ok(Math.abs(matrix.elements[0] - 3.6) < 1e-5);
+    halos.update([{ x: 2831, y: 6 }], 100, 390, 2700, 3200);
+    mesh.getMatrixAt(0, matrix);
+    assert.ok(matrix.elements[0] / (2 * 100) * 390 >= 29.99, 'zoomed-out halos must remain at least 30 CSS pixels wide');
+    assert.equal(mesh.count, 1, 'destroyed obstacles must lose their halos');
+    assert.deepEqual(positions(mesh).map(({ x, y }) => ({ x, y })), [{ x: 2831, y: 6 }]);
+    assert.equal(mesh.material.depthWrite, false);
+    assert.equal(mesh.material.toneMapped, false);
+    halos.update([], 100, 390, 2700, 3200);
+    assert.equal(mesh.count, 0);
+  } finally { halos.dispose(); }
+});
+
+test('hazard halos cull distant obstacles and grow their shared batch without dropping visible dangers', () => {
+  const halos = new HazardHalos();
+  try {
+    const hazards = Array.from({ length: 80 }, (_, i) => ({ x: i * 4, y: 3 }));
+    halos.update([...hazards, { x: 1000, y: 4 }], 30, 390, -10, 350);
+    assert.equal(halos.group.children.length, 1);
+    assert.equal(halos.group.children[0].count, 80);
+    halos.update(hazards, 13, 390, 1000, 1100);
+    assert.equal(halos.group.children[0].count, 0);
+  } finally { halos.dispose(); }
 });

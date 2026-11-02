@@ -26,6 +26,7 @@ import { MagneticShield, RandomBoxVisuals } from './powerVisuals';
 import { RagdollVisuals } from './ragdollVisuals';
 import { RagdollGroundEffects } from './ragdollGroundEffects';
 import { HealthHitPopups } from './healthHitPopups';
+import { HazardHalos } from './hazardHalos';
 
 interface Theme {
   sky: string; haze: string; far: string; middle: string; near: string;
@@ -82,6 +83,7 @@ export class GameVisuals {
   private readonly worldGroup = new THREE.Group();
   private readonly backdrop = new THREE.Group();
   private readonly chunks = new Map<number, ChunkView>();
+  private readonly hazardHalos = new HazardHalos();
   private readonly traffic: CityMotion[] = [];
   private readonly backgroundDrones: CityMotion[] = [];
   private readonly farMat = new THREE.MeshLambertMaterial({ color: THEMES[0].far, flatShading: true });
@@ -184,6 +186,7 @@ export class GameVisuals {
       this.police.group, this.policeWreck.group, this.policeSmoke.mesh, this.combat.group, this.depot.group,
       this.randomBoxes.group, this.ragdolls.group, this.ragdollGroundEffects.dust, this.ragdollGroundEffects.drops);
     this.worldGroup.add(this.healthHitPopups.group);
+    this.worldGroup.add(this.hazardHalos.group);
     this.fanGlow = box(1.8, 0.07, 0.55, new THREE.MeshBasicMaterial({ color: '#58f4dd', transparent: true, opacity: 0.8 }));
     this.fanGlow.position.set(0, -0.48, 0.08);
     this.fanGlow.visible = false;
@@ -480,8 +483,8 @@ export class GameVisuals {
     return group;
   }
 
-  private syncLoops(x: number): void {
-    const nearby = loopsBetween(x - 35, x + 90);
+  private syncLoops(x: number, left: number, right: number): void {
+    const nearby = loopsBetween(Math.min(x - 35, left - 20), Math.max(x + 90, right + 20));
     for (const spec of nearby) if (!this.loops.has(spec.id)) this.loops.set(spec.id, this.makeLoop(spec));
     for (const [id, group] of this.loops) {
       if (nearby.some((spec) => spec.id === id)) continue;
@@ -626,10 +629,6 @@ export class GameVisuals {
     const sceneDelta = impactFrozen ? 0 : delta;
     this.elapsed += sceneDelta;
     if (running) this.policeTime += delta;
-    this.syncChunks(physics);
-    this.syncLoops(snapshot.car.x);
-    this.randomBoxes.update(physics.randomBoxStates, sceneDelta, running && !impactFrozen,
-      snapshot.boxRewardEvents, snapshot.boxRewardSerial);
     this.healthHitPopups.update(snapshot.healthHitEvents, snapshot.healthHitSerial);
     this.ragdolls.update(snapshot.ragdolls ?? [], sceneDelta);
     this.ragdollGroundEffects.update(snapshot.ragdollGroundEvents, snapshot.ragdollGroundSerial,
@@ -692,6 +691,16 @@ export class GameVisuals {
     this.cameraX += (targetX - this.cameraX) * tracking;
     this.cameraY += (targetY - this.cameraY) * tracking;
     this.camera.position.set(this.cameraX, this.cameraY, 36);
+    const viewLeft = this.cameraX + this.camera.left;
+    const viewRight = this.cameraX + this.camera.right;
+    // Stream before drawing, using this frame's final zoom and tracking position.
+    physics.setViewBounds(viewLeft, viewRight);
+    this.syncChunks(physics);
+    this.syncLoops(snapshot.car.x, viewLeft, viewRight);
+    this.hazardHalos.update(physics.hazardStates, this.viewHeight,
+      this.host.clientHeight || window.innerHeight, viewLeft, viewRight);
+    this.randomBoxes.update(physics.randomBoxStates, sceneDelta, running && !impactFrozen,
+      snapshot.boxRewardEvents, snapshot.boxRewardSerial);
     this.depot.update(this.cameraX, this.viewHeight * this.aspect, this.elapsed);
     this.updateBackdrop();
     const slowing = this.slowMotion.update(slowMotion, wallDelta);
@@ -745,6 +754,7 @@ export class GameVisuals {
     this.combat.dispose();
     this.shield.dispose(); this.randomBoxes.dispose(); this.ragdolls.dispose(); this.ragdollGroundEffects.dispose();
     this.healthHitPopups.dispose();
+    this.hazardHalos.dispose();
     this.blur.dispose();
     this.slowMotion.dispose();
     this.groundMat.dispose();

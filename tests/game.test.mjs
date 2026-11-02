@@ -1698,3 +1698,41 @@ test('reserve doubles boost duration and power increases both acceleration and b
     assert.equal(plain.snapshot(1).boost,remaining,'reapplying upgrades cannot refill fuel');
   } finally {plain.dispose();reserve.dispose();power.dispose();}
 });
+
+
+test('camera streaming covers both edges of a wide airborne view and contracts after landing', () => {
+  const game = new GamePhysics(2834);
+  try {
+    game.setViewBounds(2680, 3160);
+    for (let index = Math.floor((2680 - 30) / 30); index <= Math.floor((3160 + 30) / 30); index++) {
+      assert.ok(game.chunks.has(index), `missing visible chunk ${index}`);
+    }
+    const wideCount = game.chunks.size;
+    // Advancing the fixed simulation must not revert to the old 95m look-ahead.
+    game.step(idle);
+    assert.ok(game.chunks.has(Math.floor(3160 / 30)));
+    game.setViewBounds(2810, 2890);
+    assert.ok(game.chunks.size < wideCount);
+    assert.ok(!game.chunks.has(Math.floor(3160 / 30)), 'distant physics must be released after zooming in');
+    assert.ok(game.chunks.has(Math.floor(game.car.translation().x / 30)), 'car collision terrain must remain loaded');
+  } finally { game.dispose(); }
+});
+
+test('streaming exposes newly visible hazards immediately, including while paused, and preserves destroyed obstacles', () => {
+  const game = new GamePhysics(2834);
+  try {
+    const initial = new Set(game.hazardStates.map(hazard => hazard.id));
+    game.setViewBounds(2800, 3300);
+    const revealed = game.hazardStates.filter(hazard => !initial.has(hazard.id));
+    assert.ok(revealed.length > 0);
+    const victim = revealed[0];
+    const active = [...game.chunks.values()].flatMap(chunk => chunk.hazards).find(hazard => hazard.spec.id === victim.id);
+    game.breakHazard(active, 'weapon', 0);
+    assert.ok(!game.hazardStates.some(hazard => hazard.id === victim.id));
+    game.setViewBounds(2810, 2870);
+    assert.ok(!game.hazardStates.some(hazard => hazard.id === victim.id));
+    game.setViewBounds(2800, 3300);
+    assert.ok(!game.hazardStates.some(hazard => hazard.id === victim.id), 'zooming back out must not revive destroyed hazards');
+    assert.ok(game.hazardStates.some(hazard => hazard.id === revealed.at(-1).id));
+  } finally { game.dispose(); }
+});
