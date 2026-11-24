@@ -23,22 +23,11 @@ Switching away from the browser or hiding its tab pauses the solo run and fades 
 
 ## Local multiplayer
 
-### Play from Vercel or another HTTPS host
+Open the hosted game on two devices connected to the same Wi-Fi. Each browser registers a short-lived presence with Roadster API. When a possible nearby player appears, the game offers a two-player race automatically. Choose the player; they accept the invitation; the browsers exchange WebRTC signaling through the API and open a direct data channel. The host starts the race from the lobby. No account, room code, invitation link, or local installation is needed. The API's PostgreSQL schema for this feature is installed at startup from `migrations/003_lan.sql`.
 
-1. Connect 2–4 devices to the same Wi-Fi or wired network. Open the hosted game and choose **Multiplayer** next to **Account & Sync**.
-2. The host selects **Create room** and sends the invitation link to one player. That player opens the link, selects **Join room**, and sends the reply code back to the host.
-3. The host pastes the reply code and selects **Connect player**. Repeat with the new invitation link for each additional player.
-4. Once at least two players have joined, the host selects **Start race**. Keep the host's game open for the duration of the room.
+The discovery service groups candidates by the public IP seen by Vercel. This does not prove they share a router: carrier-grade NAT, VPNs, and network configuration can produce false matches. The race only uses WebRTC host candidates with no relay server. Browsers may mask their local addresses with mDNS or block local peer connections; guest Wi-Fi isolation can also prevent a race. In those cases, the invitation times out. Browser JavaScript cannot verify that both devices use Wi-Fi rather than Ethernet.
 
-Over HTTPS, WebRTC data channels carry race updates directly between each player and the host. The invitation and reply let the browsers negotiate the connection themselves. Each link pairs one guest. Allow local network access if the browser asks, and use a network that allows devices to reach one another.
-
-Roadster fills in the Wi-Fi IPv4 address when the browser exposes one unambiguous address. Manual entries are remembered in that browser. If a direct connection times out, open **Connection help**, check the laptop’s address, and select **New link**. The mobile device can also provide its own Wi-Fi IPv4 address before generating a fresh reply. Each browser adds the entered address to the network paths it tries for that invitation.
-
-### Play from a local Vite server
-
-Run `npm run lan` on the host laptop to build and serve the game. For development, use `npm run dev`. Guests on the same network open the **Network** address printed by Vite and join using the room code or invitation link. The bundled WebSocket server handles connections over the local network.
-
-In both modes, everyone drives the same stock car on the city track. The first to reach 1,000 m wins. If everyone crashes or the three-minute timer expires, the farthest distance wins. Rivals appear on the road in different colors and pass through each other. Leaving multiplayer returns you to your solo menu with its progress intact.
+Both drivers use the same stock car on the city track. The first to reach 1,000 m wins. If both crash or the three-minute timer expires, the farthest distance wins. Rivals appear in different colors and pass through each other. Leaving the race returns each driver to their own solo progress.
 
 ## Account and cloud save
 

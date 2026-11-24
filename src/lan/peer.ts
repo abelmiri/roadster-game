@@ -8,7 +8,7 @@ const TOKEN_PREFIX = 'rd1.';
 const TOKEN_LIMIT = 12_000;
 const codePattern = /^[2-9A-HJ-NP-Z]{6}$/;
 
-interface Signal {
+export interface Signal {
   id: string;
   code: string;
   sdp: string;

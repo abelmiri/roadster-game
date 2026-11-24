@@ -1,5 +1,5 @@
 export const ROOM_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-export const MAX_PLAYERS = 4;
+export const MAX_PLAYERS = 2;
 const MIN_PLAYERS = 2;
 const TARGET = 1000;
 const COUNTDOWN_MS = 3000;

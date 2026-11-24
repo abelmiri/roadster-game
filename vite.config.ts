@@ -1,8 +1,6 @@
 import { defineConfig } from 'vite';
-import { roadsterLan } from './server/lan.mjs';
 
 export default defineConfig({
-  plugins: [roadsterLan()],
   esbuild: { legalComments: 'inline' },
   build: {
     rollupOptions: {

@@ -24,7 +24,7 @@ import { TouchLayoutEditor } from './touchLayout';
 import { touchIcon } from './touchIcons';
 import { SHOP_STATES, shopBadge, shopStateIcon, type ShopState } from './shopState';
 import { ApiError, GameSync, clearSession, getTelegram, health, linkTelegram, logout, passkey, unlinkTelegram } from './backend';
-import { LanLobby, invitedRoom, type LanInvitation } from './lan/lobby';
+import { LanLobby } from './lan/lobby';
 import type { LanRoom } from './lan/protocol';
 import './styles.css';
 import './hud.css';
@@ -49,7 +49,7 @@ interface LanRace {
   soloAim: AimDirection;
 }
 
-const lanPlayerRows = (id: string): string => Array.from({ length: 4 }, (_, i) =>
+const lanPlayerRows = (id: string): string => Array.from({ length: 2 }, (_, i) =>
   `<li id="${id}-${i}" hidden><bdi id="${id}-name-${i}"></bdi><span id="${id}-distance-${i}"></span></li>`).join('');
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -97,7 +97,7 @@ app.innerHTML = `
         <div id="mobile-settings-actions" class="mobile-settings-actions"></div>
       </section>
     </div>
-    <section id="lan-hud" class="lan-hud" aria-label="Multiplayer" hidden>
+    <section id="lan-hud" class="lan-hud" aria-label="Nearby race" hidden>
       <div class="lan-hud-heading"><div><strong id="lan-finish-distance"></strong><span id="lan-clock"></span></div><button id="lan-leave" type="button" data-i18n="lanLeave"></button></div>
       <ol id="lan-standing" class="lan-player-list">${lanPlayerRows('lan-standing')}</ol>
     </section>
@@ -212,8 +212,8 @@ app.innerHTML = `
           <button id="restart-button" class="restart-button" type="button" hidden><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg><span id="restart-label"></span></button>
           <div class="menu-network-actions">
           <button id="account-button" class="account-button" type="button"><span class="account-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8.5" r="3.2" stroke="#a6f4df" stroke-width="1.35"/><path d="M5.8 19.2c.6-3.1 2.8-5 6.2-5s5.6 1.9 6.2 5" stroke="#a6f4df" stroke-width="1.35" stroke-linecap="round"/></svg></span><span id="account-button-label"></span></button>
-          <button id="lan-button" class="account-button" type="button" aria-haspopup="dialog" aria-controls="lan-dialog" aria-expanded="false"><span class="account-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="2.4"/><path d="M4.6 17c.4-2.7 1.9-4.2 4.4-4.2s4 1.5 4.4 4.2M15 7.3a2.4 2.4 0 0 1 0 4.7m.8 1.5c2 .3 3.2 1.6 3.6 3.5"/></svg></span><span id="lan-button-label" data-i18n="multiplayer"></span></button>
           </div>
+          <p id="lan-presence" class="lan-presence" role="status"></p>
         </div>
         <div class="menu-run-records">
           <div><span data-i18n="menuBestDistance"></span><strong id="menu-best-distance"></strong></div>
@@ -306,31 +306,9 @@ app.innerHTML = `
       <div class="account-card lan-card">
         <div class="account-heading"><h2 id="lan-title" data-i18n="lanTitle"></h2><button id="lan-close" type="button">×</button></div>
         <p id="lan-intro" data-i18n="lanIntro"></p>
-        <form id="lan-entry" class="lan-entry">
-          <label for="lan-name" data-i18n="lanName"></label><input id="lan-name" maxlength="24" autocomplete="nickname" dir="auto"/>
-          <div class="account-actions"><button id="lan-create" type="button" data-i18n="lanCreate"></button></div>
-          <div id="lan-relay-entry">
-            <label for="lan-code" data-i18n="lanCode"></label>
-            <div class="account-inline"><input id="lan-code" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" dir="ltr"/><button id="lan-join" type="submit" data-i18n="lanJoin"></button></div>
-          </div>
-          <div id="lan-direct-join-actions" class="account-actions" hidden><button id="lan-direct-join" type="submit" data-i18n="lanJoin"></button></div>
-        </form>
-        <div id="lan-guest-reply" class="lan-share" hidden>
-          <p data-i18n="lanDirectSendReply"></p>
-          <label for="lan-reply-out" data-i18n="lanDirectReply"></label>
-          <div class="account-inline"><input id="lan-reply-out" readonly dir="ltr"/><button id="lan-copy-reply" type="button" data-i18n="lanDirectCopyReply"></button></div>
-        </div>
+        <div id="lan-discovery"><div id="lan-peers" class="lan-nearby-list"></div></div>
+        <div id="lan-incoming" class="account-actions" hidden><button id="lan-accept" type="button" data-i18n="lanAccept"></button><button id="lan-decline" type="button" data-i18n="lanDecline"></button></div>
         <div id="lan-room" hidden>
-          <div id="lan-share" class="lan-share">
-            <p id="lan-share-code"><span data-i18n="lanCode"></span> <strong id="lan-room-code" dir="ltr"></strong></p>
-            <p id="lan-share-help" data-i18n="lanDirectShare" hidden></p>
-            <label for="lan-invite" data-i18n="lanInvite"></label>
-            <div class="account-inline"><input id="lan-invite" readonly dir="ltr"/><button id="lan-copy" type="button" data-i18n="lanCopy"></button><button id="lan-new-link" class="lan-secondary" type="button" data-i18n="lanDirectNewInvite" hidden></button></div>
-            <form id="lan-host-reply" hidden>
-              <label for="lan-reply-in" data-i18n="lanDirectReply"></label>
-              <div class="account-inline"><input id="lan-reply-in" maxlength="12000" autocomplete="off" autocapitalize="none" spellcheck="false" dir="ltr"/><button id="lan-connect" type="submit" data-i18n="lanDirectConnect"></button></div>
-            </form>
-          </div>
           <p id="lan-target"></p>
           <p id="lan-room-message" class="lan-room-message"></p>
           <ol id="lan-roster" class="lan-player-list">${lanPlayerRows('lan-roster')}</ol>
@@ -341,15 +319,6 @@ app.innerHTML = `
           </div>
         </div>
         <p id="lan-status" role="status"></p>
-        <details id="lan-troubleshooting" class="lan-troubleshooting" hidden>
-          <summary data-i18n="lanTroubleshoot"></summary>
-          <label for="lan-wifi-address" data-i18n="lanWifiAddress"></label>
-          <input id="lan-wifi-address" dir="ltr" inputmode="decimal" maxlength="15" autocomplete="off" spellcheck="false" aria-describedby="lan-wifi-help"/>
-          <p id="lan-wifi-help" data-i18n="lanWifiHelp"></p>
-          <strong data-i18n="lanLaptopServer"></strong>
-          <p data-i18n="lanLaptopServerHelp"></p>
-          <code dir="ltr">npm run lan</code>
-        </details>
       </div>
     </div>
     <div id="account-dialog" class="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-title" hidden>
@@ -575,8 +544,7 @@ let status: GameStatus = 'loading';
 let physics: GamePhysics;
 let visuals: GameVisuals;
 let race: LanRace | null = null;
-const lan = new LanLobby(element, changeLanRoom);
-element('lan-button').addEventListener('click', () => openMultiplayer());
+const lan = new LanLobby(element, changeLanRoom, () => openMultiplayer());
 let accumulator = 0;
 let holdInterpolation = false;
 let lastFrame = performance.now();
@@ -1311,23 +1279,14 @@ function clearHeld(): void {
   document.querySelectorAll('.touch-button').forEach((button) => button.classList.remove('is-pressed'));
 }
 
-window.addEventListener('hashchange', () => {
-  const invite = invitedRoom();
-  if (invite?.type === 'peer') openMultiplayer(invite);
-});
-
-function openMultiplayer(invite?: LanInvitation): void {
-  if (invite?.type === 'peer' && lan.isOpen && !lan.room) {
-    lan.open(player.playerName, invite);
-    return;
-  }
+function openMultiplayer(): void {
   if (status === 'loading' || status === 'error' || startPending || race || dialogBlocked() ||
       !armory.hidden || !accountDialog.hidden || !coinDialog.hidden || !recordDialog.hidden || touchLayout.editing) return;
   if (status === 'running') pause();
   if (resumeCountdownTimer !== undefined) cancelResumeCountdown();
   clearHeld();
   jumpQueued = false;
-  lan.open(player.playerName, invite);
+  lan.open();
 }
 
 function changeLanRoom(room: LanRoom | null): void {
@@ -2427,9 +2386,8 @@ async function boot(): Promise<void> {
     status = 'ready';
     loading.remove();
     setOverlay('ready');
-    const invite = invitedRoom();
-    if (invite) openMultiplayer(invite);
-    else if (player.record.needsName) openRecordDialog();
+    lan.begin(player.playerName);
+    if (player.record.needsName) openRecordDialog();
     requestAnimationFrame(frame);
   } catch (error) {
     console.error('Roadster could not start', error);
