@@ -8,7 +8,7 @@ const bundle = await build({
   format: 'esm',
   write: false,
 });
-const { addWifiCandidates, isPrivateWifiAddress } = await import(
+const { addWifiCandidates, isPrivateWifiAddress, wifiAddressFromSdp } = await import(
   'data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64'),
 );
 
@@ -39,4 +39,15 @@ test('the manual Wi-Fi route preserves the original offer and the browser’s ca
   expected.splice(3, 0, 'a=candidate:wifi2 1 udp 2122260223 192.168.0.7 52000 typ host generation 0');
   assert.equal(addWifiCandidates(sdp, '192.168.0.7'), expected.join('\r\n'));
   assert.equal(addWifiCandidates(sdp, '8.8.8.8'), sdp);
+});
+
+
+test('autofill uses one exposed private host address and leaves ambiguous or masked addresses to the user', () => {
+  const masked = 'a=candidate:1 1 udp 2122260223 masked.local 50100 typ host';
+  const wifi = 'a=candidate:2 1 udp 2122260223 192.168.100.39 50101 typ host';
+  const vpn = 'a=candidate:3 1 udp 2122260223 10.1.0.9 50102 typ host';
+  const publicRelay = 'a=candidate:4 1 udp 2122260223 203.0.113.1 50103 typ relay';
+  assert.equal(wifiAddressFromSdp(masked), undefined);
+  assert.equal(wifiAddressFromSdp([masked, wifi, wifi, publicRelay].join('\r\n')), '192.168.100.39');
+  assert.equal(wifiAddressFromSdp([wifi, vpn].join('\n')), undefined);
 });

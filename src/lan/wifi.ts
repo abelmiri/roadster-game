@@ -6,6 +6,19 @@ export function isPrivateWifiAddress(address: unknown): address is string {
   return first === 10 || (first === 172 && second >= 16 && second <= 31) || (first === 192 && second === 168);
 }
 
+export function wifiAddressFromSdp(sdp: string): string | undefined {
+  const addresses = new Set<string>();
+  for (const line of sdp.split(/\r?\n/)) {
+    if (!line.startsWith('a=candidate:')) continue;
+    const [, , protocol, , address, , type, kind] = line.split(/\s+/);
+    if (protocol?.toLowerCase() === 'udp' && type === 'typ' && kind === 'host' && isPrivateWifiAddress(address)) {
+      addresses.add(address);
+    }
+  }
+  // Several addresses can represent different interfaces, including a VPN.
+  if (addresses.size === 1) return addresses.values().next().value;
+}
+
 /** Keep the browser's candidates and add the explicitly shared Wi-Fi address as an alternate route. */
 export function addWifiCandidates(sdp: string, address: string): string {
   if (!isPrivateWifiAddress(address)) return sdp;

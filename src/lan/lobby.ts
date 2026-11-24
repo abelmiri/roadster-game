@@ -1,10 +1,11 @@
 import { carPaintPalette } from '../game/carPaint';
 import { formatNumber, getLanguage, t, type MessageKey } from '../i18n';
-import { PeerGuest, PeerHost, readSignal } from './peer';
+import { detectWifiAddress, PeerGuest, PeerHost, readSignal } from './peer';
 import { isPrivateWifiAddress } from './wifi';
 import { driverName, MAX_PLAYERS } from './room-engine.mjs';
 import type { ClientMessage, DriveState, LanError, LanRoom, RoomPlayer, ServerMessage } from './protocol';
 
+const WIFI_ADDRESS_KEY = 'roadster-lan-wifi-address';
 const codePattern = /^[2-9A-HJ-NP-Z]{6}$/;
 const errors: Record<LanError, MessageKey> = {
   name: 'lanNameRequired', missing: 'lanMissing', closed: 'lanClosed', full: 'lanFull',
@@ -28,6 +29,8 @@ export class LanLobby {
   private readonly name: HTMLInputElement;
   private readonly code: HTMLInputElement;
   private readonly invite: HTMLInputElement;
+  private readonly wifiField: HTMLInputElement;
+  private wifiLookup: AbortController | null = null;
   private readonly hud: HTMLElement;
   private readonly notice: HTMLElement;
   private socket: WebSocket | null = null;
@@ -55,6 +58,21 @@ export class LanLobby {
     this.name = element('lan-name');
     this.code = element('lan-code');
     this.invite = element('lan-invite');
+    this.wifiField = element('lan-wifi-address');
+    try {
+      const saved = localStorage.getItem(WIFI_ADDRESS_KEY);
+      if (isPrivateWifiAddress(saved)) this.wifiField.value = saved;
+    } catch { /* Address preferences are optional. */ }
+    this.wifiField.addEventListener('input', () => this.wifiLookup?.abort());
+    this.wifiField.addEventListener('change', () => {
+      const address = this.wifiAddress();
+      if (address === undefined) return;
+      this.wifiField.value = address;
+      try {
+        if (address) localStorage.setItem(WIFI_ADDRESS_KEY, address);
+        else localStorage.removeItem(WIFI_ADDRESS_KEY);
+      } catch { /* Address preferences are optional. */ }
+    });
     this.hud = element('lan-hud');
     this.notice = element('lan-race-notice');
     this.dialog.hidden = this.hud.hidden = true;
@@ -98,6 +116,7 @@ export class LanLobby {
     this.dialog.hidden = false;
     this.opener.setAttribute('aria-expanded', 'true');
     this.render();
+    if (this.directMode && !this.wifiField.value && !this.wifiLookup) void this.fillWifiAddress();
     (invite?.type === 'relay' && this.name.value ? this.code : this.name).focus();
   }
 
@@ -332,16 +351,25 @@ export class LanLobby {
     this.element<HTMLDetailsElement>('lan-troubleshooting').open = true;
   }
 
+  private async fillWifiAddress(): Promise<void> {
+    const lookup = new AbortController();
+    this.wifiLookup = lookup;
+    try {
+      const address = await detectWifiAddress(lookup.signal);
+      if (address && !lookup.signal.aborted && !this.wifiField.value) this.wifiField.value = address;
+    } catch { /* Some browsers only expose mDNS names or block candidate gathering. */ }
+    finally { if (this.wifiLookup === lookup) this.wifiLookup = null; }
+  }
+
   private wifiAddress(): string | undefined {
-    const field = this.element<HTMLInputElement>('lan-wifi-address');
-    const address = field.value.trim()
+    const address = this.wifiField.value.trim()
       .replace(/[۰-۹]/g, character => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(character)))
       .replace(/[٠-٩]/g, character => String('٠١٢٣٤٥٦٧٨٩'.indexOf(character)));
     if (!address || isPrivateWifiAddress(address)) return address;
     this.message = 'lanWifiInvalid';
     this.element<HTMLDetailsElement>('lan-troubleshooting').open = true;
     this.render();
-    field.focus();
+    this.wifiField.focus();
     return undefined;
   }
 
@@ -354,6 +382,8 @@ export class LanLobby {
   }
 
   private disconnect(): void {
+    this.wifiLookup?.abort();
+    this.wifiLookup = null;
     if (this.timeout !== undefined) window.clearTimeout(this.timeout);
     this.timeout = undefined;
     this.pending = false;
@@ -439,7 +469,7 @@ export class LanLobby {
     const sharingDirect = direct && share;
     const troubleshooting = this.element<HTMLDetailsElement>('lan-troubleshooting');
     troubleshooting.hidden = !direct || Boolean(room && !sharingDirect);
-    this.element<HTMLInputElement>('lan-wifi-address').disabled = this.pending || this.pairing !== 'idle';
+    this.wifiField.disabled = this.pending || this.pairing !== 'idle';
     this.entry.hidden = Boolean(room) || hasReply;
     this.roomPanel.hidden = !room;
     this.element('lan-guest-reply').hidden = !hasReply;

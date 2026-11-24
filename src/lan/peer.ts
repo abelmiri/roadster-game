@@ -1,4 +1,4 @@
-import { addWifiCandidates, isPrivateWifiAddress } from './wifi';
+import { addWifiCandidates, isPrivateWifiAddress, wifiAddressFromSdp } from './wifi';
 import type { ClientMessage, LanError, LanRoom, ServerMessage } from './protocol';
 import { driverName, MAX_PLAYERS, RaceRoom, ROOM_ALPHABET } from './room-engine.mjs';
 
@@ -46,6 +46,41 @@ function parseMessage(data: unknown, limit: number): unknown {
   try { return JSON.parse(data); } catch { return null; }
 }
 
+function waitForGathering(pc: RTCPeerConnection, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      window.clearTimeout(timer);
+      pc.removeEventListener('icegatheringstatechange', gathered);
+      signal.removeEventListener('abort', cancelled);
+    };
+    const finish = () => { cleanup(); resolve(); };
+    const cancelled = () => { cleanup(); reject(new Error('Connection closed')); };
+    const gathered = () => { if (pc.iceGatheringState === 'complete') finish(); };
+    const timer = window.setTimeout(finish, 5000);
+    if (signal.aborted) { cancelled(); return; }
+    signal.addEventListener('abort', cancelled, { once: true });
+    pc.addEventListener('icegatheringstatechange', gathered);
+    gathered();
+  });
+}
+
+export async function detectWifiAddress(signal: AbortSignal): Promise<string | undefined> {
+  if (typeof RTCPeerConnection === 'undefined') return;
+  const pc = new RTCPeerConnection({ iceServers: [] });
+  const close = () => pc.close();
+  signal.addEventListener('abort', close, { once: true });
+  try {
+    if (signal.aborted) return;
+    pc.createDataChannel(CHANNEL);
+    await pc.setLocalDescription(await pc.createOffer());
+    await waitForGathering(pc, signal);
+    return wifiAddressFromSdp(pc.localDescription?.sdp ?? '');
+  } finally {
+    signal.removeEventListener('abort', close);
+    close();
+  }
+}
+
 // Gather only local candidates. The invite and reply carry the entire exchange.
 class PeerLink {
   readonly pc = new RTCPeerConnection({ iceServers: [] });
@@ -88,33 +123,10 @@ class PeerLink {
   async makeSignal(id: string, code: string, type: Signal['type'], wifiAddress?: string): Promise<Signal> {
     const local = await (type === 'offer' ? this.pc.createOffer() : this.pc.createAnswer());
     await this.pc.setLocalDescription(local);
-    if (this.pc.iceGatheringState !== 'complete') await this.waitForGathering();
+    await waitForGathering(this.pc, this.abort.signal);
     const sdp = this.pc.localDescription?.sdp ?? '';
     if (!/^a=candidate:.* typ host\b/m.test(sdp)) throw new Error('No local network candidates');
-    return { id, code, type, sdp, wifiAddress: wifiAddress || undefined };
-  }
-
-  private waitForGathering(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const signal = this.abort.signal;
-      const cleanup = () => {
-        window.clearTimeout(timer);
-        this.pc.removeEventListener('icegatheringstatechange', gathered);
-        signal.removeEventListener('abort', cancelled);
-      };
-      const cancelled = () => { cleanup(); reject(new Error('Connection closed')); };
-      const gathered = () => {
-        if (this.pc.iceGatheringState !== 'complete') return;
-        cleanup();
-        resolve();
-      };
-      // Some browsers keep gathering after their first usable host candidate.
-      const timer = window.setTimeout(() => { cleanup(); resolve(); }, 5000);
-      if (signal.aborted) { cancelled(); return; }
-      signal.addEventListener('abort', cancelled, { once: true });
-      this.pc.addEventListener('icegatheringstatechange', gathered);
-      gathered();
-    });
+    return { id, code, type, sdp, wifiAddress: wifiAddress || wifiAddressFromSdp(sdp) };
   }
 
   send(message: ClientMessage | ServerMessage): boolean {

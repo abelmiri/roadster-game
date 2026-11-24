@@ -32,7 +32,7 @@ Switching away from the browser or hiding its tab pauses the solo run and fades 
 
 Over HTTPS, WebRTC data channels carry race updates directly between each player and the host. The invitation and reply let the browsers negotiate the connection themselves. Each link pairs one guest. Allow local network access if the browser asks, and use a network that allows devices to reach one another.
 
-If a direct connection times out, open **Connection help**. Enter the laptop’s Wi-Fi IPv4 address on the laptop and select **New link**. The mobile device can also provide its own Wi-Fi IPv4 address before generating a fresh reply. Each browser adds the entered address to the network paths it tries for that invitation.
+Roadster fills in the Wi-Fi IPv4 address when the browser exposes one unambiguous address. Manual entries are remembered in that browser. If a direct connection times out, open **Connection help**, check the laptop’s address, and select **New link**. The mobile device can also provide its own Wi-Fi IPv4 address before generating a fresh reply. Each browser adds the entered address to the network paths it tries for that invitation.
 
 ### Play from a local Vite server
 

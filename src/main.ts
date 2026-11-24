@@ -344,7 +344,7 @@ app.innerHTML = `
         <details id="lan-troubleshooting" class="lan-troubleshooting" hidden>
           <summary data-i18n="lanTroubleshoot"></summary>
           <label for="lan-wifi-address" data-i18n="lanWifiAddress"></label>
-          <input id="lan-wifi-address" dir="ltr" inputmode="decimal" maxlength="15" placeholder="192.168.1.25" autocomplete="off" spellcheck="false" aria-describedby="lan-wifi-help"/>
+          <input id="lan-wifi-address" dir="ltr" inputmode="decimal" maxlength="15" autocomplete="off" spellcheck="false" aria-describedby="lan-wifi-help"/>
           <p id="lan-wifi-help" data-i18n="lanWifiHelp"></p>
           <strong data-i18n="lanLaptopServer"></strong>
           <p data-i18n="lanLaptopServerHelp"></p>
