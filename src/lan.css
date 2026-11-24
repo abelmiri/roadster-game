@@ -10,6 +10,10 @@
 .lan-presence { margin: 8px 0 0; color: #a6f4df; font-size: .78em; }
 .lan-nearby-list { display: grid; gap: 10px; margin: 12px 0; }
 .lan-nearby-list button { width: 100%; padding: 12px 16px; border: 1px solid #a6f4df; border-radius: 6px; background: #a6f4df; color: #10263b; font: inherit; font-weight: 750; cursor: pointer; text-align: start; }
+.lan-retry { margin-top: 14px; }
+.lan-retry label { display: block; margin-bottom: 6px; }
+.lan-retry input { min-width: 0; padding: 8px 10px; border: 1px solid #829da9; border-radius: 5px; background: #edf9f5; color: #142c3b; font: inherit; }
+.lan-retry p { font-size: .82em; }
 #lan-incoming { display: flex; gap: 10px; }
 #lan-incoming[hidden] { display: none; }
 #lan-decline { background: transparent; color: #c8ffeb; border: 1px solid #a6f4df; }

@@ -2,6 +2,7 @@ import { carPaintPalette } from '../game/carPaint';
 import { formatNumber, getLanguage, t } from '../i18n';
 import { DiscoveryApi, type NearbyInvite, type NearbyPlayer, type NearbySignal } from './discovery';
 import { PeerGuest, PeerHost, readSignal, type Signal } from './peer';
+import { isPrivateWifiAddress } from './wifi';
 import type { ClientMessage, DriveState, LanRoom, RoomPlayer, ServerMessage } from './protocol';
 
 export class LanLobby {
@@ -15,6 +16,7 @@ export class LanLobby {
   private peer: PeerHost | PeerGuest | null = null;
   private name = '';
   private status = '';
+  private failedPeerId = '';
   private polling = false;
   private connecting = false;
   private signaling = false;
@@ -40,6 +42,7 @@ export class LanLobby {
     element('lan-decline').addEventListener('click', () => void this.respond(false));
     element('lan-start').addEventListener('click', () => this.send({ type: 'start' }));
     element('lan-rematch').addEventListener('click', () => this.send({ type: 'rematch' }));
+    element('lan-retry-button').addEventListener('click', () => void this.retry());
     window.addEventListener('pagehide', () => { void this.api.close().catch(() => {}); });
   }
 
@@ -108,7 +111,7 @@ export class LanLobby {
     this.status = t('lanDirectPreparing');
     this.render();
     try {
-      const offer = readSignal(await host.createInvitation(), 'offer');
+      const offer = readSignal(await host.createInvitation(this.savedWifiAddress()), 'offer');
       if (!offer || this.peer !== host) return;
       await this.api.signal(invite.id, { kind: 'offer', signalId: offer.id, code: offer.code, sdp: offer.sdp,
         wifiAddress: offer.wifiAddress });
@@ -124,7 +127,7 @@ export class LanLobby {
     this.status = t('lanDirectPreparing');
     this.render();
     try {
-      const answer = readSignal(await guest.prepareReply(), 'answer');
+      const answer = readSignal(await guest.prepareReply(this.savedWifiAddress()), 'answer');
       if (!answer || this.peer !== guest) return;
       await this.api.signal(invite.id, { kind: 'answer', signalId: answer.id, code: answer.code, sdp: answer.sdp,
         wifiAddress: answer.wifiAddress });
@@ -136,12 +139,43 @@ export class LanLobby {
   private async invite(peerId: string): Promise<void> {
     if (this.active || !this.api.id) return;
     try {
+      this.failedPeerId = '';
       const result = await this.api.invite(peerId);
       this.active = { id: result.id, hostId: this.api.id, guestId: peerId,
         hostName: this.name, guestName: this.peers.find(peer => peer.id === peerId)?.name ?? '', state: 'pending' };
       this.status = t('lanWaitingAnswer');
     } catch { this.status = t('lanPeerUnavailable'); }
     this.render();
+  }
+
+  private savedWifiAddress(): string | undefined {
+    try {
+      const address = localStorage.getItem('roadster-lan-wifi-address');
+      return isPrivateWifiAddress(address) ? address : undefined;
+    } catch { return undefined; }
+  }
+
+  private async retry(): Promise<void> {
+    const field = this.element<HTMLInputElement>('lan-retry-address');
+    const address = field.value.trim()
+      .replace(/[۰-۹]/g, character => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(character)))
+      .replace(/[٠-٩]/g, character => String('٠١٢٣٤٥٦٧٨٩'.indexOf(character)));
+    if (address && !isPrivateWifiAddress(address)) {
+      this.status = t('lanWifiInvalid');
+      this.render();
+      field.focus();
+      return;
+    }
+    try {
+      if (address) localStorage.setItem('roadster-lan-wifi-address', address);
+      else localStorage.removeItem('roadster-lan-wifi-address');
+    } catch { /* The connection can continue without saved preferences. */ }
+    const peerId = this.failedPeerId;
+    if (!peerId) return;
+    this.failedPeerId = '';
+    this.status = '';
+    this.dismissed.delete(peerId);
+    await this.invite(peerId);
   }
 
   private async respond(accept: boolean): Promise<void> {
@@ -163,6 +197,7 @@ export class LanLobby {
   }
 
   leave(restoreFocus = true): void {
+    this.failedPeerId = '';
     if (!this.room && !this.active) for (const peer of this.peers) this.dismissed.add(peer.id);
     if (this.active) {
       this.dismissed.add(this.active.hostId === this.api.id ? this.active.guestId : this.active.hostId);
@@ -181,7 +216,10 @@ export class LanLobby {
   }
 
   private connectionLost(): void {
+    const peerId = this.active?.hostId === this.api.id ? this.active?.guestId : this.active?.hostId;
     this.leave(false);
+    this.failedPeerId = peerId ?? '';
+    this.element<HTMLInputElement>('lan-retry-address').value = this.savedWifiAddress() ?? '';
     this.status = t('lanDirectFailed');
     this.dialog.hidden = false;
     this.render();
@@ -257,6 +295,7 @@ export class LanLobby {
     this.text('lan-intro', incoming ? t('lanIncoming', { name: this.active!.hostName }) :
       this.active ? this.status || t('lanWaitingAnswer') : t('lanNearbyIntro'));
     this.text('lan-status', this.active ? '' : this.status);
+    this.element('lan-retry').hidden = !this.failedPeerId || Boolean(room || this.active);
     this.text('lan-presence', this.status === t('lanDiscoveryUnavailable') ? this.status :
       this.room || this.active ? '' : this.peers.some(peer => !this.dismissed.has(peer.id)) ? t('lanFound') : t('lanSearching'));
     const list = this.element('lan-peers');

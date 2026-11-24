@@ -319,6 +319,11 @@ app.innerHTML = `
           </div>
         </div>
         <p id="lan-status" role="status"></p>
+        <div id="lan-retry" class="lan-retry" hidden>
+          <label for="lan-retry-address" data-i18n="lanWifiAddress"></label>
+          <div class="account-inline"><input id="lan-retry-address" dir="ltr" inputmode="decimal" maxlength="15" autocomplete="off" spellcheck="false"/><button id="lan-retry-button" type="button" data-i18n="lanRetry"></button></div>
+          <p data-i18n="lanRetryHelp"></p>
+        </div>
       </div>
     </div>
     <div id="account-dialog" class="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-title" hidden>
