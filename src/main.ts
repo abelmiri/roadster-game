@@ -341,6 +341,15 @@ app.innerHTML = `
           </div>
         </div>
         <p id="lan-status" role="status"></p>
+        <details id="lan-troubleshooting" class="lan-troubleshooting" hidden>
+          <summary data-i18n="lanTroubleshoot"></summary>
+          <label for="lan-wifi-address" data-i18n="lanWifiAddress"></label>
+          <input id="lan-wifi-address" dir="ltr" inputmode="decimal" maxlength="15" placeholder="192.168.1.25" autocomplete="off" spellcheck="false" aria-describedby="lan-wifi-help"/>
+          <p id="lan-wifi-help" data-i18n="lanWifiHelp"></p>
+          <strong data-i18n="lanLaptopServer"></strong>
+          <p data-i18n="lanLaptopServerHelp"></p>
+          <code dir="ltr">npm run lan</code>
+        </details>
       </div>
     </div>
     <div id="account-dialog" class="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-title" hidden>

@@ -1,3 +1,4 @@
+import { addWifiCandidates, isPrivateWifiAddress } from './wifi';
 import type { ClientMessage, LanError, LanRoom, ServerMessage } from './protocol';
 import { driverName, MAX_PLAYERS, RaceRoom, ROOM_ALPHABET } from './room-engine.mjs';
 
@@ -12,6 +13,7 @@ interface Signal {
   code: string;
   sdp: string;
   type: 'offer' | 'answer';
+  wifiAddress?: string;
 }
 
 export function readSignal(token: string, type: Signal['type']): Signal | null {
@@ -21,6 +23,7 @@ export function readSignal(token: string, type: Signal['type']): Signal | null {
     const signal: Signal = JSON.parse(atob(value.slice(TOKEN_PREFIX.length).replace(/-/g, '+').replace(/_/g, '/')));
     if (signal.type !== type || typeof signal.code !== 'string' || !codePattern.test(signal.code) ||
         typeof signal.id !== 'string' || !/^[\da-f-]{36}$/i.test(signal.id) ||
+        (signal.wifiAddress !== undefined && !isPrivateWifiAddress(signal.wifiAddress)) ||
         typeof signal.sdp !== 'string' || !/^m=application .*webrtc-datachannel\r?$/m.test(signal.sdp) ||
         /^m=(?!application )/m.test(signal.sdp) || !/^a=candidate:.* typ host\b/m.test(signal.sdp)) return null;
     return signal;
@@ -31,6 +34,11 @@ export function readSignal(token: string, type: Signal['type']): Signal | null {
 
 function signalToken(signal: Signal): string {
   return TOKEN_PREFIX + btoa(JSON.stringify(signal)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function remoteDescription(signal: Signal): RTCSessionDescriptionInit {
+  const { type, sdp, wifiAddress } = signal;
+  return { type, sdp: wifiAddress ? addWifiCandidates(sdp, wifiAddress) : sdp };
 }
 
 function parseMessage(data: unknown, limit: number): unknown {
@@ -77,13 +85,13 @@ class PeerLink {
     });
   }
 
-  async makeSignal(id: string, code: string, type: Signal['type']): Promise<Signal> {
+  async makeSignal(id: string, code: string, type: Signal['type'], wifiAddress?: string): Promise<Signal> {
     const local = await (type === 'offer' ? this.pc.createOffer() : this.pc.createAnswer());
     await this.pc.setLocalDescription(local);
     if (this.pc.iceGatheringState !== 'complete') await this.waitForGathering();
     const sdp = this.pc.localDescription?.sdp ?? '';
     if (!/^a=candidate:.* typ host\b/m.test(sdp)) throw new Error('No local network candidates');
-    return { id, code, type, sdp };
+    return { id, code, type, sdp, wifiAddress: wifiAddress || undefined };
   }
 
   private waitForGathering(): Promise<void> {
@@ -156,7 +164,7 @@ export class PeerHost {
 
   start(name: string): void { this.room.join(HOST_ID, name, clock()); }
 
-  async createInvitation(): Promise<string> {
+  async createInvitation(wifiAddress?: string): Promise<string> {
     this.cancelInvitation();
     const id = crypto.randomUUID();
     const guestId = this.nextId++;
@@ -187,7 +195,7 @@ export class PeerHost {
     const pending = { id, link, accepted: false };
     this.pending = pending;
     try {
-      const offer = await link.makeSignal(id, this.room.code, 'offer');
+      const offer = await link.makeSignal(id, this.room.code, 'offer', wifiAddress);
       if (this.pending !== pending) throw new Error('Invitation closed');
       return signalToken(offer);
     } catch (error) {
@@ -201,7 +209,7 @@ export class PeerHost {
     if (!pending || pending.accepted || pending.id !== answer.id || this.room.code !== answer.code) return false;
     pending.accepted = true;
     try {
-      await pending.link.pc.setRemoteDescription(answer);
+      await pending.link.pc.setRemoteDescription(remoteDescription(answer));
     } catch {
       if (this.pending === pending) pending.accepted = false;
       return false;
@@ -271,9 +279,9 @@ export class PeerGuest {
     }, () => {}, onLost);
   }
 
-  async prepareReply(): Promise<string> {
-    await this.link.pc.setRemoteDescription(this.offer);
-    return signalToken(await this.link.makeSignal(this.offer.id, this.offer.code, 'answer'));
+  async prepareReply(wifiAddress?: string): Promise<string> {
+    await this.link.pc.setRemoteDescription(remoteDescription(this.offer));
+    return signalToken(await this.link.makeSignal(this.offer.id, this.offer.code, 'answer', wifiAddress));
   }
 
   send(message: ClientMessage): boolean { return this.link.send(message); }

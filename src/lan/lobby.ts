@@ -1,6 +1,7 @@
 import { carPaintPalette } from '../game/carPaint';
 import { formatNumber, getLanguage, t, type MessageKey } from '../i18n';
 import { PeerGuest, PeerHost, readSignal } from './peer';
+import { isPrivateWifiAddress } from './wifi';
 import { driverName, MAX_PLAYERS } from './room-engine.mjs';
 import type { ClientMessage, DriveState, LanError, LanRoom, RoomPlayer, ServerMessage } from './protocol';
 
@@ -114,8 +115,9 @@ export class LanLobby {
       event.preventDefault();
       if (!event.repeat) this.leave();
     } else if (event.code === 'Tab') {
-      const controls = [...this.dialog.querySelectorAll<HTMLElement>('button:not(:disabled), input')]
-        .filter(control => !control.hidden && !control.closest('[hidden]'));
+      const controls = [...this.dialog.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), summary')]
+        .filter(control => !control.hidden && !control.closest('[hidden]') &&
+          (control.tagName === 'SUMMARY' || !control.closest('details:not([open])')));
       const first = controls[0];
       const last = controls.at(-1);
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
@@ -230,12 +232,15 @@ export class LanLobby {
       this.render();
       return;
     }
+    const wifiAddress = this.wifiAddress();
+    if (wifiAddress === undefined) return;
     if (this.incoming?.type !== 'peer') {
       const host = new PeerHost(data => this.receive(data), () => {
         if (this.peer !== host) return;
         this.transfer = '';
         this.pairing = 'idle';
-        this.message = 'lanDirectFailed';
+        this.element<HTMLInputElement>('lan-reply-in').value = '';
+        this.directFailure();
         this.render();
       });
       this.id = host.id;
@@ -259,7 +264,7 @@ export class LanLobby {
         if (this.peer === guest) this.directLost();
       });
       this.peer = guest;
-      const reply = await guest.prepareReply();
+      const reply = await guest.prepareReply(wifiAddress);
       if (this.peer !== guest || this.room) return;
       this.transfer = reply;
       this.message = null;
@@ -273,6 +278,8 @@ export class LanLobby {
   private async prepareInvitation(): Promise<void> {
     const host = this.peer;
     if (!(host instanceof PeerHost) || this.room?.phase !== 'lobby' || this.room.players.length >= MAX_PLAYERS) return;
+    const wifiAddress = this.wifiAddress();
+    if (wifiAddress === undefined) return;
     const task = ++this.inviteTask;
     this.transfer = '';
     this.element<HTMLInputElement>('lan-reply-in').value = '';
@@ -280,13 +287,13 @@ export class LanLobby {
     this.message = 'lanDirectPreparing';
     this.render();
     try {
-      const token = await host.createInvitation();
+      const token = await host.createInvitation(wifiAddress);
       if (this.peer !== host || task !== this.inviteTask || this.room?.phase !== 'lobby') return;
       this.transfer = token;
       this.message = null;
     } catch {
       if (this.peer !== host || task !== this.inviteTask || this.room?.phase !== 'lobby') return;
-      this.message = 'lanDirectFailed';
+      this.directFailure();
     }
     this.pairing = 'idle';
     this.render();
@@ -313,10 +320,29 @@ export class LanLobby {
   private directLost(): void {
     const wasInRoom = Boolean(this.room);
     this.disconnect();
-    this.message = wasInRoom ? 'lanDirectLost' : 'lanDirectFailed';
+    if (wasInRoom) this.message = 'lanDirectLost';
+    else this.directFailure();
     this.dialog.hidden = false;
     this.setRoom(null);
     this.element('lan-close').focus();
+  }
+
+  private directFailure(): void {
+    this.message = 'lanDirectFailed';
+    this.element<HTMLDetailsElement>('lan-troubleshooting').open = true;
+  }
+
+  private wifiAddress(): string | undefined {
+    const field = this.element<HTMLInputElement>('lan-wifi-address');
+    const address = field.value.trim()
+      .replace(/[۰-۹]/g, character => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(character)))
+      .replace(/[٠-٩]/g, character => String('٠١٢٣٤٥٦٧٨٩'.indexOf(character)));
+    if (!address || isPrivateWifiAddress(address)) return address;
+    this.message = 'lanWifiInvalid';
+    this.element<HTMLDetailsElement>('lan-troubleshooting').open = true;
+    this.render();
+    field.focus();
+    return undefined;
   }
 
   private send(message: ClientMessage): boolean {
@@ -411,6 +437,9 @@ export class LanLobby {
     const hasReply = this.peer instanceof PeerGuest && Boolean(this.transfer);
     const share = room?.phase === 'lobby' && (!direct || (host && room.players.length < MAX_PLAYERS));
     const sharingDirect = direct && share;
+    const troubleshooting = this.element<HTMLDetailsElement>('lan-troubleshooting');
+    troubleshooting.hidden = !direct || Boolean(room && !sharingDirect);
+    this.element<HTMLInputElement>('lan-wifi-address').disabled = this.pending || this.pairing !== 'idle';
     this.entry.hidden = Boolean(room) || hasReply;
     this.roomPanel.hidden = !room;
     this.element('lan-guest-reply').hidden = !hasReply;

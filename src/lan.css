@@ -140,3 +140,18 @@
 #lan-new-link.lan-secondary { background: transparent; color: #c8ffeb; }
 .lan-share .account-inline button { flex-shrink: 0; }
 .lan-share .account-inline input { width: 0; }
+
+.lan-troubleshooting { margin-top: 16px; border-top: 1px solid #a6f4df35; padding-top: 12px; }
+.lan-troubleshooting summary { color: #a6f4df; cursor: pointer; font-weight: 750; }
+.lan-troubleshooting label { display: block; margin: 12px 0 6px; }
+.lan-troubleshooting input {
+  max-width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #829da9;
+  border-radius: 5px;
+  background: #edf9f5;
+  color: #142c3b;
+  font: inherit;
+}
+.lan-troubleshooting p { font-size: .9em; }
+.lan-troubleshooting code { display: inline-block; direction: ltr; }

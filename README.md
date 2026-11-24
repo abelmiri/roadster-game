@@ -32,9 +32,11 @@ Switching away from the browser or hiding its tab pauses the solo run and fades 
 
 Over HTTPS, WebRTC data channels carry race updates directly between each player and the host. The invitation and reply let the browsers negotiate the connection themselves. Each link pairs one guest. Allow local network access if the browser asks, and use a network that allows devices to reach one another.
 
+If a direct connection times out, open **Connection help**. Enter the laptop’s Wi-Fi IPv4 address on the laptop and select **New link**. The mobile device can also provide its own Wi-Fi IPv4 address before generating a fresh reply. Each browser adds the entered address to the network paths it tries for that invitation.
+
 ### Play from a local Vite server
 
-Run `npm run dev` on the host computer, or run `npm run build` followed by `npm run preview`. Guests on the same network open the **Network** address printed by Vite and join using the room code or invitation link. The bundled WebSocket server handles connections over the local network.
+Run `npm run lan` on the host laptop to build and serve the game. For development, use `npm run dev`. Guests on the same network open the **Network** address printed by Vite and join using the room code or invitation link. The bundled WebSocket server handles connections over the local network.
 
 In both modes, everyone drives the same stock car on the city track. The first to reach 1,000 m wins. If everyone crashes or the three-minute timer expires, the farthest distance wins. Rivals appear on the road in different colors and pass through each other. Leaving multiplayer returns you to your solo menu with its progress intact.
 
