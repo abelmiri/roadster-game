@@ -1,28 +1,26 @@
+import { API_URL } from '../backend';
 import { carPaintPalette } from '../game/carPaint';
-import { formatNumber, getLanguage, t } from '../i18n';
-import { DiscoveryApi, type NearbyInvite, type NearbyPlayer, type NearbySignal } from './discovery';
-import { PeerGuest, PeerHost, readSignal, type Signal } from './peer';
-import { isPrivateWifiAddress } from './wifi';
-import type { ClientMessage, DriveState, LanRoom, RoomPlayer, ServerMessage } from './protocol';
+import { formatNumber, getLanguage, t, type MessageKey } from '../i18n';
+import type { ClientMessage, DriveState, LanRoom, OnlinePlayer, RoomPlayer, ServerMessage } from './protocol';
+
+const notices: Record<string, MessageKey> = {
+  invitation_sent: 'onlineInviteSent', invitation_declined: 'onlineInviteDeclined',
+  invitation_expired: 'onlineInviteExpired', player_unavailable: 'lanPeerUnavailable',
+  room_closed: 'lanClosed', invalid_name: 'lanNameRequired', server_error: 'lanDiscoveryUnavailable',
+};
 
 export class LanLobby {
   private readonly dialog: HTMLDivElement;
   private readonly hud: HTMLElement;
   private readonly notice: HTMLElement;
-  private readonly api = new DiscoveryApi();
-  private readonly dismissed = new Set<string>();
-  private peers: NearbyPlayer[] = [];
-  private active: NearbyInvite | null = null;
-  private peer: PeerHost | PeerGuest | null = null;
+  private socket: WebSocket | null = null;
+  private retryTimer: number | undefined;
+  private retryDelay = 1000;
+  private online: OnlinePlayer[] = [];
+  private incoming: { room: string; host: number; name: string } | null = null;
+  private dismissed = new Set<number>();
   private name = '';
   private status = '';
-  private failedPeerId = '';
-  private polling = false;
-  private connecting = false;
-  private signaling = false;
-  private answerApplied = false;
-  private connectTimer: number | undefined;
-  private readonly ignoredInvites = new Set<string>();
   private receivedAt = 0;
   private lastDriveAt = -Infinity;
   private sentCrash = false;
@@ -38,154 +36,117 @@ export class LanLobby {
     this.dialog.hidden = this.hud.hidden = true;
     for (const id of ['lan-close', 'lan-leave', 'lan-lobby-leave'])
       element(id).addEventListener('click', () => this.leave());
-    element('lan-accept').addEventListener('click', () => void this.respond(true));
-    element('lan-decline').addEventListener('click', () => void this.respond(false));
+    element('lan-accept').addEventListener('click', () => this.respond(true));
+    element('lan-decline').addEventListener('click', () => this.respond(false));
     element('lan-start').addEventListener('click', () => this.send({ type: 'start' }));
     element('lan-rematch').addEventListener('click', () => this.send({ type: 'rematch' }));
-    element('lan-retry-button').addEventListener('click', () => void this.retry());
-    window.addEventListener('pagehide', () => { void this.api.close().catch(() => {}); });
   }
 
   get isOpen(): boolean { return !this.dialog.hidden; }
 
   begin(name: string): void {
     this.name = name.trim().slice(0, 24) || t('lanGuest');
-    void this.connectDiscovery();
+    this.connect();
   }
 
-  private async connectDiscovery(): Promise<void> {
-    if (this.connecting || this.api.id) return;
-    this.connecting = true;
-    try { await this.api.begin(this.name); this.status = ''; }
-    catch { this.status = t('lanDiscoveryUnavailable'); }
-    this.connecting = false;
-    this.render();
-    window.setTimeout(() => void this.poll(), 3000);
-  }
-
-  private async poll(): Promise<void> {
-    if (this.polling) return;
-    if (!this.api.id) { void this.connectDiscovery(); return; }
-    this.polling = true;
-    try {
-      const state = await this.api.state();
-      this.peers = state.peers;
-      for (const id of this.dismissed) if (!this.peers.some(peer => peer.id === id)) this.dismissed.delete(id);
-      const wasActive = Boolean(this.active);
-      this.active = state.invites.find(item => item.id === this.active?.id) ??
-        state.invites.find(item => !this.ignoredInvites.has(item.id)) ?? null;
-      if (wasActive && !this.active && !this.peer) this.status = '';
-      const invite = this.active;
-      if (invite?.state === 'accepted' && !this.signaling) {
-        this.signaling = true;
-        this.connectTimer = window.setTimeout(() => this.connectionLost(), 25_000);
-        if (invite.hostId === this.api.id) void this.host(invite);
-      }
-      if (invite?.state === 'accepted' && state.signal?.kind === 'offer' && !this.peer && invite.guestId === this.api.id)
-        void this.guest(invite, state.signal);
-      if (invite?.state === 'accepted' && state.signal?.kind === 'answer' && !this.answerApplied && this.peer instanceof PeerHost) {
-        this.answerApplied = true;
-        const answer: Signal = { id: state.signal.signalId, type: 'answer', ...state.signal };
-        if (!await this.peer.acceptReply(answer)) this.connectionLost();
-      }
-      if (!this.room && !this.peer && !this.isOpen && !this.active && this.peers.some(peer => !this.dismissed.has(peer.id))) this.onProposal();
-      if (!this.room && !this.isOpen && invite?.guestId === this.api.id && invite.state === 'pending') this.onProposal();
-      if (this.status === t('lanDiscoveryUnavailable')) this.status = '';
+  private connect(): void {
+    if (this.socket || !this.name) return;
+    const url = new URL('/v1/game/socket', API_URL);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    let socket: WebSocket;
+    try { socket = new WebSocket(url); }
+    catch { this.scheduleRetry(); return; }
+    this.socket = socket;
+    socket.addEventListener('open', () => {
+      if (this.socket !== socket) return;
+      this.retryDelay = 1000;
+      this.status = '';
+      this.send({ type: 'identify', name: this.name });
       this.render();
-    } catch (error) {
-      if (error instanceof Error && error.message === 'Discovery 401') this.api.reset();
+    });
+    socket.addEventListener('message', event => {
+      if (this.socket !== socket || typeof event.data !== 'string') return;
+      let data: ServerMessage;
+      try { data = JSON.parse(event.data) as ServerMessage; } catch { return; }
+      this.receive(data);
+    });
+    socket.addEventListener('close', () => {
+      if (this.socket !== socket) return;
+      this.socket = null;
+      this.id = 0;
+      this.online = [];
+      this.incoming = null;
       this.status = t('lanDiscoveryUnavailable');
+      if (this.room) this.setRoom(null);
       this.render();
-    } finally {
-      this.polling = false;
-      if (this.api.id) window.setTimeout(() => void this.poll(), 3000);
-      else void this.connectDiscovery();
-    }
+      this.scheduleRetry();
+    });
+    socket.addEventListener('error', () => { if (this.socket === socket) socket.close(); });
   }
 
-  private async host(invite: NearbyInvite): Promise<void> {
-    const host = new PeerHost(data => this.receive(data), () => this.connectionLost());
-    this.peer = host;
-    this.id = host.id;
-    host.start(this.name);
-    this.status = t('lanDirectPreparing');
-    this.render();
-    try {
-      const offer = readSignal(await host.createInvitation(this.savedWifiAddress()), 'offer');
-      if (!offer || this.peer !== host) return;
-      await this.api.signal(invite.id, { kind: 'offer', signalId: offer.id, code: offer.code, sdp: offer.sdp,
-        wifiAddress: offer.wifiAddress });
-      this.status = t('lanDirectConnecting');
-    } catch { if (this.peer === host) this.connectionLost(); }
-    this.render();
+  private scheduleRetry(): void {
+    window.clearTimeout(this.retryTimer);
+    this.retryTimer = window.setTimeout(() => this.connect(), this.retryDelay);
+    this.retryDelay = Math.min(this.retryDelay * 2, 30_000);
   }
 
-  private async guest(invite: NearbyInvite, offer: NearbySignal): Promise<void> {
-    const signal: Signal = { id: offer.signalId, type: 'offer', ...offer };
-    const guest = new PeerGuest(signal, this.name, data => this.receive(data), () => this.connectionLost());
-    this.peer = guest;
-    this.status = t('lanDirectPreparing');
-    this.render();
-    try {
-      const answer = readSignal(await guest.prepareReply(this.savedWifiAddress()), 'answer');
-      if (!answer || this.peer !== guest) return;
-      await this.api.signal(invite.id, { kind: 'answer', signalId: answer.id, code: answer.code, sdp: answer.sdp,
-        wifiAddress: answer.wifiAddress });
-      this.status = t('lanDirectConnecting');
-    } catch { if (this.peer === guest) this.connectionLost(); }
-    this.render();
-  }
-
-  private async invite(peerId: string): Promise<void> {
-    if (this.active || !this.api.id) return;
-    try {
-      this.failedPeerId = '';
-      const result = await this.api.invite(peerId);
-      this.active = { id: result.id, hostId: this.api.id, guestId: peerId,
-        hostName: this.name, guestName: this.peers.find(peer => peer.id === peerId)?.name ?? '', state: 'pending' };
-      this.status = t('lanWaitingAnswer');
-    } catch { this.status = t('lanPeerUnavailable'); }
-    this.render();
-  }
-
-  private savedWifiAddress(): string | undefined {
-    try {
-      const address = localStorage.getItem('roadster-lan-wifi-address');
-      return isPrivateWifiAddress(address) ? address : undefined;
-    } catch { return undefined; }
-  }
-
-  private async retry(): Promise<void> {
-    const field = this.element<HTMLInputElement>('lan-retry-address');
-    const address = field.value.trim()
-      .replace(/[۰-۹]/g, character => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(character)))
-      .replace(/[٠-٩]/g, character => String('٠١٢٣٤٥٦٧٨٩'.indexOf(character)));
-    if (address && !isPrivateWifiAddress(address)) {
-      this.status = t('lanWifiInvalid');
+  private receive(data: ServerMessage): void {
+    if (data.type === 'hello') { this.id = data.id; return; }
+    if (data.type === 'presence') {
+      const current = new Set(data.players.map(player => player.id));
+      for (const id of this.dismissed) if (!current.has(id)) this.dismissed.delete(id);
+      this.online = data.players.filter(player => player.id !== this.id);
+      if (!this.room && !this.incoming && !this.isOpen && this.online.some(player => !this.dismissed.has(player.id))) this.onProposal();
       this.render();
-      field.focus();
       return;
     }
-    try {
-      if (address) localStorage.setItem('roadster-lan-wifi-address', address);
-      else localStorage.removeItem('roadster-lan-wifi-address');
-    } catch { /* The connection can continue without saved preferences. */ }
-    const peerId = this.failedPeerId;
-    if (!peerId) return;
-    this.failedPeerId = '';
-    this.status = '';
-    this.dismissed.delete(peerId);
-    await this.invite(peerId);
+    if (data.type === 'invitation') {
+      this.incoming = data;
+      this.status = '';
+      if (!this.isOpen) this.onProposal();
+      this.render();
+      return;
+    }
+    if (data.type === 'notice') {
+      this.status = t(notices[data.code] ?? 'lanPeerUnavailable');
+      this.render();
+      return;
+    }
+    if (data.type === 'drive') {
+      if (this.room?.round !== data.round || this.room.phase !== 'racing') return;
+      const player = this.room.players.find(item => item.id === data.id);
+      if (!player) return;
+      player.drive = data.drive;
+      if (this.isOpen || !this.hud.hidden) this.renderPlayers('lan-standing', this.hudPlayers(this.room.players), true);
+      return;
+    }
+    if (data.type === 'room') {
+      this.incoming = null;
+      this.status = '';
+      this.setRoom(data);
+    }
   }
 
-  private async respond(accept: boolean): Promise<void> {
-    const invite = this.active;
-    if (!invite || invite.guestId !== this.api.id || invite.state !== 'pending') return;
-    try {
-      await this.api.respond(invite.id, accept);
-      if (accept) { this.active = { ...invite, state: 'accepted' }; this.status = t('lanDirectConnecting'); }
-      else { this.active = null; this.dismissed.add(invite.hostId); }
-    } catch { this.status = t('lanPeerUnavailable'); }
+  private send(message: ClientMessage): boolean {
+    const socket = this.socket;
+    if (!socket || socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > 64 * 1024) return false;
+    socket.send(JSON.stringify(message));
+    return true;
+  }
+
+  private invite(id: number): void {
+    if (!this.send({ type: 'invite', target: id })) return;
+    this.status = t('onlineInviteSent');
+    this.render();
+  }
+
+  private respond(accept: boolean): void {
+    const invite = this.incoming;
+    if (!invite) return;
+    if (!this.send({ type: accept ? 'accept' : 'decline', room: invite.room })) return;
+    if (!accept) this.dismissed.add(invite.host);
+    this.incoming = null;
+    this.status = accept ? t('lanDirectConnecting') : '';
     this.render();
   }
 
@@ -197,46 +158,19 @@ export class LanLobby {
   }
 
   leave(restoreFocus = true): void {
-    this.failedPeerId = '';
-    if (!this.room && !this.active) for (const peer of this.peers) this.dismissed.add(peer.id);
-    if (this.active) {
-      this.dismissed.add(this.active.hostId === this.api.id ? this.active.guestId : this.active.hostId);
-      this.ignoredInvites.add(this.active.id);
-      void this.api.cancel(this.active.id).catch(() => {});
-    }
-    window.clearTimeout(this.connectTimer);
-    this.peer?.close();
-    this.peer = null;
-    this.active = null;
-    this.signaling = this.answerApplied = false;
-    this.id = 0;
+    if (this.incoming) this.respond(false);
+    if (this.room) this.send({ type: 'leave' });
+    else for (const player of this.online) this.dismissed.add(player.id);
+    this.incoming = null;
     this.setRoom(null);
     this.dialog.hidden = true;
+    this.status = '';
     if (restoreFocus) this.element('primary-button').focus();
-  }
-
-  private connectionLost(): void {
-    const peerId = this.active?.hostId === this.api.id ? this.active?.guestId : this.active?.hostId;
-    this.leave(false);
-    this.failedPeerId = peerId ?? '';
-    this.element<HTMLInputElement>('lan-retry-address').value = this.savedWifiAddress() ?? '';
-    this.status = t('lanDirectFailed');
-    this.dialog.hidden = false;
-    this.render();
   }
 
   handleKey(event: KeyboardEvent): void {
     if (event.code === 'Escape') { event.preventDefault(); if (!event.repeat) this.leave(); }
   }
-
-  private receive(data: ServerMessage): void {
-    if (data.type === 'hello') { this.id = data.id; return; }
-    if (data.type === 'error') { this.connectionLost(); return; }
-    this.status = '';
-    this.setRoom(data);
-  }
-
-  private send(message: ClientMessage): boolean { return this.peer?.send(message) ?? false; }
 
   drive(state: DriveState, now: number): void {
     if (this.room?.phase !== 'racing' || this.sentCrash || (!state.crashed && now - this.lastDriveAt < 50)) return;
@@ -270,7 +204,6 @@ export class LanLobby {
   private setRoom(room: LanRoom | null): void {
     const previous = this.room;
     this.room = room;
-    if (room && room.players.length === 2) window.clearTimeout(this.connectTimer);
     this.receivedAt = performance.now();
     if (room?.round !== previous?.round || room?.phase === 'lobby') {
       this.lastDriveAt = -Infinity;
@@ -284,41 +217,37 @@ export class LanLobby {
     this.render();
   }
 
+  private rank(players: RoomPlayer[]): RoomPlayer[] {
+    return [...players].sort((a, b) => (b.drive?.distance ?? 0) - (a.drive?.distance ?? 0));
+  }
+
+  private hudPlayers(players: RoomPlayer[]): RoomPlayer[] {
+    const ranked = this.rank(players);
+    const visible = ranked.slice(0, 5);
+    const own = ranked.find(player => player.id === this.id);
+    if (own && !visible.includes(own)) visible.push(own);
+    return visible;
+  }
+
   private render(): void {
     const room = this.room;
     const results = room?.phase === 'results';
-    const incoming = this.active?.guestId === this.api.id && this.active.state === 'pending';
-    this.element('lan-discovery').hidden = Boolean(room || this.active);
-    this.element('lan-incoming').hidden = !incoming;
+    const canInvite = !room || room.phase === 'lobby' && room.host === this.id;
+    this.element('lan-discovery').hidden = !canInvite || Boolean(this.incoming);
+    this.element('lan-incoming').hidden = !this.incoming;
     this.element('lan-room').hidden = !room;
     this.text('lan-title', t(results ? 'lanResults' : room ? 'lanLobby' : 'lanTitle'));
-    this.text('lan-intro', incoming ? t('lanIncoming', { name: this.active!.hostName }) :
-      this.active ? this.status || t('lanWaitingAnswer') : t('lanNearbyIntro'));
-    this.text('lan-status', this.active ? '' : this.status);
-    this.element('lan-retry').hidden = !this.failedPeerId || Boolean(room || this.active);
-    this.text('lan-presence', this.status === t('lanDiscoveryUnavailable') ? this.status :
-      this.room || this.active ? '' : this.peers.some(peer => !this.dismissed.has(peer.id)) ? t('lanFound') : t('lanSearching'));
-    const list = this.element('lan-peers');
-    const visible = this.peers.filter(peer => !this.dismissed.has(peer.id));
-    const old = [...list.querySelectorAll<HTMLButtonElement>('button')];
-    if (visible.length !== old.length || visible.some((peer, i) =>
-      old[i]?.dataset.peerId !== peer.id || old[i].textContent !== t('lanPlayWith', { name: peer.name }))) {
-      list.replaceChildren();
-      for (const peer of visible) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.dataset.peerId = peer.id;
-        button.textContent = t('lanPlayWith', { name: peer.name });
-        button.addEventListener('click', () => void this.invite(peer.id));
-        list.append(button);
-      }
-    }
+    this.text('lan-intro', this.incoming ? t('lanIncoming', { name: this.incoming.name }) :
+      room ? t(canInvite ? 'onlineInviteMore' : 'lanWaitHost') : t('onlineNearbyIntro'));
+    this.text('lan-status', this.status);
+    this.text('lan-presence', this.socket?.readyState !== WebSocket.OPEN ? t('lanDiscoveryUnavailable') :
+      room ? '' : this.online.some(player => !this.dismissed.has(player.id)) ? t('onlineFound') : t('onlineSearching'));
+    this.renderOnline();
     if (!room) return;
-    const ranked = [...room.players].sort((a, b) => Number(b.id === room.winner) - Number(a.id === room.winner) ||
-      Number(b.connected) - Number(a.connected) || (b.drive?.distance ?? 0) - (a.drive?.distance ?? 0));
+    const ranked = this.rank(room.players);
     if (!this.hud.hidden) {
       this.text('lan-finish-distance', t('lanFinishDistance', { distance: formatNumber(room.target) }));
-      this.renderPlayers('lan-standing', ranked, true);
+      this.renderPlayers('lan-standing', this.hudPlayers(room.players), true);
       this.updateClock(performance.now(), Boolean(room.players.find(player => player.id === this.id)?.drive?.crashed));
       return;
     }
@@ -333,19 +262,42 @@ export class LanLobby {
     this.renderPlayers('lan-roster', results ? ranked : room.players, results, room.host);
   }
 
+  private renderOnline(): void {
+    const list = this.element('lan-peers');
+    const visible = this.online.filter(player => !this.dismissed.has(player.id));
+    const old = [...list.querySelectorAll<HTMLButtonElement>('button')];
+    if (visible.length === old.length && visible.every((player, i) => old[i]?.dataset.peerId === String(player.id) &&
+        old[i].textContent === t('lanPlayWith', { name: player.name }))) return;
+    list.replaceChildren();
+    for (const player of visible) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.peerId = String(player.id);
+      button.textContent = t('lanPlayWith', { name: player.name });
+      button.addEventListener('click', () => this.invite(player.id));
+      list.append(button);
+    }
+  }
+
   private renderPlayers(id: string, players: RoomPlayer[], showDistance: boolean, host?: number): void {
-    const list = this.element(id);
-    for (let i = 0; i < 2; i++) {
-      const row = this.element(`${id}-${i}`);
-      const player = players[i];
-      row.hidden = !player;
-      if (!player) continue;
+    const list = this.element<HTMLOListElement>(id);
+    const existing = new Map([...list.children].map(row => [Number((row as HTMLElement).dataset.playerId), row as HTMLElement]));
+    for (const player of players) {
+      let row = existing.get(player.id);
+      if (!row) {
+        row = document.createElement('li');
+        row.dataset.playerId = String(player.id);
+        row.append(document.createElement('bdi'), document.createElement('span'));
+      }
       const detail = [player.id === this.id ? t('lanYou') : '', player.id === host ? t('lanHost') : '',
         !player.connected ? t('lanDisconnected') : player.drive?.crashed ? t('lanCrashed') : ''].filter(Boolean).join(' · ');
-      this.text(`${id}-name-${i}`, player.name + (detail ? ` · ${detail}` : ''));
-      this.text(`${id}-distance-${i}`, showDistance ? `${formatNumber(Math.floor(player.drive?.distance ?? 0))} ${t('meter')}` : '');
+      row.children[0].textContent = player.name + (detail ? ` · ${detail}` : '');
+      row.children[1].textContent = showDistance ? `${formatNumber(Math.floor(player.drive?.distance ?? 0))} ${t('meter')}` : '';
       row.style.setProperty('--lan-paint', carPaintPalette(player.paint).base);
+      list.append(row);
+      existing.delete(player.id);
     }
+    for (const row of existing.values()) row.remove();
     list.hidden = players.length === 0;
   }
 

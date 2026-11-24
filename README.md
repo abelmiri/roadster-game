@@ -21,17 +21,15 @@ Rendering uses a half-resolution city blur, batched road stripes, and an adaptiv
 
 Switching away from the browser or hiding its tab pauses the solo run and fades out music and effects. Returning restores audio, while the run stays paused until resumed.
 
-## Local multiplayer
+## Online multiplayer
 
-Open the hosted game on two devices connected to the same Wi-Fi. Each browser registers a short-lived presence with Roadster API. When a possible nearby player appears, the game offers a two-player race automatically. Choose the player; they accept the invitation; the browsers exchange WebRTC signaling through the API and open a direct data channel. The host starts the race from the lobby. No account, room code, invitation link, or local installation is needed. The API's PostgreSQL schema for this feature is installed at startup from `migrations/003_lan.sql`.
+Open the hosted game on each device. Each browser connects to Roadster API over WebSocket and appears in the list of online players. Choose a player to invite; they accept in their game. The host may invite more players while the room is in the lobby. There is no fixed player cap. The host starts the race after at least two players have joined. No account, room code, shared Wi-Fi, or local installation is needed.
 
-The discovery service groups candidates by the public IP seen by Vercel. This does not prove they share a router: carrier-grade NAT, VPNs, and network configuration can produce false matches. The race only uses WebRTC host candidates with no relay server. Browsers may mask their local addresses with mDNS or block local peer connections; guest Wi-Fi isolation can also prevent a race. Previously saved Wi-Fi IPv4 addresses are tried automatically; if the connection still fails, the retry panel lets each device provide its own address once. Browser JavaScript cannot verify that both devices use Wi-Fi rather than Ethernet.
-
-Both drivers use the same stock car on the city track. The first to reach 1,000 m wins. If both crash or the three-minute timer expires, the farthest distance wins. Rivals appear in different colors and pass through each other. Leaving the race returns each driver to their own solo progress.
+Players use the same stock car on the city track. The first to reach 1,000 m wins. If every player crashes or the three-minute timer expires, the farthest distance wins. Rivals appear in different colors and pass through each other. The client renders the 16 closest rivals to keep frames responsive in large rooms. Leaving the race returns the player to solo progress. Rooms live in the API process, so a server restart ends active races; browsers reconnect automatically to show online players again. A single Render instance is required for this in-memory room implementation.
 
 ## Account and cloud save
 
-The **Account & Sync** button on the ready or game-over menu connects the game to [Roadster API](https://github.com/abelmiri/roadster-api). The default endpoint is `https://roadster-api.vercel.app`; set `VITE_ROADSTER_API_URL` before building to use another deployment. The client checks `/health` before Passkey registration or login. Production Passkeys require the game origin and RP ID configured on the API; localhost Passkeys are separate from production Passkeys.
+The **Account & Sync** button on the ready or game-over menu connects the game to [Roadster API](https://github.com/abelmiri/roadster-api). Set `VITE_ROADSTER_API_URL` to the Render API URL before building; this also controls the multiplayer WebSocket endpoint. The client checks `/health` before Passkey registration or login. Production Passkeys require the game origin and RP ID configured on the API; localhost Passkeys are separate from production Passkeys.
 
 After signing in, the server save becomes the game's starting state. A new account uploads the existing local save. Progress and XP are sent with revision checks; each new run uses an idempotency key, and coin codes refresh the server save before the game reloads. A revision conflict stops further writes until the player chooses **Load cloud save** in the account panel. The account panel also provides Telegram linking and unlinking. Without sign-in, the game continues to save locally.
 

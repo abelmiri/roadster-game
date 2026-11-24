@@ -49,9 +49,6 @@ interface LanRace {
   soloAim: AimDirection;
 }
 
-const lanPlayerRows = (id: string): string => Array.from({ length: 2 }, (_, i) =>
-  `<li id="${id}-${i}" hidden><bdi id="${id}-name-${i}"></bdi><span id="${id}-distance-${i}"></span></li>`).join('');
-
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) throw new Error('Missing app element');
 
@@ -99,7 +96,7 @@ app.innerHTML = `
     </div>
     <section id="lan-hud" class="lan-hud" aria-label="Nearby race" hidden>
       <div class="lan-hud-heading"><div><strong id="lan-finish-distance"></strong><span id="lan-clock"></span></div><button id="lan-leave" type="button" data-i18n="lanLeave"></button></div>
-      <ol id="lan-standing" class="lan-player-list">${lanPlayerRows('lan-standing')}</ol>
+      <ol id="lan-standing" class="lan-player-list"></ol>
     </section>
     <div id="lan-race-notice" class="lan-race-notice" role="status" hidden></div>
     <div id="distance-rewards" class="distance-rewards">
@@ -311,7 +308,7 @@ app.innerHTML = `
         <div id="lan-room" hidden>
           <p id="lan-target"></p>
           <p id="lan-room-message" class="lan-room-message"></p>
-          <ol id="lan-roster" class="lan-player-list">${lanPlayerRows('lan-roster')}</ol>
+          <ol id="lan-roster" class="lan-player-list"></ol>
           <div class="account-actions">
             <button id="lan-start" type="button" data-i18n="lanStart" hidden></button>
             <button id="lan-rematch" type="button" data-i18n="lanRematch" hidden></button>
@@ -319,11 +316,6 @@ app.innerHTML = `
           </div>
         </div>
         <p id="lan-status" role="status"></p>
-        <div id="lan-retry" class="lan-retry" hidden>
-          <label for="lan-retry-address" data-i18n="lanWifiAddress"></label>
-          <div class="account-inline"><input id="lan-retry-address" dir="ltr" inputmode="decimal" maxlength="15" autocomplete="off" spellcheck="false"/><button id="lan-retry-button" type="button" data-i18n="lanRetry"></button></div>
-          <p data-i18n="lanRetryHelp"></p>
-        </div>
       </div>
     </div>
     <div id="account-dialog" class="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-title" hidden>
@@ -2229,7 +2221,11 @@ function renderLanFrame(active: LanRace, room: LanRoom, now: number, delta: numb
   };
   lan.drive(drive, now);
   lan.updateClock(now, snapshot.crashed);
-  const rivals = room.phase === 'countdown' ? room.players.map(member => ({ ...member, drive })) : room.players;
+  const nearby = [...room.players].filter(member => member.id !== lan.id &&
+    (room.phase === 'countdown' || Math.abs((member.drive?.distance ?? -10000) - snapshot.distance) < 180))
+    .sort((a, b) => Math.abs((a.drive?.distance ?? 0) - snapshot.distance) - Math.abs((b.drive?.distance ?? 0) - snapshot.distance))
+    .slice(0, 16);
+  const rivals = room.phase === 'countdown' ? nearby.map(member => ({ ...member, drive })) : nearby;
   visuals.updateRivals(rivals, lan.id, delta);
   visuals.render(snapshot, game, racing ? delta : 0, racing, false, delta);
   audio.update(snapshot, racing && !snapshot.crashed);

@@ -1,4 +1,4 @@
-const API_URL = (import.meta.env?.VITE_ROADSTER_API_URL || 'https://roadster-api.vercel.app').replace(/\/$/, '');
+export const API_URL = (import.meta.env?.VITE_ROADSTER_API_URL || 'https://roadster-api.vercel.app').replace(/\/$/, '');
 const SESSION_KEY = 'roadster-api-session';
 const DEVICE_KEY = 'roadster-device-id';
 const SYNC_KEY = 'roadster-api-sync';

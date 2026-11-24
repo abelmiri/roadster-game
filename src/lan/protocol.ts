@@ -30,7 +30,12 @@ export interface LanRoom {
   players: RoomPlayer[];
 }
 
-export type LanError = 'name' | 'missing' | 'closed' | 'full';
-export type ServerMessage = LanRoom | { type: 'hello'; id: number; address: string | null } | { type: 'error'; code: LanError };
-export type ClientMessage = { type: 'create'; name: string } | { type: 'join'; name: string; code: string } |
-  { type: 'start' | 'rematch' } | ({ type: 'drive'; round: number } & DriveState);
+export interface OnlinePlayer { id: number; name: string }
+export type ServerMessage = LanRoom | { type: 'hello'; id: number } |
+  { type: 'presence'; players: OnlinePlayer[] } |
+  { type: 'invitation'; room: string; host: number; name: string } |
+  { type: 'notice'; code: string } |
+  { type: 'drive'; id: number; round: number; drive: DriveState };
+export type ClientMessage = { type: 'identify'; name: string } |
+  { type: 'invite'; target: number } | { type: 'accept' | 'decline'; room: string } |
+  { type: 'start' | 'rematch' | 'leave' } | ({ type: 'drive'; round: number } & DriveState);
