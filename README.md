@@ -19,7 +19,16 @@ Open the URL Vite prints. Development mode shows a small translucent FPS counter
 
 Rendering uses a half-resolution city blur, batched road stripes, and an adaptive pixel budget. Active play is paced to 60 FPS while physics retains its fixed 120 Hz step. Touch devices start with a smaller pixel budget to limit GPU load; sustained slow frames lower it further, and sustained smooth play restores detail. Paused menus draw at about 15 FPS (30 FPS for the animated crash view), while hidden tabs skip drawing.
 
-Switching away from the browser or hiding its tab pauses the run and fades out music and effects. Returning restores audio, while the run stays paused until resumed.
+Switching away from the browser or hiding its tab pauses the solo run and fades out music and effects. Returning restores audio, while the run stays paused until resumed.
+
+## Local multiplayer
+
+1. Run `npm run dev` on the host computer. To use a built copy, run `npm run build` followed by `npm run preview`.
+2. Connect 2–4 devices to the same Wi-Fi or wired network. Open the **Network** address printed by Vite on each device.
+3. Open **Multiplayer** next to **Account & Sync** and choose **Create room**. Share the invitation link, or give guests the room code to enter from the same game address.
+4. The host can start once 2–4 players have joined. Everyone drives the same stock car on the city track. The first to reach 1,000 m wins. If everyone crashes or the three-minute timer runs out, the farthest distance wins.
+
+The LAN server runs with both local commands and needs no account or internet connection during play. A static copy of `dist/` can serve solo play. Multiplayer needs the running local server. Rivals appear on the road in different colors and pass through each other. Races have a shared clock, and leaving a race returns you to your solo menu with its progress intact.
 
 ## Account and cloud save
 

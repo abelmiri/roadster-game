@@ -44,12 +44,12 @@ export class RandomBoxRewards {
   shieldRemaining = 0;
   boostRemaining = 0;
 
-  constructor(private readonly random = Math.random) {}
+  constructor(private readonly random: (box: RandomBoxSpec) => number = Math.random) {}
 
   open(box: RandomBoxSpec, available: { health?: boolean; ammo?: boolean } = {}): BoxReward | null {
     if (this.opened.has(box.id)) return null;
     this.opened.add(box.id);
-    const rolled = rollBoxReward(this.random());
+    const rolled = rollBoxReward(this.random(box));
     const unusable = (rolled.kind === 'health' && available.health === false) ||
       (rolled.kind === 'ammo' && available.ammo === false);
     const reward: BoxReward = unusable ? { kind: 'coins', amount: 20 } : rolled;

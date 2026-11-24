@@ -191,7 +191,7 @@ export class GamePhysics {
   private previousSuspensionOffset = 0;
   private previousSuspensionPitch = 0;
   private readonly damage = new VehicleDamage();
-  private readonly boxRewards = new RandomBoxRewards();
+  private readonly boxRewards: RandomBoxRewards;
   private readonly boxHealth = new Map<string, number>();
   private readonly runMissions = new RunMissionTracker();
   private jumpSerial = 0;
@@ -233,7 +233,9 @@ export class GamePhysics {
   private carStats = carUpgradeStats();
 
   constructor(private readonly startX = 7, loadout?: { id: WeaponId; xp: number; upgrades?: WeaponUpgrades;
-    ownedWeapons?: readonly WeaponId[]; carUpgrades?: CarUpgrades; vehicle?: CarModelId }) {
+    ownedWeapons?: readonly WeaponId[]; carUpgrades?: CarUpgrades; vehicle?: CarModelId },
+    randomBoxRoll?: (box: RandomBoxSpec) => number) {
+    this.boxRewards = new RandomBoxRewards(randomBoxRoll);
     this.furthestX = startX;
     this.pursuit = new PolicePursuit(startX);
     this.weapon = new VehicleWeapon('machine-gun', loadout?.upgrades);

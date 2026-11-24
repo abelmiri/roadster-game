@@ -1,0 +1,136 @@
+.menu-network-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.menu-network-actions .account-button { margin: 0; }
+.lan-card { width: min(510px, 100%); }
+.lan-entry > label, .lan-share > label { display: block; margin-bottom: 6px; }
+.lan-entry > input {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #829da9;
+  border-radius: 5px;
+  background: #edf9f5;
+  color: #142c3b;
+  font: inherit;
+}
+#lan-code { text-transform: uppercase; letter-spacing: .12em; }
+#lan-room-code { color: #a6f4df; letter-spacing: .16em; }
+#lan-lobby-leave { background: transparent; color: #c8ffeb; }
+#lan-status { color: #a6f4df; }
+#lan-status:empty { display: none; }
+.lan-room-message { color: #a6f4df; font-weight: 750; }
+
+.lan-player-list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lan-player-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: #ffffff0b;
+}
+
+.lan-player-list li::before {
+  content: '';
+  flex: 0 0 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--lan-paint);
+}
+
+.lan-player-list bdi { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lan-player-list li > span { margin-inline-start: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lan-hud[hidden], .lan-race-notice[hidden], .lan-player-list li[hidden] { display: none; }
+
+.lan-hud {
+  position: absolute;
+  z-index: 5;
+  inset-block-start: max(72px, env(safe-area-inset-top));
+  left: 50%;
+  width: min(255px, calc(100% - 32px));
+  transform: translateX(-50%);
+  padding: 9px 10px;
+  border: 1px solid #a6f4df50;
+  border-radius: 8px;
+  background: #10263be8;
+  color: #eefff9;
+  font-size: 12px;
+}
+
+.lan-hud-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.lan-hud-heading > div { display: flex; align-items: center; gap: 10px; }
+.lan-hud-heading strong { color: #a6f4df; }
+.lan-hud-heading button {
+  padding: 4px 8px;
+  border: 1px solid #a6f4df70;
+  border-radius: 5px;
+  background: transparent;
+  color: #c8ffeb;
+  font: inherit;
+  cursor: pointer;
+}
+
+.lan-race-notice {
+  position: absolute;
+  z-index: 5;
+  top: 46%;
+  left: 50%;
+  width: max-content;
+  max-width: 80%;
+  transform: translate(-50%, -50%);
+  padding: 10px 18px;
+  border-radius: 7px;
+  background: #10263be8;
+  color: #c8ffeb;
+  font-size: clamp(14px, 2vw, 22px);
+  font-weight: 800;
+  text-align: center;
+  pointer-events: none;
+}
+
+.is-lan-race :is(#settings-controls, #pause-button, #distance-rewards, #mission-tracker, .experience-panel,
+  #mission-toast, #xp-toast, #coin-toast, #box-toast, .hud-stat:has(#best), .hud-divider,
+  .keyboard-guide > span:has([data-i18n="selectWeapon"]), .keyboard-guide > span:has([data-i18n="armory"])) { display: none; }
+
+@media (max-width: 900px), (pointer: coarse) and (orientation: landscape) {
+  .menu-network-actions {
+    position: fixed;
+    right: max(var(--mobile-corner-gap), env(safe-area-inset-right));
+    bottom: max(var(--mobile-corner-gap), env(safe-area-inset-bottom));
+    z-index: 7;
+    align-items: center;
+    flex-wrap: nowrap;
+    margin: 0;
+  }
+
+  .menu-network-actions #account-button.account-button { position: static; }
+  .menu-network-actions #lan-button {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    min-height: 42px;
+    padding: 0;
+    border-radius: 50%;
+    background: transparent;
+  }
+
+  #lan-button-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+  .lan-hud { inset-block-start: max(8px, env(safe-area-inset-top)); font-size: 11px; width: min(205px, 44%); }
+  .lan-hud-heading, .lan-hud-heading > div { gap: 5px; }
+  .lan-hud .lan-player-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lan-hud .lan-player-list li { gap: 4px; padding: 3px; }
+  .lan-hud .lan-player-list li::before { flex-basis: 5px; height: 5px; }
+}

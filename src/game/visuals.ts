@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import type { GamePhysics, GameSnapshot } from './physics';
+import type { BodyPose, GamePhysics, GameSnapshot } from './physics';
+import type { RoomPlayer } from '../lan/protocol';
 import { getDistrict, hash, roadHeight, loopsBetween, loopGeometry, rampsBetween, type LoopSpec, type HazardKind, type TrackChunk } from './track';
 import { sprungBodyPose } from './vehicle';
 import { createRoadsterWheel } from './roadsterModel';
@@ -79,6 +80,21 @@ function disposeCarBody(group: THREE.Object3D): void {
   for (const material of materials) material.dispose();
 }
 
+interface RivalCar {
+  body: THREE.Group;
+  wheels: [THREE.Group, THREE.Group];
+  z: number;
+  laneHeight: number;
+}
+
+function moveRival(view: THREE.Group, pose: BodyPose, z: number, laneHeight: number, fraction: number): void {
+  view.position.x = THREE.MathUtils.lerp(view.position.x, pose.x, fraction);
+  view.position.y = THREE.MathUtils.lerp(view.position.y, pose.y + laneHeight, fraction);
+  view.position.z = z;
+  const angle = pose.angle - view.rotation.z;
+  view.rotation.z += Math.atan2(Math.sin(angle), Math.cos(angle)) * fraction;
+}
+
 export class GameVisuals {
   readonly scene = new THREE.Scene();
   readonly renderer: THREE.WebGLRenderer;
@@ -133,6 +149,7 @@ export class GameVisuals {
   private paint = 'white';
   private readonly armor = new CarArmorVisual();
   private readonly wheelGroups: [THREE.Group, THREE.Group];
+  private readonly rivals = new Map<number, RivalCar>();
   private readonly fanGlow: THREE.Mesh;
   private readonly smoke = new CarSmoke();
   private readonly debris = new ObstacleDebris();
@@ -752,6 +769,36 @@ export class GameVisuals {
     this.carGroup.add(this.carBody);
     this.weapon.group.position.y = WEAPON_MOUNT.y + model.roofLift;
     this.armor.setRoofLift(model.roofLift);
+  }
+
+  updateRivals(players: readonly RoomPlayer[], localId: number, delta: number): void {
+    for (const [id, rival] of this.rivals) {
+      if (players.some(player => player.id === id && player.connected)) continue;
+      disposeCarBody(rival.body);
+      rival.wheels.forEach(disposeCarBody);
+      this.rivals.delete(id);
+    }
+    let lane = 0;
+    for (const player of players) {
+      if (player.id === localId) continue;
+      lane++;
+      if (!player.connected || !player.drive) continue;
+      let rival = this.rivals.get(player.id);
+      const fraction = rival ? 1 - Math.exp(-delta * 22) : 1;
+      if (!rival) {
+        const body = createVehicleBody('roadster');
+        const paint = new CarBodyDamage(body);
+        paint.setPaint(player.paint);
+        paint.dispose();
+        const wheels: [THREE.Group, THREE.Group] = [createRoadsterWheel(), createRoadsterWheel()];
+        // Offset the rendered lanes so overlapping cars remain distinguishable.
+        rival = { body, wheels, z: 0.65 - lane * 0.22, laneHeight: lane * 0.24 };
+        this.rivals.set(player.id, rival);
+        this.worldGroup.add(body, ...wheels);
+      }
+      moveRival(rival.body, player.drive.car, rival.z, rival.laneHeight, fraction);
+      player.drive.wheels.forEach((pose, i) => moveRival(rival.wheels[i], pose, rival.z + .40, rival.laneHeight, fraction));
+    }
   }
 
   private setCarGhost(ghost: boolean): void {

@@ -14,7 +14,8 @@ import { ALL_CAR_PAINTS, CAR_PAINT_PRICE } from './game/carPaint';
 import type { BoxReward } from './game/randomBox';
 import { MISSIONS, missionSpec, type MissionSpec } from './game/missions';
 import { purchaseQuote, confirmPurchase, purchaseWeaponStats, purchaseCarStats, type PurchaseIntent, type PurchaseQuote } from './game/purchases';
-import { loopsBetween, resetTrackCaches } from './game/track';
+import { hash, loopsBetween, resetTrackCaches } from './game/track';
+import { sprungBodyPose } from './game/vehicle';
 import { ImpactPause, IMPACT_DAMAGE, IMPACT_PAUSE_SECONDS, ExplosionSlowMotion, RAGDOLL_SLOWDOWN_SECONDS, RAGDOLL_RECOVERY_SECONDS, RAGDOLL_MIN_TIME_SCALE, RESTART_DELAY_SECONDS, WRECK_TIME_SCALE } from './game/damage';
 import { WeaponLoadout, WEAPONS, MAX_WEAPON_UPGRADE, weaponSpec, weaponUpgradeCost, type AimDirection } from './game/weapons';
 import { weaponIcon } from './game/weaponIcon';
@@ -23,6 +24,8 @@ import { TouchLayoutEditor } from './touchLayout';
 import { touchIcon } from './touchIcons';
 import { SHOP_STATES, shopBadge, shopStateIcon, type ShopState } from './shopState';
 import { ApiError, GameSync, clearSession, getTelegram, health, linkTelegram, logout, passkey, unlinkTelegram } from './backend';
+import { LanLobby, invitedRoom } from './lan/lobby';
+import type { LanRoom } from './lan/protocol';
 import './styles.css';
 import './hud.css';
 import './touchLayout.css';
@@ -33,9 +36,21 @@ import './customization.css';
 import './missions.css';
 import './shopStates.css';
 import './backend.css';
+import './lan.css';
 
 type GameStatus = 'loading' | 'ready' | 'running' | 'paused' | 'crashed' | 'error';
 const carUpgradeNames: Record<CarUpgradeId, MessageKey> = { armor:'carArmor', 'boost-reserve':'carBoostReserve', 'boost-power':'carBoostPower' };
+
+interface LanRace {
+  physics: GamePhysics;
+  round: number;
+  accumulator: number;
+  district: number;
+  soloAim: AimDirection;
+}
+
+const lanPlayerRows = (id: string): string => Array.from({ length: 4 }, (_, i) =>
+  `<li id="${id}-${i}" hidden><bdi id="${id}-name-${i}"></bdi><span id="${id}-distance-${i}"></span></li>`).join('');
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) throw new Error('Missing app element');
@@ -82,6 +97,11 @@ app.innerHTML = `
         <div id="mobile-settings-actions" class="mobile-settings-actions"></div>
       </section>
     </div>
+    <section id="lan-hud" class="lan-hud" aria-label="Multiplayer" hidden>
+      <div class="lan-hud-heading"><div><strong id="lan-finish-distance"></strong><span id="lan-clock"></span></div><button id="lan-leave" type="button" data-i18n="lanLeave"></button></div>
+      <ol id="lan-standing" class="lan-player-list">${lanPlayerRows('lan-standing')}</ol>
+    </section>
+    <div id="lan-race-notice" class="lan-race-notice" role="status" hidden></div>
     <div id="distance-rewards" class="distance-rewards">
       <div class="distance-reward-heading"><span id="distance-reward-next"></span><strong id="distance-reward-earned"></strong></div>
       <div id="distance-reward-meter" class="distance-reward-track" role="progressbar" aria-valuemin="0" aria-valuemax="${DISTANCE_REWARD_INTERVAL}"><span id="distance-reward-fill"></span>${DISTANCE_COIN_REWARDS.slice(0,DISTANCE_REWARDS_PER_INTERVAL).map((reward,index)=>`<i id="distance-reward-mark-${index}" class="distance-reward-mark" style="left:${reward.distance/DISTANCE_REWARD_INTERVAL*100}%" aria-hidden="true"></i>`).join('')}</div>
@@ -190,7 +210,10 @@ app.innerHTML = `
         <div class="menu-action-row">
           <button id="primary-button" class="primary-button" type="button"><span id="primary-label"></span><span class="button-arrow" aria-hidden="true">↗</span></button>
           <button id="restart-button" class="restart-button" type="button" hidden><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg><span id="restart-label"></span></button>
+          <div class="menu-network-actions">
           <button id="account-button" class="account-button" type="button"><span class="account-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8.5" r="3.2" stroke="#a6f4df" stroke-width="1.35"/><path d="M5.8 19.2c.6-3.1 2.8-5 6.2-5s5.6 1.9 6.2 5" stroke="#a6f4df" stroke-width="1.35" stroke-linecap="round"/></svg></span><span id="account-button-label"></span></button>
+          <button id="lan-button" class="account-button" type="button" aria-haspopup="dialog" aria-controls="lan-dialog" aria-expanded="false"><span class="account-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="2.4"/><path d="M4.6 17c.4-2.7 1.9-4.2 4.4-4.2s4 1.5 4.4 4.2M15 7.3a2.4 2.4 0 0 1 0 4.7m.8 1.5c2 .3 3.2 1.6 3.6 3.5"/></svg></span><span id="lan-button-label" data-i18n="multiplayer"></span></button>
+          </div>
         </div>
         <div class="menu-run-records">
           <div><span data-i18n="menuBestDistance"></span><strong id="menu-best-distance"></strong></div>
@@ -278,6 +301,34 @@ app.innerHTML = `
         <p id="record-name-error" class="record-name-error" role="alert" hidden data-i18n="recordNameRequired"></p>
         <button id="record-save" class="primary-button" type="submit" data-i18n="saveRecord"></button>
       </form>
+    </div>
+    <div id="lan-dialog" class="account-dialog lan-dialog" role="dialog" aria-modal="true" aria-labelledby="lan-title" hidden>
+      <div class="account-card lan-card">
+        <div class="account-heading"><h2 id="lan-title" data-i18n="lanTitle"></h2><button id="lan-close" type="button">×</button></div>
+        <p id="lan-intro" data-i18n="lanIntro"></p>
+        <form id="lan-entry" class="lan-entry">
+          <label for="lan-name" data-i18n="lanName"></label><input id="lan-name" maxlength="24" autocomplete="nickname" dir="auto"/>
+          <div class="account-actions"><button id="lan-create" type="button" data-i18n="lanCreate"></button></div>
+          <label for="lan-code" data-i18n="lanCode"></label>
+          <div class="account-inline"><input id="lan-code" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" dir="ltr"/><button id="lan-join" type="submit" data-i18n="lanJoin"></button></div>
+        </form>
+        <div id="lan-room" hidden>
+          <div id="lan-share" class="lan-share">
+            <p><span data-i18n="lanCode"></span> <strong id="lan-room-code" dir="ltr"></strong></p>
+            <label for="lan-invite" data-i18n="lanInvite"></label>
+            <div class="account-inline"><input id="lan-invite" readonly dir="ltr"/><button id="lan-copy" type="button" data-i18n="lanCopy"></button></div>
+          </div>
+          <p id="lan-target"></p>
+          <p id="lan-room-message" class="lan-room-message"></p>
+          <ol id="lan-roster" class="lan-player-list">${lanPlayerRows('lan-roster')}</ol>
+          <div class="account-actions">
+            <button id="lan-start" type="button" data-i18n="lanStart" hidden></button>
+            <button id="lan-rematch" type="button" data-i18n="lanRematch" hidden></button>
+            <button id="lan-lobby-leave" type="button" data-i18n="lanLeave"></button>
+          </div>
+        </div>
+        <p id="lan-status" role="status"></p>
+      </div>
     </div>
     <div id="account-dialog" class="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-title" hidden>
       <div class="account-card">
@@ -501,6 +552,9 @@ let distanceRewardHighlightUntil = 0;
 let status: GameStatus = 'loading';
 let physics: GamePhysics;
 let visuals: GameVisuals;
+let race: LanRace | null = null;
+const lan = new LanLobby(element, changeLanRoom);
+element('lan-button').addEventListener('click', () => openMultiplayer());
 let accumulator = 0;
 let holdInterpolation = false;
 let lastFrame = performance.now();
@@ -671,7 +725,7 @@ element('telegram-unlink').addEventListener('click', () => {
 const formatDistance = (meters: number): string => `${formatNumber(meters, 4)} <small>${t('meter')}</small>`;
 const districtKeys: MessageKey[] = ['districtMorning', 'districtDowntown', 'districtNight'];
 const weaponName = (id: string): string => t(`weapon${WEAPONS.findIndex(spec => spec.id === id)}` as MessageKey);
-const dialogBlocked = (): boolean => !purchaseDialog.hidden || !missionsDialog.hidden || !mapDialog.hidden || !mobileSettingsDialog.hidden;
+const dialogBlocked = (): boolean => lan.isOpen || !purchaseDialog.hidden || !missionsDialog.hidden || !mapDialog.hidden || !mobileSettingsDialog.hidden;
 const missionName = (spec: MissionSpec): string => `${spec.title[getLanguage()]} · ${formatNumber(spec.target)}`;
 const missionValue = (spec: MissionSpec, value: number): string => spec.unit === 'seconds' ? formatDecimal(Math.floor(value * 10 + 1e-6) / 10) : formatNumber(value);
 let displayedMissionHistory = -1;
@@ -969,7 +1023,7 @@ function updatePauseButton(): void {
   pauseButton.classList.toggle('is-paused', paused);
   pauseButton.setAttribute('aria-label', t(paused ? 'resume' : 'pause'));
   pauseButton.title = t(paused ? 'resumeTitle' : 'pauseTitle');
-  pauseButton.disabled = status !== 'running' && status !== 'paused';
+  pauseButton.disabled = race !== null || (status !== 'running' && status !== 'paused');
 }
 
 function textIfChanged(node: HTMLElement, value: string): void { if (node.textContent !== value) node.textContent = value; }
@@ -1012,7 +1066,9 @@ function updateHud(snapshot?: GameSnapshot): void {
     name: lastMissionRewards.length === 1 ? missionName(lastMissionRewards[0]) : t('missionBatch', { count: formatNumber(lastMissionRewards.length) }),
     coins: formatNumber(lastMissionRewards.reduce((sum, spec) => sum + spec.reward, 0)),
   }));
-  const showingLastScore = (status === 'ready' || status === 'loading') && player.score > 0;
+  const showingSoloScore = !race && (status === 'ready' || status === 'loading');
+  const showingLastScore = showingSoloScore && player.score > 0;
+  const driving = status === 'running' || Boolean(race && lan.room?.phase === 'racing');
   const unlimitedBoost = (snapshot?.unlimitedBoostRemaining ?? 0) > 0;
   const charge = unlimitedBoost ? 1 : snapshot?.boost ?? 1;
   const maxHealth = snapshot?.maxHealth ?? carUpgradeStats(player.carUpgrades).maxHealth;
@@ -1024,8 +1080,8 @@ function updateHud(snapshot?: GameSnapshot): void {
   const speed = hudFeedback.update({ health, boost: Math.round(charge * 100),
     speed: Math.max(0, snapshot?.speed ?? 0) * 3.6, xp: experience.total, level: experience.level,
     progress: experience.levelProgress / LEVEL_XP, distance: snapshot?.distance ?? 0, best,
-    ammo, capacity: spec.ammo, weapon: spec.id }, performance.now(), status === 'running' || status === 'crashed');
-  htmlIfChanged(distanceLabel, formatDistance(status === 'ready' || status === 'loading' ? player.score : snapshot?.distance ?? 0));
+    ammo, capacity: spec.ammo, weapon: spec.id }, performance.now(), driving || status === 'crashed');
+  htmlIfChanged(distanceLabel, formatDistance(showingSoloScore ? player.score : snapshot?.distance ?? 0));
   textIfChanged(element('distance-title'), t(showingLastScore ? 'lastScore' : 'distance'));
   htmlIfChanged(bestLabel, formatDistance(best));
   textIfChanged(element('best-player'), player.record.name);
@@ -1035,7 +1091,7 @@ function updateHud(snapshot?: GameSnapshot): void {
   textIfChanged(element('menu-coins'), formatNumber(player.coins));
   textIfChanged(element('coin-guide-balance'), formatNumber(player.coins));
   for(const button of walletButtons) attributeIfChanged(button,'aria-label',`${t('coinDetails')} · ${t('coinBalance')}: ${formatNumber(player.coins)}`);
-  updateDistanceRewards(snapshot?.distance??0);
+  if (!race) updateDistanceRewards(snapshot?.distance ?? 0);
   textIfChanged(element('coin-toast'), t('coinReward', { coins: formatNumber(lastCoinReward) }));
   element('coin-toast').hidden = coinRewardTime <= 0;
   element('box-toast').hidden = boxRewardTime <= 0 || !lastBoxReward;
@@ -1072,7 +1128,7 @@ function updateHud(snapshot?: GameSnapshot): void {
   impactFlash.style.opacity = String(status === 'running' && impactPause.active
     ? 0.55 * Math.sqrt(impactPause.remaining / IMPACT_PAUSE_SECONDS) : 0);
   textIfChanged(speedLabel, formatNumber(speed, 2));
-  textIfChanged(districtLabel, t(districtKeys[currentDistrict]));
+  textIfChanged(districtLabel, t(districtKeys[race?.district ?? currentDistrict]));
   textIfChanged(xpLevel, t('xpLevel', { level: formatNumber(experience.level) }));
   textIfChanged(xpTotal, `${formatNumber(experience.total)} XP`);
   fillIfChanged(xpFill, experience.levelProgress / LEVEL_XP);
@@ -1084,12 +1140,12 @@ function updateHud(snapshot?: GameSnapshot): void {
   const rewardText = t(lastRewardMessage, { xp: formatNumber(lastReward) });
   if (xpToast.textContent !== rewardText) textIfChanged(xpToast, rewardText);
   const police = snapshot?.police;
-  pursuitGlow.style.opacity = String(status === 'running' ? (police?.pressure ?? 0) * 0.7 : 0);
+  pursuitGlow.style.opacity = String(driving ? (police?.pressure ?? 0) * 0.7 : 0);
   pursuitGlow.classList.toggle('is-ahead', Boolean(police && police.gap < 0));
   const nextLoop = snapshot ? loopsBetween(snapshot.car.x, snapshot.car.x + 35)[0] : undefined;
   let hint = '';
-  if (status === 'running') {
-    if (impactPause.active) hint = t('impactNotice', { damage: formatPercent(IMPACT_DAMAGE / maxHealth) });
+  if (driving) {
+    if (!race && impactPause.active) hint = t('impactNotice', { damage: formatPercent(IMPACT_DAMAGE / maxHealth) });
     else if (snapshot && snapshot.invincibilityRemaining > 0) hint = t('invincibleNotice');
     else if (snapshot?.loop) hint = t('loopHold');
     else if (police && police.visibility > 0.3 && Math.abs(police.gap) < 23) hint = t(police.gap < 0 ? 'policeAhead' : 'policeWarning');
@@ -1218,8 +1274,9 @@ function updateLanguage(): void {
   updateMusicButton();
   updateFullscreenButton();
   updatePauseButton();
-  updateHud(physics?.snapshot(Math.min(1, accumulator / FIXED_STEP)));
-  if (status === 'ready' || status === 'paused' || status === 'crashed') setOverlay(status);
+  lan.updateLanguage();
+  updateHud(race ? race.physics.snapshot(1) : physics?.snapshot(Math.min(1, accumulator / FIXED_STEP)));
+  if (!race && (status === 'ready' || status === 'paused' || status === 'crashed')) setOverlay(status);
   else if (status === 'loading') setOverlay('ready');
   if (failureKey) renderFailure();
   refreshArmory();
@@ -1232,8 +1289,60 @@ function clearHeld(): void {
   document.querySelectorAll('.touch-button').forEach((button) => button.classList.remove('is-pressed'));
 }
 
+function openMultiplayer(code = ''): void {
+  if (status === 'loading' || status === 'error' || startPending || race || dialogBlocked() ||
+      !armory.hidden || !accountDialog.hidden || !coinDialog.hidden || !recordDialog.hidden || touchLayout.editing) return;
+  if (status === 'running') pause();
+  if (resumeCountdownTimer !== undefined) cancelResumeCountdown();
+  clearHeld();
+  jumpQueued = false;
+  lan.open(player.playerName, code);
+}
+
+function changeLanRoom(room: LanRoom | null): void {
+  if (!room || room.phase === 'lobby') {
+    if (!race) return;
+    race.physics.dispose();
+    aimDirection = race.soloAim;
+    race = null;
+    clearHeld();
+    jumpQueued = false;
+    setRoadGravity(selectedMap === 'moon' ? MOON_GRAVITY : EARTH_GRAVITY);
+    visuals.updateRivals([], 0, 0);
+    visuals.setMap(selectedMap);
+    visuals.setVehicle(player.selectedVehicle);
+    visuals.setPaint(player.selectedPaint);
+    visuals.resetCameraForRun();
+    audio.reset();
+    gameShell.classList.remove('is-lan-race');
+    if (status === 'ready' || status === 'paused' || status === 'crashed') setOverlay(status);
+    updateHud(physics.snapshot(1));
+    return;
+  }
+  if (room.phase === 'results' || race?.round === room.round) return;
+  clearHeld();
+  jumpQueued = false;
+  setRoadGravity(EARTH_GRAVITY);
+  const game = new GamePhysics(7, undefined, box => hash(box.phase + room.round));
+  race = { physics: game, round: room.round, accumulator: 0, district: 0, soloAim: aimDirection };
+  aimDirection = 1;
+  visuals.setMap('earth');
+  visuals.setVehicle('roadster');
+  visuals.setPaint(room.players.find(member => member.id === lan.id)?.paint ?? 'white');
+  visuals.resetCameraForRun();
+  audio.reset();
+  audio.play('start');
+  gameShell.classList.add('is-lan-race');
+  overlay.classList.remove('is-visible');
+  watchCrashButton.hidden = true;
+  crashMenuToggle.hidden = true;
+  lastFrame = performance.now();
+  updatePauseButton();
+  updateHud(race.physics.snapshot(1));
+}
+
 async function start(): Promise<void> {
-  if (startPending) return;
+  if (startPending || race || lan.room) return;
   if (document.hidden || !windowFocused || !(document.hasFocus?.() ?? true)) return;
   if (dialogBlocked()) return;
   if (touchLayout.editing || !armory.hidden || !recordDialog.hidden || !coinDialog.hidden || !accountDialog.hidden) return;
@@ -1335,6 +1444,12 @@ function saveRunScore(): void {
 }
 
 function pause(): void {
+  if (race) {
+    jumpQueued = false;
+    clearHeld();
+    audio.suspend();
+    return;
+  }
   saveRunScore();
   void sync?.flush().catch(accountError);
   if (status !== 'running') { audio.suspend(); return; }
@@ -1442,6 +1557,10 @@ function jumpDown(source: string): void {
   if (dialogBlocked()) return;
   if (held.jump.has(source)) return;
   held.jump.add(source);
+  if (race) {
+    if (lan.room?.phase === 'racing' && !race.physics.crashed) jumpQueued = true;
+    return;
+  }
   if (status === 'ready' || status === 'crashed' || status === 'paused') {
     start();
     return;
@@ -1494,7 +1613,7 @@ bindTouch('touch-fire', 'fire');
 function turnWeapon(direction: AimDirection = aimDirection === 1 ? -1 : 1): void {
   if (dialogBlocked()) return;
   aimDirection = direction;
-  updateHud(physics?.snapshot(Math.min(1, accumulator / FIXED_STEP)));
+  updateHud(race ? race.physics.snapshot(1) : physics?.snapshot(Math.min(1, accumulator / FIXED_STEP)));
 }
 element('touch-aim').addEventListener('click', () => { if (!element('touch-aim').hidden && !touchLayout.editing && armory.hidden && recordDialog.hidden && coinDialog.hidden) turnWeapon(); });
 element('weapon-aim').addEventListener('click', () => { turnWeapon(); element('weapon-aim').blur(); });
@@ -1847,6 +1966,7 @@ function toggleMusic(): void {
 
 window.addEventListener('keydown', (event) => {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (lan.isOpen) { lan.handleKey(event); return; }
   if (!mobileSettingsDialog.hidden) {
     if (event.code === 'Escape') { event.preventDefault(); if (!event.repeat) closeMobileSettings(); return; }
     if (event.code === 'Tab') {
@@ -1917,11 +2037,11 @@ window.addEventListener('keydown', (event) => {
   if (target instanceof HTMLElement &&
       (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)) return;
   if (event.code === 'KeyJ') {
-    event.preventDefault(); if (!event.repeat) openMissions(element<HTMLButtonElement>('missions-button')); return;
+    event.preventDefault(); if (!event.repeat && !race) openMissions(element<HTMLButtonElement>('missions-button')); return;
   }
   if (event.code === 'KeyG') {
     event.preventDefault();
-    if (!event.repeat) { if (armory.hidden) openArmory(); else closeArmory(); }
+    if (!event.repeat && !race) { if (armory.hidden) openArmory(); else closeArmory(); }
     return;
   }
   const slot = /^(?:Digit|Numpad)([1-8])$/.exec(event.code);
@@ -1930,7 +2050,7 @@ window.addEventListener('keydown', (event) => {
   const weaponSlot = slot ? Number(slot[1]) - 1 : keySlot;
   if (weaponSlot >= 0) {
     event.preventDefault();
-    if (!event.repeat && (armory.hidden || armoryTab==='weapons')) selectWeapon(weaponSlot);
+    if (!event.repeat && !race && (armory.hidden || armoryTab==='weapons')) selectWeapon(weaponSlot);
     return;
   }
   if (!armory.hidden) {
@@ -1958,7 +2078,7 @@ window.addEventListener('keydown', (event) => {
     if (!event.repeat) turnWeapon(['ArrowLeft', 'KeyA'].includes(event.code) ? -1 : ['ArrowRight', 'KeyD'].includes(event.code) ? 1 : undefined);
   } else if (event.code === 'KeyP' || event.code === 'Escape') {
     event.preventDefault();
-    if (event.repeat) return;
+    if (event.repeat || race) return;
     if (status === 'running') pause();
     else if (status === 'paused') start();
   } else if (event.code === 'KeyM' && !event.repeat) {
@@ -1988,6 +2108,7 @@ window.addEventListener('focus', syncBrowserFocus);
 window.addEventListener('pagehide', () => {
   windowFocused = false;
   audio.setBackgrounded(true);
+  if (lan.isOpen || lan.room) lan.leave(false);
   saveRunScore();
   void sync?.flush().catch(accountError);
   audio.suspend();
@@ -1997,7 +2118,7 @@ document.addEventListener('visibilitychange', syncBrowserFocus);
 syncBrowserFocus();
 primaryButton.addEventListener('click', start);
 restartButton.addEventListener('click', () => {
-  if (status !== 'paused' || startPending) return;
+  if (status !== 'paused' || startPending || race || lan.isOpen) return;
   saveRunScore();
   cancelResumeCountdown();
   status = 'crashed';
@@ -2055,8 +2176,8 @@ function fail(key: 'bootError' | 'runtimeError'): void {
 function frame(now: number): void {
   // Keep a 60 FPS presentation cadence independent of faster displays.
   // Simulation still uses its fixed 120 Hz physics step for stable handling.
-  const mode = status === 'running' && mobileSettingsDialog.hidden ? 'play'
-    : status === 'crashed' ? 'crash' : 'menu';
+  const mode = race ? (lan.room?.phase === 'results' ? 'menu' : 'play')
+    : status === 'running' && mobileSettingsDialog.hidden ? 'play' : status === 'crashed' ? 'crash' : 'menu';
   const interval = mode === 'play' ? 1000 / 60 : mode === 'crash' ? 1000 / 30 : 1000 / 15;
   if (mode !== lastFrameMode) { nextFrameAt = now; lastFrameMode = mode; }
   if (document.hidden || now + 0.5 < nextFrameAt) {
@@ -2069,8 +2190,60 @@ function frame(now: number): void {
   try { renderFrame(now); }
   catch (error) {
     console.error('Roadster frame failed', error);
+    if (race) lan.leave(false);
     fail('runtimeError');
   }
+}
+
+function drivingControls(): Controls {
+  return {
+    jumpPressed: jumpQueued,
+    jumpHeld: held.jump.size > 0,
+    suction: held.suction.size > 0,
+    boost: held.boost.size > 0,
+    frontJet: held.frontJet.size > 0,
+    rearJet: held.rearJet.size > 0,
+    fire: held.fire.size > 0,
+    aim: aimDirection,
+  };
+}
+
+function renderLanFrame(active: LanRace, room: LanRoom, now: number, delta: number): void {
+  const game = active.physics;
+  const racing = room.phase === 'racing';
+  if (racing) {
+    active.accumulator = Math.min(active.accumulator + delta, .15);
+    while (active.accumulator >= FIXED_STEP) {
+      if (game.crashed) game.stepWreck();
+      else {
+        const impact = game.impactSerial;
+        const explosion = game.explosionSerial;
+        game.step(drivingControls());
+        jumpQueued = false;
+        if (game.impactSerial !== impact) audio.play('impact');
+        if (game.explosionSerial !== explosion) audio.play('explosion');
+        if (game.crashed) { clearHeld(); audio.play('crash'); }
+      }
+      active.accumulator -= FIXED_STEP;
+    }
+  }
+  const snapshot = game.snapshot(racing ? active.accumulator / FIXED_STEP : room.phase === 'results' ? 1 : 0);
+  const drive = {
+    car: sprungBodyPose(snapshot.car, snapshot.suspensionOffset, snapshot.suspensionPitch),
+    wheels: snapshot.wheels, distance: snapshot.distance, crashed: snapshot.crashed,
+  };
+  lan.drive(drive, now);
+  lan.updateClock(now, snapshot.crashed);
+  const rivals = room.phase === 'countdown' ? room.players.map(member => ({ ...member, drive })) : room.players;
+  visuals.updateRivals(rivals, lan.id, delta);
+  visuals.render(snapshot, game, racing ? delta : 0, racing, false, delta);
+  audio.update(snapshot, racing && !snapshot.crashed);
+  active.district = Math.min(2, Math.floor(snapshot.distance / 360));
+  if (now - lastHudFrame >= 1000 / 30) {
+    updateHud(snapshot);
+    lastHudFrame = now;
+  }
+  document.body.classList.toggle('fans-on', snapshot.suctionActive);
 }
 
 function renderFrame(now: number): void {
@@ -2079,6 +2252,11 @@ function renderFrame(now: number): void {
   const wallDelta = Math.max(0, (now - lastFrame) / 1000);
   const delta = Math.min(wallDelta, 0.06);
   lastFrame = now;
+  if (race && lan.room) {
+    renderLanFrame(race, lan.room, now, delta);
+    requestAnimationFrame(frame);
+    return;
+  }
   let playDelta = 0;
   if (status === 'running' && mobileSettingsDialog.hidden) {
     playDelta = Math.min(impactPause.consume(wallDelta), explosionSlowMotion.consume(wallDelta),
@@ -2089,17 +2267,7 @@ function renderFrame(now: number): void {
     accumulator = Math.min(accumulator + playDelta, 0.15);
     let steps = 0;
     while (accumulator >= FIXED_STEP && steps < 10) {
-      const controls: Controls = {
-        jumpPressed: jumpQueued,
-        jumpHeld: held.jump.size > 0,
-        suction: held.suction.size > 0,
-        boost: held.boost.size > 0,
-        frontJet: held.frontJet.size > 0,
-        rearJet: held.rearJet.size > 0,
-        fire: held.fire.size > 0,
-        aim: aimDirection,
-      };
-      physics.step(controls);
+      physics.step(drivingControls());
       holdInterpolation = false;
       jumpQueued = false;
       accumulator -= FIXED_STEP;
@@ -2228,7 +2396,9 @@ async function boot(): Promise<void> {
     status = 'ready';
     loading.remove();
     setOverlay('ready');
-    if (player.record.needsName) openRecordDialog();
+    const invite = invitedRoom();
+    if (invite) openMultiplayer(invite);
+    else if (player.record.needsName) openRecordDialog();
     requestAnimationFrame(frame);
   } catch (error) {
     console.error('Roadster could not start', error);
