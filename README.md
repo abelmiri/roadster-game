@@ -23,12 +23,20 @@ Switching away from the browser or hiding its tab pauses the solo run and fades 
 
 ## Local multiplayer
 
-1. Run `npm run dev` on the host computer. To use a built copy, run `npm run build` followed by `npm run preview`.
-2. Connect 2–4 devices to the same Wi-Fi or wired network. Open the **Network** address printed by Vite on each device.
-3. Open **Multiplayer** next to **Account & Sync** and choose **Create room**. Share the invitation link, or give guests the room code to enter from the same game address.
-4. The host can start once 2–4 players have joined. Everyone drives the same stock car on the city track. The first to reach 1,000 m wins. If everyone crashes or the three-minute timer runs out, the farthest distance wins.
+### Play from Vercel or another HTTPS host
 
-The LAN server runs with both local commands and needs no account or internet connection during play. A static copy of `dist/` can serve solo play. Multiplayer needs the running local server. Rivals appear on the road in different colors and pass through each other. Races have a shared clock, and leaving a race returns you to your solo menu with its progress intact.
+1. Connect 2–4 devices to the same Wi-Fi or wired network. Open the hosted game and choose **Multiplayer** next to **Account & Sync**.
+2. The host selects **Create room** and sends the invitation link to one player. That player opens the link, selects **Join room**, and sends the reply code back to the host.
+3. The host pastes the reply code and selects **Connect player**. Repeat with the new invitation link for each additional player.
+4. Once at least two players have joined, the host selects **Start race**. Keep the host's game open for the duration of the room.
+
+Over HTTPS, WebRTC data channels carry race updates directly between each player and the host. The invitation and reply let the browsers negotiate the connection themselves. Each link pairs one guest. Allow local network access if the browser asks, and use a network that allows devices to reach one another.
+
+### Play from a local Vite server
+
+Run `npm run dev` on the host computer, or run `npm run build` followed by `npm run preview`. Guests on the same network open the **Network** address printed by Vite and join using the room code or invitation link. The bundled WebSocket server handles connections over the local network.
+
+In both modes, everyone drives the same stock car on the city track. The first to reach 1,000 m wins. If everyone crashes or the three-minute timer expires, the farthest distance wins. Rivals appear on the road in different colors and pass through each other. Leaving multiplayer returns you to your solo menu with its progress intact.
 
 ## Account and cloud save
 

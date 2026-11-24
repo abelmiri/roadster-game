@@ -1,5 +1,7 @@
 import { carPaintPalette } from '../game/carPaint';
 import { formatNumber, getLanguage, t, type MessageKey } from '../i18n';
+import { PeerGuest, PeerHost, readSignal } from './peer';
+import { driverName, MAX_PLAYERS } from './room-engine.mjs';
 import type { ClientMessage, DriveState, LanError, LanRoom, RoomPlayer, ServerMessage } from './protocol';
 
 const codePattern = /^[2-9A-HJ-NP-Z]{6}$/;
@@ -7,10 +9,14 @@ const errors: Record<LanError, MessageKey> = {
   name: 'lanNameRequired', missing: 'lanMissing', closed: 'lanClosed', full: 'lanFull',
 };
 
-export function invitedRoom(): string {
+export type LanInvitation = { type: 'relay'; code: string } | { type: 'peer'; token: string };
+
+export function invitedRoom(): LanInvitation | undefined {
   const url = window.location;
-  const code = url ? (new URLSearchParams(url.search).get('room') ?? '').toUpperCase() : '';
-  return codePattern.test(code) ? code : '';
+  if (!url) return;
+  if (url.hash.startsWith('#lan=')) return { type: 'peer', token: url.hash.slice(5) };
+  const code = (new URLSearchParams(url.search).get('room') ?? '').toUpperCase();
+  if (codePattern.test(code)) return { type: 'relay', code };
 }
 
 export class LanLobby {
@@ -24,6 +30,11 @@ export class LanLobby {
   private readonly hud: HTMLElement;
   private readonly notice: HTMLElement;
   private socket: WebSocket | null = null;
+  private peer: PeerHost | PeerGuest | null = null;
+  private incoming: LanInvitation | undefined;
+  private transfer = '';
+  private pairing: 'idle' | 'preparing' | 'connecting' = 'idle';
+  private inviteTask = 0;
   private timeout: number | undefined;
   private pending = false;
   private receivedAt = 0;
@@ -50,21 +61,43 @@ export class LanLobby {
     element('lan-leave').addEventListener('click', () => this.leave());
     element('lan-lobby-leave').addEventListener('click', () => this.leave());
     element('lan-create').addEventListener('click', () => this.enter('create'));
-    this.entry.addEventListener('submit', event => { event.preventDefault(); this.enter('join'); });
-    element('lan-copy').addEventListener('click', () => { void this.copyInvite(); });
+    this.entry.addEventListener('submit', event => {
+      event.preventDefault();
+      this.enter(this.directMode && this.incoming?.type !== 'peer' ? 'create' : 'join');
+    });
+    element('lan-copy').addEventListener('click', () => {
+      void this.copyField(this.invite, 'lanCopied', 'lanCopyManual');
+    });
+    element('lan-copy-reply').addEventListener('click', () => {
+      void this.copyField(element('lan-reply-out'), 'lanDirectReplyCopied', 'lanDirectSendReply');
+    });
+    element('lan-new-link').addEventListener('click', () => { void this.prepareInvitation(); });
+    element('lan-host-reply').addEventListener('submit', event => {
+      event.preventDefault();
+      void this.connectPlayer();
+    });
     element('lan-start').addEventListener('click', () => this.send({ type: 'start' }));
     element('lan-rematch').addEventListener('click', () => this.send({ type: 'rematch' }));
   }
 
   get isOpen(): boolean { return !this.dialog.hidden; }
 
-  open(defaultName: string, code = ''): void {
+  private get directMode(): boolean {
+    return this.incoming?.type === 'peer' || (this.incoming?.type !== 'relay' && window.location?.protocol === 'https:');
+  }
+
+  open(defaultName: string, invite = invitedRoom()): void {
+    if (invite?.type === 'peer' && (this.incoming?.type !== 'peer' || invite.token !== this.incoming.token)) {
+      this.disconnect();
+      this.message = null;
+    }
+    this.incoming = invite;
     if (!this.name.value) this.name.value = defaultName;
-    if (code) this.code.value = code;
+    if (invite?.type === 'relay') this.code.value = invite.code;
     this.dialog.hidden = false;
     this.opener.setAttribute('aria-expanded', 'true');
     this.render();
-    (code && this.name.value ? this.code : this.name).focus();
+    (invite?.type === 'relay' && this.name.value ? this.code : this.name).focus();
   }
 
   leave(restoreFocus = true): void {
@@ -125,7 +158,11 @@ export class LanLobby {
 
   private enter(type: 'create' | 'join'): void {
     if (this.pending || this.room) return;
-    const name = this.name.value.trim() || t('lanGuest');
+    const name = driverName(this.name.value) || t('lanGuest');
+    if (this.directMode) {
+      void this.enterDirect(name);
+      return;
+    }
     const code = this.code.value.trim().toUpperCase();
     if (type === 'join' && !codePattern.test(code)) {
       this.message = 'lanInvalidCode';
@@ -151,29 +188,139 @@ export class LanLobby {
       if (this.socket !== socket) return;
       let data: ServerMessage;
       try { data = JSON.parse(event.data) as ServerMessage; } catch { return; }
-      if (data.type === 'hello') {
-        this.id = data.id;
-        this.address = data.address;
-      } else if (data.type === 'room' || data.type === 'error') {
-        window.clearTimeout(this.timeout);
-        this.pending = false;
-        this.timeout = undefined;
-        if (data.type === 'room') {
-          this.message = null;
-          this.setRoom(data);
-        } else {
-          this.disconnect();
-          this.message = errors[data.code];
-          this.render();
-        }
-      }
+      this.receive(data);
     });
     socket.addEventListener('close', () => {
       if (this.socket === socket) this.connectionLost(Boolean(this.room));
     });
   }
 
+  private receive(data: ServerMessage): void {
+    if (data.type === 'hello') {
+      this.id = data.id;
+      this.address = data.address;
+      return;
+    }
+    window.clearTimeout(this.timeout);
+    this.timeout = undefined;
+    this.pending = false;
+    if (data.type === 'error') {
+      this.disconnect();
+      this.message = errors[data.code];
+      this.render();
+      return;
+    }
+    this.message = null;
+    const previous = this.room;
+    if (this.peer instanceof PeerGuest) this.transfer = '';
+    this.setRoom(data);
+    if (!(this.peer instanceof PeerHost)) return;
+    if (data.phase !== 'lobby' || data.players.length >= MAX_PLAYERS) {
+      this.transfer = '';
+      this.pairing = 'idle';
+    } else if (previous?.phase !== 'lobby' || data.players.length > previous.players.length ||
+        previous.players.length >= MAX_PLAYERS) {
+      void this.prepareInvitation();
+    }
+  }
+
+  private async enterDirect(name: string): Promise<void> {
+    if (typeof RTCPeerConnection === 'undefined') {
+      this.message = 'lanDirectUnsupported';
+      this.render();
+      return;
+    }
+    if (this.incoming?.type !== 'peer') {
+      const host = new PeerHost(data => this.receive(data), () => {
+        if (this.peer !== host) return;
+        this.transfer = '';
+        this.pairing = 'idle';
+        this.message = 'lanDirectFailed';
+        this.render();
+      });
+      this.id = host.id;
+      this.peer = host;
+      host.start(name);
+      return;
+    }
+    const offer = readSignal(this.incoming.token, 'offer');
+    if (!offer) {
+      this.message = 'lanDirectInvalidInvite';
+      this.render();
+      return;
+    }
+    this.pending = true;
+    this.message = 'lanDirectPreparing';
+    this.render();
+    try {
+      const guest = new PeerGuest(offer, name, data => {
+        if (this.peer === guest) this.receive(data);
+      }, () => {
+        if (this.peer === guest) this.directLost();
+      });
+      this.peer = guest;
+      const reply = await guest.prepareReply();
+      if (this.peer !== guest || this.room) return;
+      this.transfer = reply;
+      this.message = null;
+      this.render();
+      this.element('lan-copy-reply').focus();
+    } catch {
+      if (this.pending) this.directLost();
+    }
+  }
+
+  private async prepareInvitation(): Promise<void> {
+    const host = this.peer;
+    if (!(host instanceof PeerHost) || this.room?.phase !== 'lobby' || this.room.players.length >= MAX_PLAYERS) return;
+    const task = ++this.inviteTask;
+    this.transfer = '';
+    this.element<HTMLInputElement>('lan-reply-in').value = '';
+    this.pairing = 'preparing';
+    this.message = 'lanDirectPreparing';
+    this.render();
+    try {
+      const token = await host.createInvitation();
+      if (this.peer !== host || task !== this.inviteTask || this.room?.phase !== 'lobby') return;
+      this.transfer = token;
+      this.message = null;
+    } catch {
+      if (this.peer !== host || task !== this.inviteTask || this.room?.phase !== 'lobby') return;
+      this.message = 'lanDirectFailed';
+    }
+    this.pairing = 'idle';
+    this.render();
+  }
+
+  private async connectPlayer(): Promise<void> {
+    const host = this.peer;
+    if (!(host instanceof PeerHost) || !this.transfer || this.pairing !== 'idle') return;
+    const field = this.element<HTMLInputElement>('lan-reply-in');
+    const answer = readSignal(field.value, 'answer');
+    if (answer) {
+      this.pairing = 'connecting';
+      this.message = 'lanDirectConnecting';
+      this.render();
+      const task = this.inviteTask;
+      if (await host.acceptReply(answer) || this.peer !== host || task !== this.inviteTask) return;
+      this.pairing = 'idle';
+    }
+    this.message = 'lanDirectInvalidReply';
+    this.render();
+    field.focus();
+  }
+
+  private directLost(): void {
+    const wasInRoom = Boolean(this.room);
+    this.disconnect();
+    this.message = wasInRoom ? 'lanDirectLost' : 'lanDirectFailed';
+    this.dialog.hidden = false;
+    this.setRoom(null);
+    this.element('lan-close').focus();
+  }
+
   private send(message: ClientMessage): boolean {
+    if (this.peer) return this.peer.send(message);
     const socket = this.socket;
     if (!socket || socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > 64 * 1024) return false;
     socket.send(JSON.stringify(message));
@@ -187,6 +334,11 @@ export class LanLobby {
     const socket = this.socket;
     this.socket = null;
     socket?.close();
+    const peer = this.peer;
+    this.peer = null;
+    peer?.close();
+    this.transfer = '';
+    this.pairing = 'idle';
     this.id = 0;
     this.address = null;
   }
@@ -218,49 +370,68 @@ export class LanLobby {
     if (onTrack && focused instanceof HTMLElement && this.dialog.contains(focused)) focused.blur();
   }
 
-  private inviteUrl(code: string): string {
+  private inviteUrl(code: string, peerToken = ''): string {
     const url = new URL(window.location.href);
     if (['localhost', '127.0.0.1', '[::1]', '0.0.0.0'].includes(url.hostname) && this.address) {
       url.hostname = this.address;
     }
     url.search = '';
     url.hash = '';
-    url.searchParams.set('room', code);
+    if (peerToken) url.hash = `lan=${peerToken}`;
+    else url.searchParams.set('room', code);
     return url.href;
   }
 
-  private async copyInvite(): Promise<void> {
-    const room = this.room;
-    if (!room) return;
+  private async copyField(field: HTMLInputElement, success: MessageKey, manual: MessageKey): Promise<void> {
+    const value = field.value;
+    if (!value) return;
     let copied = false;
     try {
       if (navigator.clipboard) {
-        await navigator.clipboard.writeText(this.invite.value);
+        await navigator.clipboard.writeText(value);
         copied = true;
       }
     } catch { /* HTTP LAN addresses may require copying a selection. */ }
+    if (!this.isOpen || field.value !== value) return;
     if (!copied) {
-      this.invite.focus();
-      this.invite.select();
-      try { copied = document.execCommand('copy'); } catch { /* The link stays selected for manual copying. */ }
+      field.focus();
+      field.select();
+      try { copied = document.execCommand('copy'); } catch { /* The value stays selected for manual copying. */ }
     }
-    if (this.room === room) {
-      this.message = copied ? 'lanCopied' : 'lanCopyManual';
-      this.render();
-    }
+    this.message = copied ? success : manual;
+    this.render();
   }
 
   private render(): void {
     const room = this.room;
     const results = room?.phase === 'results';
     const host = room?.host === this.id;
-    this.entry.hidden = Boolean(room);
+    const direct = this.directMode;
+    const guest = this.incoming?.type === 'peer';
+    const hasReply = this.peer instanceof PeerGuest && Boolean(this.transfer);
+    const share = room?.phase === 'lobby' && (!direct || (host && room.players.length < MAX_PLAYERS));
+    const sharingDirect = direct && share;
+    this.entry.hidden = Boolean(room) || hasReply;
     this.roomPanel.hidden = !room;
-    this.element('lan-share').hidden = !room || results;
+    this.element('lan-guest-reply').hidden = !hasReply;
+    const reply = this.element<HTMLInputElement>('lan-reply-out');
+    const replyValue = hasReply ? this.transfer : '';
+    if (reply.value !== replyValue) reply.value = replyValue;
+    this.element('lan-share').hidden = !share;
+    this.element('lan-share-code').hidden = direct;
+    this.element('lan-share-help').hidden = !sharingDirect;
+    this.element('lan-host-reply').hidden = !sharingDirect;
+    this.element('lan-new-link').hidden = !sharingDirect;
+    this.element<HTMLButtonElement>('lan-new-link').disabled = this.pairing === 'preparing';
+    this.element<HTMLButtonElement>('lan-copy').disabled = sharingDirect && !this.transfer;
+    this.element<HTMLButtonElement>('lan-connect').disabled = !this.transfer || this.pairing !== 'idle';
     this.element('lan-target').hidden = results;
-    this.element('lan-intro').hidden = Boolean(room);
-    this.element<HTMLButtonElement>('lan-create').disabled = this.pending;
-    this.element<HTMLButtonElement>('lan-join').disabled = this.pending;
+    this.element('lan-intro').hidden = Boolean(room) || hasReply;
+    this.text('lan-intro', t(direct ? guest ? 'lanDirectGuestIntro' : 'lanDirectIntro' : 'lanIntro'));
+    this.element('lan-relay-entry').hidden = direct;
+    this.element('lan-direct-join-actions').hidden = !guest;
+    this.element('lan-create').hidden = guest;
+    for (const id of ['lan-create', 'lan-join', 'lan-direct-join']) this.element<HTMLButtonElement>(id).disabled = this.pending;
     this.text('lan-status', this.message ? t(this.message) : '');
     if (!room) {
       this.text('lan-title', t('lanTitle'));
@@ -276,7 +447,7 @@ export class LanLobby {
     }
     this.text('lan-title', t(results ? 'lanResults' : 'lanLobby'));
     this.text('lan-room-code', room.code);
-    const invite = this.inviteUrl(room.code);
+    const invite = direct && !this.transfer ? '' : this.inviteUrl(room.code, direct ? this.transfer : '');
     if (this.invite.value !== invite) this.invite.value = invite;
     this.element('lan-start').hidden = results || !host;
     this.element<HTMLButtonElement>('lan-start').disabled = room.players.length < 2;

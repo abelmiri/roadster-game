@@ -24,7 +24,7 @@ import { TouchLayoutEditor } from './touchLayout';
 import { touchIcon } from './touchIcons';
 import { SHOP_STATES, shopBadge, shopStateIcon, type ShopState } from './shopState';
 import { ApiError, GameSync, clearSession, getTelegram, health, linkTelegram, logout, passkey, unlinkTelegram } from './backend';
-import { LanLobby, invitedRoom } from './lan/lobby';
+import { LanLobby, invitedRoom, type LanInvitation } from './lan/lobby';
 import type { LanRoom } from './lan/protocol';
 import './styles.css';
 import './hud.css';
@@ -309,14 +309,27 @@ app.innerHTML = `
         <form id="lan-entry" class="lan-entry">
           <label for="lan-name" data-i18n="lanName"></label><input id="lan-name" maxlength="24" autocomplete="nickname" dir="auto"/>
           <div class="account-actions"><button id="lan-create" type="button" data-i18n="lanCreate"></button></div>
-          <label for="lan-code" data-i18n="lanCode"></label>
-          <div class="account-inline"><input id="lan-code" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" dir="ltr"/><button id="lan-join" type="submit" data-i18n="lanJoin"></button></div>
+          <div id="lan-relay-entry">
+            <label for="lan-code" data-i18n="lanCode"></label>
+            <div class="account-inline"><input id="lan-code" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" dir="ltr"/><button id="lan-join" type="submit" data-i18n="lanJoin"></button></div>
+          </div>
+          <div id="lan-direct-join-actions" class="account-actions" hidden><button id="lan-direct-join" type="submit" data-i18n="lanJoin"></button></div>
         </form>
+        <div id="lan-guest-reply" class="lan-share" hidden>
+          <p data-i18n="lanDirectSendReply"></p>
+          <label for="lan-reply-out" data-i18n="lanDirectReply"></label>
+          <div class="account-inline"><input id="lan-reply-out" readonly dir="ltr"/><button id="lan-copy-reply" type="button" data-i18n="lanDirectCopyReply"></button></div>
+        </div>
         <div id="lan-room" hidden>
           <div id="lan-share" class="lan-share">
-            <p><span data-i18n="lanCode"></span> <strong id="lan-room-code" dir="ltr"></strong></p>
+            <p id="lan-share-code"><span data-i18n="lanCode"></span> <strong id="lan-room-code" dir="ltr"></strong></p>
+            <p id="lan-share-help" data-i18n="lanDirectShare" hidden></p>
             <label for="lan-invite" data-i18n="lanInvite"></label>
-            <div class="account-inline"><input id="lan-invite" readonly dir="ltr"/><button id="lan-copy" type="button" data-i18n="lanCopy"></button></div>
+            <div class="account-inline"><input id="lan-invite" readonly dir="ltr"/><button id="lan-copy" type="button" data-i18n="lanCopy"></button><button id="lan-new-link" class="lan-secondary" type="button" data-i18n="lanDirectNewInvite" hidden></button></div>
+            <form id="lan-host-reply" hidden>
+              <label for="lan-reply-in" data-i18n="lanDirectReply"></label>
+              <div class="account-inline"><input id="lan-reply-in" maxlength="12000" autocomplete="off" autocapitalize="none" spellcheck="false" dir="ltr"/><button id="lan-connect" type="submit" data-i18n="lanDirectConnect"></button></div>
+            </form>
           </div>
           <p id="lan-target"></p>
           <p id="lan-room-message" class="lan-room-message"></p>
@@ -1289,14 +1302,23 @@ function clearHeld(): void {
   document.querySelectorAll('.touch-button').forEach((button) => button.classList.remove('is-pressed'));
 }
 
-function openMultiplayer(code = ''): void {
+window.addEventListener('hashchange', () => {
+  const invite = invitedRoom();
+  if (invite?.type === 'peer') openMultiplayer(invite);
+});
+
+function openMultiplayer(invite?: LanInvitation): void {
+  if (invite?.type === 'peer' && lan.isOpen && !lan.room) {
+    lan.open(player.playerName, invite);
+    return;
+  }
   if (status === 'loading' || status === 'error' || startPending || race || dialogBlocked() ||
       !armory.hidden || !accountDialog.hidden || !coinDialog.hidden || !recordDialog.hidden || touchLayout.editing) return;
   if (status === 'running') pause();
   if (resumeCountdownTimer !== undefined) cancelResumeCountdown();
   clearHeld();
   jumpQueued = false;
-  lan.open(player.playerName, code);
+  lan.open(player.playerName, invite);
 }
 
 function changeLanRoom(room: LanRoom | null): void {

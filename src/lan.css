@@ -134,3 +134,9 @@
   .lan-hud .lan-player-list li { gap: 4px; padding: 3px; }
   .lan-hud .lan-player-list li::before { flex-basis: 5px; height: 5px; }
 }
+
+#lan-relay-entry label, #lan-host-reply label { display: block; margin-bottom: 6px; }
+#lan-host-reply { margin-top: 12px; }
+#lan-new-link.lan-secondary { background: transparent; color: #c8ffeb; }
+.lan-share .account-inline button { flex-shrink: 0; }
+.lan-share .account-inline input { width: 0; }
