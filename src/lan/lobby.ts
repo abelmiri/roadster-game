@@ -36,6 +36,8 @@ export class LanLobby {
     this.dialog.hidden = this.hud.hidden = true;
     for (const id of ['lan-close', 'lan-leave', 'lan-lobby-leave'])
       element(id).addEventListener('click', () => this.leave());
+    element('lan-presence').addEventListener('click', () => this.onProposal());
+    element('lan-distance').addEventListener('change', () => this.send({type:'configure', distanceGoal: Number(this.element<HTMLSelectElement>('lan-distance').value)}));
     element('lan-accept').addEventListener('click', () => this.respond(true));
     element('lan-decline').addEventListener('click', () => this.respond(false));
     element('lan-start').addEventListener('click', () => this.send({ type: 'start' }));
@@ -188,7 +190,7 @@ export class LanLobby {
     const seconds = Math.max(0, Math.ceil(((countdown ? room.startsAt : room.endsAt) - serverNow) / 1000));
     const timer = countdown ? t('lanCountdown', { seconds: formatNumber(Math.max(1, seconds)) })
       : t('lanRaceClock', { minutes: formatNumber(Math.floor(seconds / 60)), seconds: formatNumber(seconds % 60, 2) });
-    this.element('lan-clock').hidden = countdown;
+    this.element('lan-clock').hidden = countdown || room.target === 0;
     if (!countdown) this.text('lan-clock', timer);
     this.notice.hidden = !countdown && !crashed;
     if (!this.notice.hidden) this.text('lan-race-notice', countdown ? timer : t('lanEliminated'));
@@ -233,7 +235,7 @@ export class LanLobby {
     const room = this.room;
     const results = room?.phase === 'results';
     const canInvite = !room || room.phase === 'lobby' && room.host === this.id;
-    this.element('lan-discovery').hidden = !canInvite || Boolean(this.incoming);
+    this.element('lan-discovery').hidden = Boolean(this.incoming);
     this.element('lan-incoming').hidden = !this.incoming;
     this.element('lan-room').hidden = !room;
     this.text('lan-title', t(results ? 'lanResults' : room ? 'lanLobby' : 'lanTitle'));
@@ -241,18 +243,21 @@ export class LanLobby {
       room ? t(canInvite ? 'onlineInviteMore' : 'lanWaitHost') : t('onlineNearbyIntro'));
     this.text('lan-status', this.status);
     this.text('lan-presence', this.socket?.readyState !== WebSocket.OPEN ? t('lanDiscoveryUnavailable') :
-      room ? '' : this.online.some(player => !this.dismissed.has(player.id)) ? t('onlineFound') : t('onlineSearching'));
+      this.online.length ? t('onlineFound') : t('onlineSearching'));
     this.renderOnline();
     if (!room) return;
     const ranked = this.rank(room.players);
     if (!this.hud.hidden) {
-      this.text('lan-finish-distance', t('lanFinishDistance', { distance: formatNumber(room.target) }));
+      this.text('lan-finish-distance', room.target === 0 ? t('onlineEndless') : t('lanFinishDistance', { distance: formatNumber(room.target) }));
       this.renderPlayers('lan-standing', this.hudPlayers(room.players), true);
       this.updateClock(performance.now(), Boolean(room.players.find(player => player.id === this.id)?.drive?.crashed));
       return;
     }
     this.element('lan-target').hidden = results;
-    this.text('lan-target', t('lanDistanceGoal', { distance: formatNumber(room.target) }));
+    this.element('lan-distance-control').hidden = results;
+    this.element<HTMLSelectElement>('lan-distance').disabled = room.host !== this.id;
+    this.element<HTMLSelectElement>('lan-distance').value = String(room.target);
+    this.text('lan-target', room.target === 0 ? t('onlineEndlessGoal') : t('lanDistanceGoal', { distance: formatNumber(room.target) }));
     this.element('lan-start').hidden = results || room.host !== this.id;
     this.element<HTMLButtonElement>('lan-start').disabled = room.players.length < 2;
     this.element('lan-rematch').hidden = !results || room.host !== this.id;
@@ -264,17 +269,17 @@ export class LanLobby {
 
   private renderOnline(): void {
     const list = this.element('lan-peers');
-    const visible = this.online.filter(player => !this.dismissed.has(player.id));
-    const old = [...list.querySelectorAll<HTMLButtonElement>('button')];
-    if (visible.length === old.length && visible.every((player, i) => old[i]?.dataset.peerId === String(player.id) &&
-        old[i].textContent === t('lanPlayWith', { name: player.name }))) return;
+    const visible = this.online;
     list.replaceChildren();
     for (const player of visible) {
       const button = document.createElement('button');
       button.type = 'button';
       button.dataset.peerId = String(player.id);
-      button.textContent = t('lanPlayWith', { name: player.name });
-      button.addEventListener('click', () => this.invite(player.id));
+      const sameRoom = Boolean(this.room && this.room.code === player.room);
+      const canJoin = !this.room && player.phase === 'lobby';
+      button.textContent = t(canJoin ? 'onlineJoinPlayer' : player.phase === 'idle' ? 'lanPlayWith' : 'onlinePlayerStatus', { name: player.name, status: t(player.phase === 'lobby' ? 'lanLobby' : 'onlineRacing') });
+      button.disabled = sameRoom || (Boolean(this.room) && (this.room!.host !== this.id || this.room!.phase !== 'lobby')) || (!canJoin && player.phase !== 'idle');
+      button.addEventListener('click', () => canJoin ? this.send({type:'join',room:player.room}) : this.invite(player.id));
       list.append(button);
     }
   }

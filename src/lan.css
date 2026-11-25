@@ -151,3 +151,9 @@
 }
 .lan-troubleshooting p { font-size: .9em; }
 .lan-troubleshooting code { display: inline-block; direction: ltr; }
+
+#lan-distance-control { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
+#lan-distance { padding: 8px; font: inherit; background: #edf9f5; color: #142c3b; border-radius: 6px; }
+.lan-nearby-list button:disabled { background: transparent; color: #a6f4df; opacity: .7; cursor: default; }
+#lan-peers { max-height: 28vh; overflow-y: auto; }
+#lan-presence { cursor: pointer; }

@@ -306,7 +306,7 @@ app.innerHTML = `
         <div id="lan-discovery"><div id="lan-peers" class="lan-nearby-list"></div></div>
         <div id="lan-incoming" class="account-actions" hidden><button id="lan-accept" type="button" data-i18n="lanAccept"></button><button id="lan-decline" type="button" data-i18n="lanDecline"></button></div>
         <div id="lan-room" hidden>
-          <p id="lan-target"></p>
+          <label id="lan-distance-control"><span data-i18n="onlineDistance"></span><select id="lan-distance"><option value="1000">1000 m</option><option value="2000">2000 m</option><option value="5000">5000 m</option><option value="0" data-i18n="onlineEndless"></option></select></label><p id="lan-target"></p>
           <p id="lan-room-message" class="lan-room-message"></p>
           <ol id="lan-roster" class="lan-player-list"></ol>
           <div class="account-actions">
